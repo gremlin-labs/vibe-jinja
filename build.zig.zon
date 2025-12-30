@@ -1,0 +1,19 @@
+.{
+    .name = .vibe_jinja,
+    .version = "1.0.0",
+    .fingerprint = 0x2cc7375cfe3711db, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "LICENSE.md",
+    },
+    .modules = .{
+        .vibe_jinja = .{
+            .path = "src/root.zig",
+            .dependencies = .{},
+        },
+    },
+}
