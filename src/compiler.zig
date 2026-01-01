@@ -16,6 +16,61 @@ pub const OptimizedLoopContext = loop_context_mod.OptimizedLoopContext;
 /// Re-export Value type for convenience
 pub const Value = value_mod.Value;
 
+/// Normalize a slice index (Python-style)
+/// Handles negative indices: -1 means last element, -2 means second-to-last, etc.
+fn normalizeIndex(idx: i64, len: i64) i64 {
+    if (idx < 0) {
+        return idx + len;
+    }
+    return idx;
+}
+
+/// Compute a simple hash for a value (used by loop.changed())
+fn computeValueHash(val: value_mod.Value) u64 {
+    return switch (val) {
+        .integer => |i| @as(u64, @bitCast(i)),
+        .float => |f| @as(u64, @bitCast(f)),
+        .boolean => |b| if (b) 1 else 0,
+        .null => 0,
+        .string => |s| blk: {
+            var h: u64 = 0;
+            for (s) |c| {
+                h = h *% 31 +% c;
+            }
+            break :blk h;
+        },
+        .list => |l| blk: {
+            var h: u64 = 0;
+            for (l.items.items) |item| {
+                h = h *% 31 +% computeValueHash(item);
+            }
+            break :blk h;
+        },
+        .dict => |d| blk: {
+            var h: u64 = 0;
+            var iter = d.map.iterator();
+            while (iter.next()) |entry| {
+                for (entry.key_ptr.*) |c| {
+                    h = h *% 31 +% c;
+                }
+                h = h *% 31 +% computeValueHash(entry.value_ptr.*);
+            }
+            break :blk h;
+        },
+        .undefined => 0xDEADBEEF,
+        .markup => |m| blk: {
+            var h: u64 = 0;
+            for (m.content) |c| {
+                h = h *% 31 +% c;
+            }
+            break :blk h;
+        },
+        .async_result => 0xCAFEBABE,
+        .callable => 0xFEEDFACE,
+        .custom => 0xC0FFEE,
+    };
+}
+
 /// Loop context for tracking loop state (for loops)
 pub const LoopContext = struct {
     index: usize,
@@ -811,11 +866,16 @@ pub const Compiler = struct {
         };
     }
 
-    /// Visit Getitem node - access list/dict item (obj[index])
+    /// Visit Getitem node - access list/dict item (obj[index]) or slice (obj[start:stop:step])
     pub fn visitGetitem(self: *Self, node: *nodes.Getitem, frame: *Frame, ctx: *context.Context) !value_mod.Value {
         // Evaluate the object expression
         var obj_val = try self.visitExpression(&node.node, frame, ctx);
         defer obj_val.deinit(self.allocator);
+
+        // Check if this is a slice expression
+        if (node.arg == .slice) {
+            return try self.evaluateSlice(obj_val, node.arg.slice, frame, ctx);
+        }
 
         // Evaluate the index/key expression
         var index_val = try self.visitExpression(&node.arg, frame, ctx);
@@ -854,10 +914,16 @@ pub const Compiler = struct {
             .list => |l| {
                 // For lists, index must be integer
                 const index_int = index_val.toInteger() orelse return exceptions.TemplateError.TypeError;
-                if (index_int < 0 or index_int >= @as(i64, @intCast(l.items.items.len))) {
+                const len: i64 = @intCast(l.items.items.len);
+                // Handle negative indices (Python-style)
+                var actual_idx = index_int;
+                if (actual_idx < 0) {
+                    actual_idx = len + actual_idx;
+                }
+                if (actual_idx < 0 or actual_idx >= len) {
                     return exceptions.TemplateError.IndexError;
                 }
-                const item = l.items.items[@intCast(index_int)];
+                const item = l.items.items[@intCast(actual_idx)];
                 // Return a deep copy of the value
                 return try item.deepCopy(self.allocator);
             },
@@ -881,10 +947,16 @@ pub const Compiler = struct {
             .string => |s| {
                 // For strings, index must be integer
                 const index_int = index_val.toInteger() orelse return exceptions.TemplateError.TypeError;
-                if (index_int < 0 or index_int >= @as(i64, @intCast(s.len))) {
+                const len: i64 = @intCast(s.len);
+                // Handle negative indices (Python-style)
+                var actual_idx = index_int;
+                if (actual_idx < 0) {
+                    actual_idx = len + actual_idx;
+                }
+                if (actual_idx < 0 or actual_idx >= len) {
                     return exceptions.TemplateError.IndexError;
                 }
-                const char = s[@intCast(index_int)];
+                const char = s[@intCast(actual_idx)];
                 const char_str = try std.fmt.allocPrint(self.allocator, "{c}", .{char});
                 return value_mod.Value{ .string = char_str };
             },
@@ -918,6 +990,143 @@ pub const Compiler = struct {
                 } };
             },
         };
+    }
+
+    /// Evaluate slice expression on a value
+    /// Handles [start:stop:step] syntax like Python
+    fn evaluateSlice(self: *Self, obj: value_mod.Value, slice: *nodes.Slice, frame: *Frame, ctx: *context.Context) !value_mod.Value {
+        // Get start, stop, step values (evaluate if present)
+        var start_val: ?i64 = null;
+        var stop_val: ?i64 = null;
+        var step_val: i64 = 1;
+
+        if (slice.start) |start_expr| {
+            var start_copy = start_expr;
+            const val = try self.visitExpression(&start_copy, frame, ctx);
+            defer val.deinit(self.allocator);
+            start_val = val.toInteger();
+        }
+
+        if (slice.stop) |stop_expr| {
+            var stop_copy = stop_expr;
+            const val = try self.visitExpression(&stop_copy, frame, ctx);
+            defer val.deinit(self.allocator);
+            stop_val = val.toInteger();
+        }
+
+        if (slice.step) |step_expr| {
+            var step_copy = step_expr;
+            const val = try self.visitExpression(&step_copy, frame, ctx);
+            defer val.deinit(self.allocator);
+            step_val = val.toInteger() orelse 1;
+            if (step_val == 0) {
+                return exceptions.TemplateError.RuntimeError; // step cannot be zero
+            }
+        }
+
+        // Apply slice based on object type
+        return switch (obj) {
+            .list => |l| try self.sliceList(l, start_val, stop_val, step_val),
+            .string => |s| try self.sliceString(s, start_val, stop_val, step_val),
+            else => exceptions.TemplateError.TypeError,
+        };
+    }
+
+    /// Slice a list value
+    fn sliceList(self: *Self, list: *value_mod.List, start: ?i64, stop: ?i64, step: i64) !value_mod.Value {
+        const len: i64 = @intCast(list.items.items.len);
+
+        // Resolve slice bounds (Python-style)
+        var actual_start: i64 = undefined;
+        var actual_stop: i64 = undefined;
+
+        if (step > 0) {
+            // Forward slice
+            actual_start = if (start) |s| normalizeIndex(s, len) else 0;
+            actual_stop = if (stop) |s| normalizeIndex(s, len) else len;
+            // Clamp values
+            actual_start = @max(0, @min(actual_start, len));
+            actual_stop = @max(0, @min(actual_stop, len));
+        } else {
+            // Backward slice
+            actual_start = if (start) |s| normalizeIndex(s, len) else len - 1;
+            actual_stop = if (stop) |s| normalizeIndex(s, len) else -1;
+            // For negative step, start defaults to len-1, stop defaults to -1 (meaning beginning)
+            actual_start = @max(-1, @min(actual_start, len - 1));
+            actual_stop = @max(-1, @min(actual_stop, len));
+        }
+
+        // Create result list
+        const result_list = try self.allocator.create(value_mod.List);
+        result_list.* = value_mod.List.init(self.allocator);
+        errdefer {
+            result_list.deinit(self.allocator);
+            self.allocator.destroy(result_list);
+        }
+
+        // Collect items according to slice
+        var i = actual_start;
+        if (step > 0) {
+            while (i < actual_stop) : (i += step) {
+                if (i >= 0 and i < len) {
+                    const item = list.items.items[@intCast(i)];
+                    const copied = try item.deepCopy(self.allocator);
+                    try result_list.append(copied);
+                }
+            }
+        } else {
+            while (i > actual_stop) : (i += step) {
+                if (i >= 0 and i < len) {
+                    const item = list.items.items[@intCast(i)];
+                    const copied = try item.deepCopy(self.allocator);
+                    try result_list.append(copied);
+                }
+            }
+        }
+
+        return value_mod.Value{ .list = result_list };
+    }
+
+    /// Slice a string value
+    fn sliceString(self: *Self, str: []const u8, start: ?i64, stop: ?i64, step: i64) !value_mod.Value {
+        const len: i64 = @intCast(str.len);
+
+        // Resolve slice bounds (Python-style)
+        var actual_start: i64 = undefined;
+        var actual_stop: i64 = undefined;
+
+        if (step > 0) {
+            actual_start = if (start) |s| normalizeIndex(s, len) else 0;
+            actual_stop = if (stop) |s| normalizeIndex(s, len) else len;
+            actual_start = @max(0, @min(actual_start, len));
+            actual_stop = @max(0, @min(actual_stop, len));
+        } else {
+            actual_start = if (start) |s| normalizeIndex(s, len) else len - 1;
+            actual_stop = if (stop) |s| normalizeIndex(s, len) else -1;
+            actual_start = @max(-1, @min(actual_start, len - 1));
+            actual_stop = @max(-1, @min(actual_stop, len));
+        }
+
+        // Build result string
+        var result = std.ArrayList(u8){};
+        errdefer result.deinit(self.allocator);
+
+        var i = actual_start;
+        if (step > 0) {
+            while (i < actual_stop) : (i += step) {
+                if (i >= 0 and i < len) {
+                    try result.append(self.allocator, str[@intCast(i)]);
+                }
+            }
+        } else {
+            while (i > actual_stop) : (i += step) {
+                if (i >= 0 and i < len) {
+                    try result.append(self.allocator, str[@intCast(i)]);
+                }
+            }
+        }
+
+        return value_mod.Value{ .string = try result.toOwnedSlice(self.allocator) };
     }
 
     /// Visit BinExpr node - evaluate binary expression
@@ -1601,6 +1810,21 @@ pub const Compiler = struct {
 
     /// Visit CallExpr node - evaluate function call expression
     pub fn visitCallExpr(self: *Self, node: *nodes.CallExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
+        // SPECIAL CASE: Handle loop.cycle() and loop.changed() methods
+        if (node.func == .getattr) {
+            const attr = node.func.getattr;
+            if (attr.node == .name and std.mem.eql(u8, attr.node.name.name, "loop")) {
+                // Check for loop.cycle(...) method
+                if (std.mem.eql(u8, attr.attr, "cycle")) {
+                    return try self.evaluateLoopCycle(node, frame, ctx);
+                }
+                // Check for loop.changed(...) method
+                if (std.mem.eql(u8, attr.attr, "changed")) {
+                    return try self.evaluateLoopChanged(node, frame, ctx);
+                }
+            }
+        }
+
         // Extract function name from expression
         var func_name: []const u8 = undefined;
         var func_name_owned: ?[]u8 = null;
@@ -1747,6 +1971,58 @@ pub const Compiler = struct {
         return exceptions.TemplateError.RuntimeError;
     }
 
+    /// Evaluate loop.cycle(args) - return item based on current loop index
+    /// Example: loop.cycle('odd', 'even') returns 'odd' for index0=0, 'even' for index0=1, etc.
+    fn evaluateLoopCycle(self: *Self, node: *nodes.CallExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
+        // Get the loop context
+        const opt_loop = frame.getOptLoop() orelse {
+            return exceptions.TemplateError.RuntimeError; // Not in a loop
+        };
+
+        // Need at least one argument
+        if (node.args.items.len == 0) {
+            return exceptions.TemplateError.TypeError; // No items for cycling given
+        }
+
+        // Calculate which item to return based on current loop index
+        const idx: usize = @intCast(@mod(opt_loop.index0, @as(i64, @intCast(node.args.items.len))));
+
+        // Evaluate the argument at that index
+        var arg_expr = node.args.items[idx];
+        return try self.visitExpression(&arg_expr, frame, ctx);
+    }
+
+    /// Evaluate loop.changed(value) - return true if value differs from last call
+    /// Example: {% if loop.changed(item.category) %}new category{% endif %}
+    fn evaluateLoopChanged(self: *Self, node: *nodes.CallExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
+        // Get the loop context (need mutable access)
+        const opt_loop = frame.getOptLoop() orelse {
+            return exceptions.TemplateError.RuntimeError; // Not in a loop
+        };
+
+        // Evaluate all arguments and compute a hash
+        var hash: u64 = 0;
+        for (node.args.items) |*arg_expr| {
+            var arg_val = try self.visitExpression(arg_expr, frame, ctx);
+            defer arg_val.deinit(self.allocator);
+
+            // Simple hash computation based on value
+            const val_hash = computeValueHash(arg_val);
+            hash = hash *% 31 +% val_hash;
+        }
+
+        // Check if changed from last call
+        const changed = if (opt_loop.last_changed_hash) |last_hash|
+            hash != last_hash
+        else
+            true; // First call always returns true
+
+        // Update the last changed hash
+        opt_loop.last_changed_hash = hash;
+
+        return value_mod.Value{ .boolean = changed };
+    }
+
     /// Visit Macro node - register macro in context
     pub fn visitMacro(self: *Self, node: *nodes.Macro, _: *Frame, ctx: *context.Context) ![]const u8 {
         // Register macro in context for later use
@@ -1808,9 +2084,11 @@ pub const Compiler = struct {
     }
 
     /// Visit Slice node - slicing syntax [start:end:step]
+    /// Note: Slices are handled in visitGetitem through evaluateSlice.
+    /// This function is called when a slice appears standalone, which is invalid.
     pub fn visitSlice(_: *Self, _: *nodes.Slice, _: *Frame, _: *context.Context) !value_mod.Value {
-        // Slice is typically used as part of Getitem, not standalone
-        // This would be handled in Getitem evaluation
+        // Slice expressions should only appear as part of Getitem (obj[start:stop])
+        // A standalone slice expression is not valid in Jinja2
         return exceptions.TemplateError.RuntimeError;
     }
 

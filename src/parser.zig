@@ -1442,24 +1442,46 @@ pub const Parser = struct {
 
                 current_expr = nodes.Expression{ .getattr = getattr_node };
             }
-            // Subscript access: [index]
+            // Subscript access: [index] or slice [start:stop:step]
             else if (next_token.kind == .LBRACKET) {
                 _ = self.stream.next();
                 self.skipWhitespace();
 
-                const index_expr = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
-                self.skipWhitespace();
+                // Check if this is slice syntax (starts with : or has : after expression)
+                const first_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+                
+                if (first_token.kind == .COLON) {
+                    // Slice starting with : like [:stop] or [:]
+                    const slice_expr = try self.parseSlice(null, next_token.lineno, next_token.filename);
+                    
+                    const getitem_node = try self.allocator.create(nodes.Getitem);
+                    getitem_node.* = nodes.Getitem.init(current_expr, slice_expr, next_token.lineno, next_token.filename);
+                    current_expr = nodes.Expression{ .getitem = getitem_node };
+                } else {
+                    // Parse first expression (could be index or slice start)
+                    const first_expr = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
+                    self.skipWhitespace();
 
-                const end_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
-                if (end_token.kind != .RBRACKET) {
-                    return exceptions.TemplateError.SyntaxError;
+                    const after_first = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+                    
+                    if (after_first.kind == .COLON) {
+                        // This is slice syntax [start:...]
+                        const slice_expr = try self.parseSlice(first_expr, next_token.lineno, next_token.filename);
+                        
+                        const getitem_node = try self.allocator.create(nodes.Getitem);
+                        getitem_node.* = nodes.Getitem.init(current_expr, slice_expr, next_token.lineno, next_token.filename);
+                        current_expr = nodes.Expression{ .getitem = getitem_node };
+                    } else if (after_first.kind == .RBRACKET) {
+                        // Regular index access [index]
+                        _ = self.stream.next();
+                        
+                        const getitem_node = try self.allocator.create(nodes.Getitem);
+                        getitem_node.* = nodes.Getitem.init(current_expr, first_expr, next_token.lineno, next_token.filename);
+                        current_expr = nodes.Expression{ .getitem = getitem_node };
+                    } else {
+                        return exceptions.TemplateError.SyntaxError;
+                    }
                 }
-                _ = self.stream.next();
-
-                const getitem_node = try self.allocator.create(nodes.Getitem);
-                getitem_node.* = nodes.Getitem.init(current_expr, index_expr, next_token.lineno, next_token.filename);
-
-                current_expr = nodes.Expression{ .getitem = getitem_node };
             } else {
                 // Not an attribute or subscript access, stop parsing
                 break;
@@ -1467,6 +1489,58 @@ pub const Parser = struct {
         }
 
         return current_expr;
+    }
+
+    /// Parse slice syntax [start:stop:step]
+    /// Called when we've already parsed start (if any) and are at a colon
+    /// Returns a Slice expression wrapped in Expression
+    fn parseSlice(self: *Self, start: ?nodes.Expression, lineno: usize, filename: ?[]const u8) (exceptions.TemplateError || std.mem.Allocator.Error)!nodes.Expression {
+        // We're at the first colon
+        const colon_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        if (colon_token.kind != .COLON) {
+            return exceptions.TemplateError.SyntaxError;
+        }
+        _ = self.stream.next(); // consume first colon
+        self.skipWhitespace();
+
+        // Parse stop expression (optional)
+        var stop: ?nodes.Expression = null;
+        const after_colon = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        
+        if (after_colon.kind != .COLON and after_colon.kind != .RBRACKET) {
+            // There's a stop expression
+            stop = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
+            self.skipWhitespace();
+        }
+
+        // Check for second colon (step)
+        var step: ?nodes.Expression = null;
+        const after_stop = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        
+        if (after_stop.kind == .COLON) {
+            _ = self.stream.next(); // consume second colon
+            self.skipWhitespace();
+            
+            const after_second_colon = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+            if (after_second_colon.kind != .RBRACKET) {
+                // There's a step expression
+                step = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
+                self.skipWhitespace();
+            }
+        }
+
+        // Expect closing bracket
+        const end_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        if (end_token.kind != .RBRACKET) {
+            return exceptions.TemplateError.SyntaxError;
+        }
+        _ = self.stream.next();
+
+        // Create Slice node
+        const slice_node = try self.allocator.create(nodes.Slice);
+        slice_node.* = nodes.Slice.init(start, stop, step, lineno, filename);
+        
+        return nodes.Expression{ .slice = slice_node };
     }
 
     /// Parse for loop statement

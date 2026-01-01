@@ -47,6 +47,9 @@ pub const OptimizedLoopContext = struct {
     // Note: Currently not fully implemented but reserved for future
     parent_loop: ?*const OptimizedLoopContext = null,
 
+    // For loop.changed() tracking - stores hash of last value
+    last_changed_hash: ?u64 = null,
+
     const Self = @This();
 
     /// Initialize for a new loop

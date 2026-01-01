@@ -366,10 +366,33 @@ pub const Environment = struct {
         lipsum_callable.* = value_mod.Callable.initWithFunc(lipsum_name, utils.lipsumGlobal, false);
         try self.addGlobal("lipsum", Value{ .callable = lipsum_callable });
 
-        // Note: cycler, joiner, and namespace are class-like constructors in Jinja2.
-        // They are available through the utils module as Cycler, Joiner, Namespace
-        // For full parity, users can construct them programmatically.
-        // The most commonly used global functions (range, dict, lipsum) are registered above.
+        // cycler(*items) - Cycle through values
+        const cycler_name = try self.allocator.dupe(u8, "cycler");
+        errdefer self.allocator.free(cycler_name);
+        const cycler_callable = try self.allocator.create(value_mod.Callable);
+        cycler_callable.* = value_mod.Callable.initWithFunc(cycler_name, utils.cyclerGlobal, false);
+        try self.addGlobal("cycler", Value{ .callable = cycler_callable });
+
+        // joiner(sep=", ") - Join values with separator
+        const joiner_name = try self.allocator.dupe(u8, "joiner");
+        errdefer self.allocator.free(joiner_name);
+        const joiner_callable = try self.allocator.create(value_mod.Callable);
+        joiner_callable.* = value_mod.Callable.initWithFunc(joiner_name, utils.joinerGlobal, false);
+        try self.addGlobal("joiner", Value{ .callable = joiner_callable });
+
+        // namespace(**kwargs) - Create namespace for scoped variables
+        const namespace_name = try self.allocator.dupe(u8, "namespace");
+        errdefer self.allocator.free(namespace_name);
+        const namespace_callable = try self.allocator.create(value_mod.Callable);
+        namespace_callable.* = value_mod.Callable.initWithFunc(namespace_name, utils.namespaceGlobal, false);
+        try self.addGlobal("namespace", Value{ .callable = namespace_callable });
+
+        // raise_exception(message) - Raise template runtime error (HuggingFace chat template support)
+        const raise_name = try self.allocator.dupe(u8, "raise_exception");
+        errdefer self.allocator.free(raise_name);
+        const raise_callable = try self.allocator.create(value_mod.Callable);
+        raise_callable.* = value_mod.Callable.initWithFunc(raise_name, utils.raiseExceptionGlobal, false);
+        try self.addGlobal("raise_exception", Value{ .callable = raise_callable });
     }
 
     /// Deinitialize the environment and free allocated memory

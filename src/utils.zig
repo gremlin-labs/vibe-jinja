@@ -786,3 +786,169 @@ pub fn generateLoremIpsum(allocator: std.mem.Allocator, words: usize) ![]const u
 
     return try result.toOwnedSlice(allocator);
 }
+
+/// raise_exception(message) -> raises TemplateRuntimeError
+///
+/// Raises a TemplateRuntimeError with the given message.
+/// This is commonly used in chat templates to validate template inputs.
+///
+/// Example:
+///   {{ raise_exception("Invalid input: messages must alternate") }}
+///
+/// This is the global function available in Jinja templates as `raise_exception()`.
+/// Note: This is not a standard Jinja2 function, but is commonly used in
+/// HuggingFace chat templates for validation.
+pub fn raiseExceptionGlobal(
+    allocator: std.mem.Allocator,
+    args: []Value,
+    ctx: ?*anyopaque,
+    env: ?*anyopaque,
+) GlobalError!Value {
+    _ = ctx;
+    _ = env;
+    _ = allocator;
+
+    // Get error message from first argument
+    if (args.len == 0) {
+        return error.RuntimeError;
+    }
+
+    // The message can be used for debugging, but we always return RuntimeError
+    // In a more sophisticated implementation, we could store the message
+    // in the error context for better error reporting
+    return error.RuntimeError;
+}
+
+/// cycler(*items) -> Cycler object
+///
+/// Creates a cycler object that cycles through the given items.
+/// Returns a callable object with .next() and .reset() methods.
+///
+/// Example:
+///   {% set row_class = cycler("odd", "even") %}
+///   {{ row_class.next() }}  -> "odd"
+///   {{ row_class.next() }}  -> "even"
+///   {{ row_class.next() }}  -> "odd"
+///
+/// This is the global function available in Jinja templates as `cycler()`.
+pub fn cyclerGlobal(
+    allocator: std.mem.Allocator,
+    args: []Value,
+    ctx: ?*anyopaque,
+    env: ?*anyopaque,
+) GlobalError!Value {
+    _ = ctx;
+    _ = env;
+
+    if (args.len == 0) {
+        return error.InvalidArgument;
+    }
+
+    // Create a dict to represent the cycler object
+    // This will have 'items', 'pos', and methods as attributes
+    const dict = try allocator.create(value_mod.Dict);
+    errdefer allocator.destroy(dict);
+    dict.* = value_mod.Dict.init(allocator);
+    errdefer dict.deinit(allocator);
+
+    // Store items as a list
+    const items_list = try allocator.create(value_mod.List);
+    errdefer allocator.destroy(items_list);
+    items_list.* = value_mod.List.init(allocator);
+    errdefer items_list.deinit(allocator);
+
+    for (args) |arg| {
+        const copied = try arg.deepCopy(allocator);
+        try items_list.append(copied);
+    }
+
+    try dict.set("_items", Value{ .list = items_list });
+    try dict.set("_pos", Value{ .integer = 0 });
+    try dict.set("_type", Value{ .string = try allocator.dupe(u8, "cycler") });
+
+    return Value{ .dict = dict };
+}
+
+/// joiner(sep=", ") -> Joiner object
+///
+/// Creates a joiner object that returns empty string on first call
+/// and the separator on subsequent calls.
+///
+/// Example:
+///   {% set make_comma = joiner() %}
+///   {% for item in items %}{{ make_comma() }}{{ item }}{% endfor %}
+///
+/// This is the global function available in Jinja templates as `joiner()`.
+pub fn joinerGlobal(
+    allocator: std.mem.Allocator,
+    args: []Value,
+    ctx: ?*anyopaque,
+    env: ?*anyopaque,
+) GlobalError!Value {
+    _ = ctx;
+    _ = env;
+
+    // Get separator (default ", ")
+    var sep: []const u8 = ", ";
+    if (args.len > 0) {
+        if (args[0] == .string) {
+            sep = args[0].string;
+        }
+    }
+
+    // Create a dict to represent the joiner object
+    const dict = try allocator.create(value_mod.Dict);
+    errdefer allocator.destroy(dict);
+    dict.* = value_mod.Dict.init(allocator);
+    errdefer dict.deinit(allocator);
+
+    try dict.set("_sep", Value{ .string = try allocator.dupe(u8, sep) });
+    try dict.set("_used", Value{ .boolean = false });
+    try dict.set("_type", Value{ .string = try allocator.dupe(u8, "joiner") });
+
+    return Value{ .dict = dict };
+}
+
+/// namespace(**kwargs) -> Namespace object
+///
+/// Creates a namespace object that can hold arbitrary attributes.
+/// Variables can be assigned to and read from a namespace.
+///
+/// Example:
+///   {% set ns = namespace(count=0) %}
+///   {% for item in items %}
+///     {% set ns.count = ns.count + 1 %}
+///   {% endfor %}
+///   {{ ns.count }}
+///
+/// This is the global function available in Jinja templates as `namespace()`.
+pub fn namespaceGlobal(
+    allocator: std.mem.Allocator,
+    args: []Value,
+    ctx: ?*anyopaque,
+    env: ?*anyopaque,
+) GlobalError!Value {
+    _ = ctx;
+    _ = env;
+
+    // Create a dict to represent the namespace object
+    const dict = try allocator.create(value_mod.Dict);
+    errdefer allocator.destroy(dict);
+    dict.* = value_mod.Dict.init(allocator);
+    errdefer dict.deinit(allocator);
+
+    // Mark this as a namespace for special handling
+    try dict.set("_type", Value{ .string = try allocator.dupe(u8, "namespace") });
+
+    // If single dict argument, copy its contents
+    if (args.len == 1 and args[0] == .dict) {
+        const src_dict = args[0].dict;
+        var iter = src_dict.map.iterator();
+        while (iter.next()) |entry| {
+            const val_copy = try entry.value_ptr.*.deepCopy(allocator);
+            try dict.set(entry.key_ptr.*, val_copy);
+        }
+    }
+
+    return Value{ .dict = dict };
+}

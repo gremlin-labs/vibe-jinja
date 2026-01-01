@@ -58,6 +58,59 @@
 
 const std = @import("std");
 const nodes = @import("nodes.zig");
+const value_mod = @import("value.zig");
+const exceptions = @import("exceptions.zig");
+const context = @import("context.zig");
+const environment = @import("environment.zig");
+
+/// Normalize a slice index for Python-style slicing semantics
+fn normalizeSliceIndex(index: ?i64, length: i64, step: i64, is_start: bool) i64 {
+    if (index) |idx| {
+        if (idx < 0) {
+            return @max(0, length + idx);
+        }
+        return @min(length, idx);
+    } else {
+        // Default start/stop depends on step direction
+        if (is_start) {
+            return if (step > 0) 0 else length - 1;
+        } else {
+            return if (step > 0) length else -1;
+        }
+    }
+}
+
+/// Compute hash for a Value (for loop.changed())
+fn computeValueHashBytecode(val: value_mod.Value) u64 {
+    return switch (val) {
+        .integer => |i| @as(u64, @bitCast(i)),
+        .float => |f| @as(u64, @bitCast(f)),
+        .boolean => |b| if (b) @as(u64, 1) else 0,
+        .string => |s| std.hash.Wyhash.hash(0, s),
+        .null => 0,
+        .undefined => 0,
+        .list => |l| blk: {
+            var h: u64 = 0;
+            for (l.items.items) |item| {
+                h = h *% 31 +% computeValueHashBytecode(item);
+            }
+            break :blk h;
+        },
+        .dict => |d| blk: {
+            var h: u64 = 0;
+            var iter = d.map.iterator();
+            while (iter.next()) |entry| {
+                h = h *% 31 +% std.hash.Wyhash.hash(0, entry.key_ptr.*);
+                h = h *% 31 +% computeValueHashBytecode(entry.value_ptr.*);
+            }
+            break :blk h;
+        },
+        .callable => 0,
+        .markup => |m| std.hash.Wyhash.hash(0, m.content),
+        .async_result => 0,
+        .custom => 0,
+    };
+}
 
 /// Bytecode instruction types
 /// Optimized instruction set with specialized opcodes for common operations
@@ -86,7 +139,11 @@ pub const Opcode = enum(u8) {
     UNARY_OP, // Unary operation (operand = operator enum value)
     GET_ATTR, // Get attribute (operand = attribute name index)
     GET_ITEM, // Get item (operand = key name index, or use stack)
+    GET_SLICE, // Get slice (operand encodes which of start/stop/step are present)
     CALL_FUNC, // Call function (operand = arg count)
+    CALL_GLOBAL, // Call global function (operand = lower 16 bits name_idx, upper 16 bits arg_count)
+    LOOP_CYCLE, // loop.cycle(args) (operand = arg count)
+    LOOP_CHANGED, // loop.changed(args) (operand = arg count)
     APPLY_FILTER, // Apply filter (operand = filter name index)
     APPLY_TEST, // Apply test (operand = test name index)
     BUILD_LIST, // Build list from stack (operand = element count)
@@ -552,10 +609,34 @@ pub const BytecodeGenerator = struct {
             .getitem => |item| {
                 // Generate object expression
                 try self.generateExpression(item.node);
-                // Generate key/index expression
-                try self.generateExpression(item.arg);
-                // Get item
-                try self.bytecode.addInstruction(.GET_ITEM, 0);
+                
+                // Check if this is a slice expression
+                if (item.arg == .slice) {
+                    const slice = item.arg.slice;
+                    // Encode which parts are present in the operand
+                    // bit 0 = has start, bit 1 = has stop, bit 2 = has step
+                    var flags: u32 = 0;
+                    
+                    if (slice.start) |start| {
+                        try self.generateExpression(start);
+                        flags |= 1;
+                    }
+                    if (slice.stop) |stop| {
+                        try self.generateExpression(stop);
+                        flags |= 2;
+                    }
+                    if (slice.step) |step| {
+                        try self.generateExpression(step);
+                        flags |= 4;
+                    }
+                    
+                    try self.bytecode.addInstruction(.GET_SLICE, flags);
+                } else {
+                    // Generate key/index expression
+                    try self.generateExpression(item.arg);
+                    // Get item
+                    try self.bytecode.addInstruction(.GET_ITEM, 0);
+                }
             },
             .filter => |filter| {
                 // Generate base expression
@@ -691,14 +772,58 @@ pub const BytecodeGenerator = struct {
                 self.bytecode.instructions.items[@as(usize, @intCast(jump_end_idx))].operand = end_idx;
             },
             .call_expr => |call| {
-                // Generate function expression
-                try self.generateExpression(call.func);
-                // Generate arguments
-                for (call.args.items) |arg| {
-                    try self.generateExpression(arg);
+                // Check if this is a call to a global function (name expression)
+                if (call.func == .name) {
+                    const func_name = call.func.name.name;
+                    // Generate arguments first
+                    for (call.args.items) |arg| {
+                        try self.generateExpression(arg);
+                    }
+                    // Use CALL_GLOBAL for global functions
+                    const name_idx = try self.bytecode.addName(func_name);
+                    const arg_count: u32 = @intCast(call.args.items.len);
+                    const operand = (arg_count << 16) | (name_idx & 0xFFFF);
+                    try self.bytecode.addInstruction(.CALL_GLOBAL, operand);
+                } else if (call.func == .getattr) {
+                    // Check for loop.cycle() and loop.changed()
+                    const attr = call.func.getattr;
+                    if (attr.node == .name and std.mem.eql(u8, attr.node.name.name, "loop")) {
+                        if (std.mem.eql(u8, attr.attr, "cycle")) {
+                            // loop.cycle(args) - generate args then LOOP_CYCLE
+                            for (call.args.items) |arg| {
+                                try self.generateExpression(arg);
+                            }
+                            try self.bytecode.addInstruction(.LOOP_CYCLE, @as(u32, @intCast(call.args.items.len)));
+                        } else if (std.mem.eql(u8, attr.attr, "changed")) {
+                            // loop.changed(args) - generate args then LOOP_CHANGED
+                            for (call.args.items) |arg| {
+                                try self.generateExpression(arg);
+                            }
+                            try self.bytecode.addInstruction(.LOOP_CHANGED, @as(u32, @intCast(call.args.items.len)));
+                        } else {
+                            // Other loop method - fallback to generic call
+                            try self.generateExpression(call.func);
+                            for (call.args.items) |arg| {
+                                try self.generateExpression(arg);
+                            }
+                            try self.bytecode.addInstruction(.CALL_FUNC, @as(u32, @intCast(call.args.items.len)));
+                        }
+                    } else {
+                        // Generic method call
+                        try self.generateExpression(call.func);
+                        for (call.args.items) |arg| {
+                            try self.generateExpression(arg);
+                        }
+                        try self.bytecode.addInstruction(.CALL_FUNC, @as(u32, @intCast(call.args.items.len)));
+                    }
+                } else {
+                    // Generic function call
+                    try self.generateExpression(call.func);
+                    for (call.args.items) |arg| {
+                        try self.generateExpression(arg);
+                    }
+                    try self.bytecode.addInstruction(.CALL_FUNC, @as(u32, @intCast(call.args.items.len)));
                 }
-                // Call function
-                try self.bytecode.addInstruction(.CALL_FUNC, @as(u32, @intCast(call.args.items.len)));
             },
             .null_literal => {
                 try self.bytecode.addInstruction(.LOAD_NULL, 0);
@@ -777,6 +902,10 @@ pub const BytecodeVM = struct {
     /// Phase 6: Local variable slots (O(1) access by index)
     locals: [MAX_LOCALS]?value_mod.Value,
     locals_count: u8,
+    /// Current loop index (0-based) for loop.cycle()
+    loop_index0: i64 = 0,
+    /// Last hash for loop.changed()
+    last_changed_hash: ?u64 = null,
 
     const Self = @This();
     const Value = value_mod.Value;
@@ -1316,10 +1445,176 @@ pub const BytecodeVM = struct {
                     try self.stack.append(self.allocator, Value{ .list = list_ptr });
                 },
                 .CALL_FUNC => {
-                    // For now, function calls are not fully implemented
-                    // Would need to pop args and function, then call
-                    _ = instr.operand;
-                    return exceptions.TemplateError.RuntimeError;
+                    // Generic function call - pop function and args
+                    const arg_count = instr.operand;
+                    
+                    // Pop arguments from stack (in reverse order)
+                    var args = try self.allocator.alloc(Value, arg_count);
+                    defer {
+                        for (args) |*arg| {
+                            arg.deinit(self.allocator);
+                        }
+                        self.allocator.free(args);
+                    }
+                    var call_i: usize = arg_count;
+                    while (call_i > 0) {
+                        call_i -= 1;
+                        args[call_i] = self.stack.pop() orelse Value{ .null = {} };
+                    }
+                    
+                    // Pop function value
+                    const func_val = self.stack.pop() orelse Value{ .null = {} };
+                    defer func_val.deinit(self.allocator);
+                    
+                    // Call callable if it has a function pointer
+                    if (func_val == .callable) {
+                        if (func_val.callable.func) |func| {
+                            const result = func(self.allocator, args, self.context, self.environment) catch {
+                                return exceptions.TemplateError.RuntimeError;
+                            };
+                            try self.stack.append(self.allocator, result);
+                        } else {
+                            try self.stack.append(self.allocator, Value{ .null = {} });
+                        }
+                    } else {
+                        try self.stack.append(self.allocator, Value{ .null = {} });
+                    }
+                },
+                .CALL_GLOBAL => {
+                    // Call a global function by name
+                    const name_idx = instr.operand & 0xFFFF;
+                    const arg_count = instr.operand >> 16;
+                    
+                    // Pop arguments from stack (in reverse order)
+                    var args = try self.allocator.alloc(Value, arg_count);
+                    defer {
+                        for (args) |*arg| {
+                            arg.deinit(self.allocator);
+                        }
+                        self.allocator.free(args);
+                    }
+                    var global_i: usize = arg_count;
+                    while (global_i > 0) {
+                        global_i -= 1;
+                        args[global_i] = self.stack.pop() orelse Value{ .null = {} };
+                    }
+                    
+                    const func_name = self.bytecode.names.items[@as(usize, @intCast(name_idx))];
+                    
+                    if (self.environment.getGlobal(func_name)) |global_val| {
+                        if (global_val == .callable) {
+                            if (global_val.callable.func) |func| {
+                                const result = func(self.allocator, args, self.context, self.environment) catch {
+                                    return exceptions.TemplateError.RuntimeError;
+                                };
+                                try self.stack.append(self.allocator, result);
+                            } else {
+                                try self.stack.append(self.allocator, Value{ .null = {} });
+                            }
+                        } else {
+                            // Non-callable global - return as-is
+                            const result = try global_val.deepCopy(self.allocator);
+                            try self.stack.append(self.allocator, result);
+                        }
+                    } else {
+                        // Check if it's a filter that can be called as function
+                        if (self.environment.getFilter(func_name)) |filter| {
+                            // First arg is the value, rest are args
+                            if (args.len > 0) {
+                                const filter_args = args[1..];
+                                const result = try filter.func(self.allocator, args[0], filter_args, self.context, self.environment);
+                                try self.stack.append(self.allocator, result);
+                            } else {
+                                try self.stack.append(self.allocator, Value{ .null = {} });
+                            }
+                        } else {
+                            return exceptions.TemplateError.RuntimeError;
+                        }
+                    }
+                },
+                .GET_SLICE => {
+                    // Slice operation: obj[start:stop:step]
+                    // Operand encodes which parts are present: bit 0=start, bit 1=stop, bit 2=step
+                    const flags = instr.operand;
+                    
+                    // Pop slice components in reverse order of how they were pushed
+                    var step_val: ?i64 = null;
+                    var stop_val: ?i64 = null;
+                    var start_val: ?i64 = null;
+                    
+                    if (flags & 4 != 0) {
+                        const step = self.stack.pop() orelse Value{ .null = {} };
+                        defer step.deinit(self.allocator);
+                        step_val = step.toInteger();
+                    }
+                    if (flags & 2 != 0) {
+                        const stop = self.stack.pop() orelse Value{ .null = {} };
+                        defer stop.deinit(self.allocator);
+                        stop_val = stop.toInteger();
+                    }
+                    if (flags & 1 != 0) {
+                        const start = self.stack.pop() orelse Value{ .null = {} };
+                        defer start.deinit(self.allocator);
+                        start_val = start.toInteger();
+                    }
+                    
+                    const obj = self.stack.pop() orelse Value{ .null = {} };
+                    defer obj.deinit(self.allocator);
+                    
+                    const step: i64 = step_val orelse 1;
+                    if (step == 0) {
+                        return exceptions.TemplateError.RuntimeError;
+                    }
+                    
+                    const result = try self.executeSlice(obj, start_val, stop_val, step);
+                    try self.stack.append(self.allocator, result);
+                },
+                .LOOP_CYCLE => {
+                    // loop.cycle(args) - return arg at index % arg_count
+                    const arg_count = instr.operand;
+                    if (arg_count == 0) {
+                        return exceptions.TemplateError.TypeError;
+                    }
+                    
+                    // Pop arguments from stack (in reverse order)
+                    var args = try self.allocator.alloc(Value, arg_count);
+                    defer self.allocator.free(args);
+                    var cycle_i: usize = arg_count;
+                    while (cycle_i > 0) {
+                        cycle_i -= 1;
+                        args[cycle_i] = self.stack.pop() orelse Value{ .null = {} };
+                    }
+                    defer {
+                        for (args) |*arg| {
+                            arg.deinit(self.allocator);
+                        }
+                    }
+                    
+                    // Get current loop index
+                    const idx: usize = @intCast(@mod(self.loop_index0, @as(i64, @intCast(arg_count))));
+                    const result = try args[idx].deepCopy(self.allocator);
+                    try self.stack.append(self.allocator, result);
+                },
+                .LOOP_CHANGED => {
+                    // loop.changed(args) - return true if args hash differs from last call
+                    const arg_count = instr.operand;
+                    
+                    // Pop arguments and compute hash
+                    var hash: u64 = 0;
+                    var changed_j: u32 = 0;
+                    while (changed_j < arg_count) : (changed_j += 1) {
+                        const arg = self.stack.pop() orelse Value{ .null = {} };
+                        defer arg.deinit(self.allocator);
+                        hash = hash *% 31 +% computeValueHashBytecode(arg);
+                    }
+                    
+                    const changed = if (self.last_changed_hash) |last_hash|
+                        hash != last_hash
+                    else
+                        true;
+                    
+                    self.last_changed_hash = hash;
+                    try self.stack.append(self.allocator, Value{ .boolean = changed });
                 },
                 .JUMP_IF_FALSE => {
                     const val = self.stack.pop() orelse Value{ .null = {} };
@@ -1412,6 +1707,10 @@ pub const BytecodeVM = struct {
                             .local_slot = 0, // Reserved for future use
                         });
 
+                        // Update loop_index0 for loop.cycle() and loop.changed()
+                        self.loop_index0 = 0;
+                        self.last_changed_hash = null;
+
                         // Push first item to stack (will be stored by next STORE_VAR)
                         const first_item = try items[0].deepCopy(self.allocator);
                         try self.stack.append(self.allocator, first_item);
@@ -1430,11 +1729,20 @@ pub const BytecodeVM = struct {
                         // More items - push next item and jump back
                         const next_item = try loop_state.items[loop_state.index].deepCopy(self.allocator);
                         try self.stack.append(self.allocator, next_item);
+                        // Update loop_index0 for loop.cycle() and loop.changed()
+                        self.loop_index0 = @intCast(loop_state.index);
                         pc = instr.operand + 1; // Jump to instruction after FOR_LOOP_START
                     } else {
                         // Loop complete - free iterable and pop loop state
                         var completed_state = self.loop_stack.pop().?;
                         completed_state.iterable.deinit(self.allocator);
+                        // Reset loop_index0 when exiting loop
+                        if (self.loop_stack.items.len > 0) {
+                            const outer_loop = &self.loop_stack.items[self.loop_stack.items.len - 1];
+                            self.loop_index0 = @intCast(outer_loop.index);
+                        } else {
+                            self.loop_index0 = 0;
+                        }
                     }
                 },
                 // Phase 6: Fast loop variable access
@@ -1550,6 +1858,51 @@ pub const BytecodeVM = struct {
             .name = name_copy,
             .behavior = self.environment.undefined_behavior,
         } };
+    }
+
+    /// Execute slice operation on a list or string
+    fn executeSlice(self: *Self, obj: Value, start_val: ?i64, stop_val: ?i64, step: i64) !Value {
+        return switch (obj) {
+            .list => |l| {
+                const len = @as(i64, @intCast(l.items.items.len));
+                const normalized_start = normalizeSliceIndex(start_val, len, step, true);
+                const normalized_stop = normalizeSliceIndex(stop_val, len, step, false);
+
+                const new_list = try self.allocator.create(value_mod.List);
+                new_list.* = value_mod.List.init(self.allocator);
+                errdefer {
+                    new_list.deinit(self.allocator);
+                    self.allocator.destroy(new_list);
+                }
+
+                var i = normalized_start;
+                while (if (step > 0) i < normalized_stop else i > normalized_stop) {
+                    if (i >= 0 and i < len) {
+                        try new_list.append(try l.items.items[@intCast(i)].deepCopy(self.allocator));
+                    }
+                    i += step;
+                }
+                return Value{ .list = new_list };
+            },
+            .string => |s| {
+                const len = @as(i64, @intCast(s.len));
+                const normalized_start = normalizeSliceIndex(start_val, len, step, true);
+                const normalized_stop = normalizeSliceIndex(stop_val, len, step, false);
+
+                var result_builder = std.ArrayList(u8){};
+                errdefer result_builder.deinit(self.allocator);
+
+                var i = normalized_start;
+                while (if (step > 0) i < normalized_stop else i > normalized_stop) {
+                    if (i >= 0 and i < len) {
+                        try result_builder.append(self.allocator, s[@intCast(i)]);
+                    }
+                    i += step;
+                }
+                return Value{ .string = try result_builder.toOwnedSlice(self.allocator) };
+            },
+            else => return exceptions.TemplateError.TypeError,
+        };
     }
 
     /// Execute binary operation
@@ -2134,8 +2487,3 @@ pub const BytecodeVM = struct {
         return try self.result.toOwnedSlice(self.allocator);
     }
 };
-
-const exceptions = @import("exceptions.zig");
-const value_mod = @import("value.zig");
-const context = @import("context.zig");
-const environment = @import("environment.zig");
