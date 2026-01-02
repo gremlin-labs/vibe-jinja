@@ -110,6 +110,8 @@ pub const TemplateError = error{
     ContinueError,
     /// Break statement (internal use)
     BreakError,
+    /// Execution timeout exceeded
+    TimeoutError,
 };
 
 /// Template stack entry for tracking template call chain

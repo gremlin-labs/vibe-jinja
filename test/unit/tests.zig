@@ -11,19 +11,30 @@ test "test defined" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Test with defined value
+    // In Jinja2, "is defined" checks if the value EXISTS, not if it's truthy
+    // Any value that is not the undefined type is considered "defined"
+
+    // Test with string value - IS defined
     var val = value.Value{ .string = try allocator.dupe(u8, "hello") };
     defer val.deinit(allocator);
     try testing.expect(tests.BuiltinTests.defined(val, &[_]value.Value{}, null, null));
 
-    // Test with empty string
+    // Test with empty string - IS defined (empty string is a valid value)
     var empty_val = value.Value{ .string = try allocator.dupe(u8, "") };
     defer empty_val.deinit(allocator);
-    try testing.expect(!tests.BuiltinTests.defined(empty_val, &[_]value.Value{}, null, null));
+    try testing.expect(tests.BuiltinTests.defined(empty_val, &[_]value.Value{}, null, null));
 
-    // Test with null
+    // Test with null - IS defined (null/None is a valid value in Jinja2)
     const null_val = value.Value{ .null = {} };
-    try testing.expect(!tests.BuiltinTests.defined(null_val, &[_]value.Value{}, null, null));
+    try testing.expect(tests.BuiltinTests.defined(null_val, &[_]value.Value{}, null, null));
+
+    // Test with boolean false - IS defined
+    const false_val = value.Value{ .boolean = false };
+    try testing.expect(tests.BuiltinTests.defined(false_val, &[_]value.Value{}, null, null));
+
+    // Test with undefined value - NOT defined
+    const undefined_val = value.Value{ .undefined = value.Undefined{ .name = "x", .behavior = .lenient, .logger = null } };
+    try testing.expect(!tests.BuiltinTests.defined(undefined_val, &[_]value.Value{}, null, null));
 }
 
 test "test undefined" {
@@ -31,15 +42,26 @@ test "test undefined" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Test with undefined value
+    // In Jinja2, "is undefined" checks if the value is the undefined type
+    // Only variables that don't exist in the context are undefined
+
+    // Test with actual undefined value - IS undefined
+    const undefined_val = value.Value{ .undefined = value.Undefined{ .name = "x", .behavior = .lenient, .logger = null } };
+    try testing.expect(tests.BuiltinTests.@"undefined"(undefined_val, &[_]value.Value{}, null, null));
+
+    // Test with empty string - NOT undefined (it's a valid value)
     var empty_val = value.Value{ .string = try allocator.dupe(u8, "") };
     defer empty_val.deinit(allocator);
-    try testing.expect(tests.BuiltinTests.@"undefined"(empty_val, &[_]value.Value{}, null, null));
+    try testing.expect(!tests.BuiltinTests.@"undefined"(empty_val, &[_]value.Value{}, null, null));
 
-    // Test with defined value
+    // Test with string value - NOT undefined
     var val = value.Value{ .string = try allocator.dupe(u8, "hello") };
     defer val.deinit(allocator);
     try testing.expect(!tests.BuiltinTests.@"undefined"(val, &[_]value.Value{}, null, null));
+
+    // Test with null - NOT undefined
+    const null_val = value.Value{ .null = {} };
+    try testing.expect(!tests.BuiltinTests.@"undefined"(null_val, &[_]value.Value{}, null, null));
 }
 
 test "test equalto" {

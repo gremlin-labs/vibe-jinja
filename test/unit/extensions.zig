@@ -140,11 +140,13 @@ test "extension add filter" {
             alloc: std.mem.Allocator,
             val: value.Value,
             args: []value.Value,
+            kwargs: *const std.StringHashMap(value.Value),
             ctx: ?*context.Context,
             env: ?*environment.Environment,
         ) filters.FilterError!value.Value {
             _ = val;
             _ = args;
+            _ = kwargs;
             _ = ctx;
             _ = env;
             return .{ .string = try alloc.dupe(u8, "filtered") };

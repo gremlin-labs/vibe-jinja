@@ -527,6 +527,7 @@ fn customTestFilter(
     _: std.mem.Allocator,
     value: jinja.Value,
     _: []jinja.Value,
+    _: *const std.StringHashMap(jinja.Value),
     _: ?*jinja.context.Context,
     _: ?*Environment,
 ) !jinja.Value {

@@ -53,6 +53,8 @@ pub const lexer = @import("lexer.zig");
 pub const parser = @import("parser.zig");
 /// Compiler module - compiles AST to executable code
 pub const compiler = @import("compiler.zig");
+/// CompiledTemplate type for rendering templates
+pub const CompiledTemplate = compiler.CompiledTemplate;
 /// Runtime module - runtime utilities and helpers
 pub const runtime = @import("runtime.zig");
 /// Environment module - core environment configuration
@@ -69,6 +71,8 @@ pub const Value = environment_mod.Value;
 pub const FinalizeFn = environment_mod.FinalizeFn;
 /// Autoescape configuration type - can be bool or function
 pub const AutoescapeConfig = environment_mod.AutoescapeConfig;
+/// Render options for timeout and debug tracing support
+pub const RenderOptions = environment_mod.RenderOptions;
 /// Get or create a cached spontaneous environment
 pub const getSpontaneousEnvironment = environment_mod.getSpontaneousEnvironment;
 /// Clear the spontaneous environment cache

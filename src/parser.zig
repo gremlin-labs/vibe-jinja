@@ -179,13 +179,11 @@ pub const Parser = struct {
                     // Return pointer to full struct - the base field is at offset 0
                     return @as(*nodes.Stmt, @ptrCast(@alignCast(macro_stmt)));
                 } else if (nt.kind == .CALL) {
-                    // Check if this is a call block ({% call macro() %}{% endcall %})
-                    // by looking ahead for BLOCK_END (call statement) vs checking for endcall
-                    // For now, parse as regular call - call blocks will be handled separately
-                    // when we see {% call ... %} followed by body and {% endcall %}
-                    const call_stmt = try self.parseCall();
+                    // In Jinja2, {% call %} is always a call block with body until {% endcall %}
+                    // Parse as CallBlock to properly handle caller() variable
+                    const call_block_stmt = try self.parseCallBlock();
                     // Return pointer to full struct - the base field is at offset 0
-                    return @as(*nodes.Stmt, @ptrCast(@alignCast(call_stmt)));
+                    return @as(*nodes.Stmt, @ptrCast(@alignCast(call_block_stmt)));
                 } else if (nt.kind == .SET) {
                     // Parse set statement
                     const set_stmt = try self.parseSet();
@@ -211,13 +209,6 @@ pub const Parser = struct {
                         const autoescape_stmt = try self.parseAutoescape();
                         // Return pointer to full struct - the base field is at offset 0
                         return @as(*nodes.Stmt, @ptrCast(@alignCast(autoescape_stmt)));
-                    }
-
-                    // Check for call block ({% call macro() %}{% endcall %})
-                    if (std.mem.eql(u8, name, "call")) {
-                        const call_block_stmt = try self.parseCallBlock();
-                        // Return pointer to full struct - the base field is at offset 0
-                        return @as(*nodes.Stmt, @ptrCast(@alignCast(call_block_stmt)));
                     }
 
                     // Check if this is an extension tag
@@ -1147,6 +1138,7 @@ pub const Parser = struct {
 
     /// Parse filter expression (applies filters to an expression)
     /// Filters are chained using the pipe operator (|)
+    /// Supports both positional args and kwargs: {{ value | filter(arg1, kwarg=value) }}
     fn parseFilter(self: *Self, expr: nodes.Expression) (exceptions.TemplateError || std.mem.Allocator.Error)!nodes.Expression {
         var current_expr = expr;
 
@@ -1181,6 +1173,17 @@ pub const Parser = struct {
                 args.deinit(self.allocator);
             }
 
+            // Parse filter kwargs (if any)
+            var kwargs = std.StringHashMap(nodes.Expression).init(self.allocator);
+            errdefer {
+                var iter = kwargs.iterator();
+                while (iter.next()) |entry| {
+                    self.allocator.free(entry.key_ptr.*);
+                    entry.value_ptr.*.deinit(self.allocator);
+                }
+                kwargs.deinit();
+            }
+
             // Check for filter arguments (in parentheses)
             if (self.stream.hasNext()) {
                 const next_token = self.stream.current();
@@ -1189,40 +1192,87 @@ pub const Parser = struct {
                         _ = self.stream.next();
                         self.skipWhitespace();
 
-                        // Parse argument list
+                        // Parse argument list (positional and keyword)
                         while (self.stream.hasNext()) {
-                            const arg_expr = try self.parseExpression();
-                            if (arg_expr) |arg| {
-                                try args.append(self.allocator, arg);
-                                self.skipWhitespace();
+                            // Check for closing paren first
+                            const check_close = self.stream.current();
+                            if (check_close) |cc| {
+                                if (cc.kind == .RPAREN) {
+                                    _ = self.stream.next();
+                                    self.skipWhitespace();
+                                    break;
+                                }
+                            }
 
-                                // Check for comma or closing paren
-                                const sep_token = self.stream.current();
-                                if (sep_token) |st| {
-                                    if (st.kind == .COMMA) {
-                                        _ = self.stream.next();
-                                        self.skipWhitespace();
-                                        continue;
-                                    } else if (st.kind == .RPAREN) {
-                                        _ = self.stream.next();
-                                        self.skipWhitespace();
-                                        break;
-                                    } else {
-                                        return exceptions.TemplateError.SyntaxError;
+                            // Check for kwarg: identifier followed by '='
+                            const is_kwarg = blk: {
+                                const cur = self.stream.current() orelse break :blk false;
+                                if (cur.kind != .NAME) break :blk false;
+                                // Peek at next token for '='
+                                const saved_cursor = self.stream.cursor;
+                                _ = self.stream.next();
+                                self.skipWhitespace();
+                                const peek = self.stream.current();
+                                self.stream.cursor = saved_cursor; // restore
+                                if (peek) |p| {
+                                    break :blk p.kind == .ASSIGN;
+                                }
+                                break :blk false;
+                            };
+
+                            if (is_kwarg) {
+                                // Parse kwarg: name = value
+                                const kwarg_name_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+                                const kwarg_name = try self.allocator.dupe(u8, kwarg_name_token.value);
+                                errdefer self.allocator.free(kwarg_name);
+                                _ = self.stream.next();
+                                self.skipWhitespace();
+                                // Consume '='
+                                const assign_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+                                if (assign_token.kind != .ASSIGN) {
+                                    return exceptions.TemplateError.SyntaxError;
+                                }
+                                _ = self.stream.next();
+                                self.skipWhitespace();
+                                // Parse kwarg value expression
+                                const kwarg_expr = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
+                                try kwargs.put(kwarg_name, kwarg_expr);
+                            } else {
+                                // Parse positional argument
+                                const arg_expr = try self.parseExpression();
+                                if (arg_expr) |arg| {
+                                    try args.append(self.allocator, arg);
+                                } else {
+                                    // No expression, check for closing paren
+                                    const close_token = self.stream.current();
+                                    if (close_token) |ct| {
+                                        if (ct.kind == .RPAREN) {
+                                            _ = self.stream.next();
+                                            self.skipWhitespace();
+                                            break;
+                                        }
                                     }
+                                    return exceptions.TemplateError.SyntaxError;
+                                }
+                            }
+
+                            self.skipWhitespace();
+
+                            // Check for comma or closing paren
+                            const sep_token = self.stream.current();
+                            if (sep_token) |st| {
+                                if (st.kind == .COMMA) {
+                                    _ = self.stream.next();
+                                    self.skipWhitespace();
+                                    continue;
+                                } else if (st.kind == .RPAREN) {
+                                    _ = self.stream.next();
+                                    self.skipWhitespace();
+                                    break;
                                 } else {
                                     return exceptions.TemplateError.SyntaxError;
                                 }
                             } else {
-                                // No more arguments
-                                const close_token = self.stream.current();
-                                if (close_token) |ct| {
-                                    if (ct.kind == .RPAREN) {
-                                        _ = self.stream.next();
-                                        self.skipWhitespace();
-                                        break;
-                                    }
-                                }
                                 return exceptions.TemplateError.SyntaxError;
                             }
                         }
@@ -1241,6 +1291,7 @@ pub const Parser = struct {
                 .node = current_expr,
                 .name = filter_name,
                 .args = args,
+                .kwargs = kwargs,
             };
 
             current_expr = nodes.Expression{ .filter = filter_node };
@@ -2299,14 +2350,21 @@ pub const Parser = struct {
             self.skipWhitespace();
             const token = self.stream.current();
             if (token) |t| {
-                // Check for {% endmacro %}
+                // Check for {% endmacro %} using peek (don't consume BLOCK_BEGIN yet)
                 if (t.kind == .BLOCK_BEGIN) {
-                    _ = self.stream.next();
-                    self.skipWhitespace();
-                    const name_token_inner = self.stream.current();
-                    if (name_token_inner) |nt| {
+                    // Peek past BLOCK_BEGIN and any whitespace to find the keyword
+                    var peek_offset: usize = 1;
+                    while (self.stream.peek(peek_offset)) |pt| {
+                        if (pt.kind != .WHITESPACE) break;
+                        peek_offset += 1;
+                    }
+                    const next_token = self.stream.peek(peek_offset);
+                    if (next_token) |nt| {
                         if (nt.kind == .ENDMACRO) {
-                            _ = self.stream.next();
+                            // Now consume: BLOCK_BEGIN, whitespace, ENDMACRO
+                            _ = self.stream.next(); // consume BLOCK_BEGIN
+                            self.skipWhitespace();
+                            _ = self.stream.next(); // consume ENDMACRO
                             self.skipWhitespace();
                             const block_end = self.stream.current();
                             if (block_end) |be| {
@@ -2329,6 +2387,8 @@ pub const Parser = struct {
                 if (eof_token == null or eof_token.?.kind == .EOF) {
                     break;
                 }
+                // Advance stream to avoid infinite loop if parseStatement returns null
+                _ = self.stream.next();
             }
         }
 
@@ -2540,7 +2600,7 @@ pub const Parser = struct {
         _ = self.stream.next();
         self.skipWhitespace();
 
-        // Parse variable name
+        // Parse variable name (may be simple "name" or namespace "name.attr")
         const name_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
         if (name_token.kind != .NAME) {
             return exceptions.TemplateError.SyntaxError;
@@ -2548,6 +2608,21 @@ pub const Parser = struct {
         // Note: Don't duplicate var_name here - Set.init will duplicate it internally
         const var_name = name_token.value;
         _ = self.stream.next();
+
+        // Check for namespace attribute assignment ({% set ns.attr = val %})
+        var target_attr: ?[]const u8 = null;
+        if (self.stream.current()) |tok| {
+            if (tok.kind == .DOT) {
+                _ = self.stream.next(); // consume DOT
+                const attr_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+                if (attr_token.kind != .NAME) {
+                    return exceptions.TemplateError.SyntaxError;
+                }
+                target_attr = attr_token.value;
+                _ = self.stream.next();
+            }
+        }
+
         self.skipWhitespace();
 
         // Check for block variant ({% set x %}{% endset %})
@@ -2608,7 +2683,11 @@ pub const Parser = struct {
                     const dummy_expr = nodes.Expression{ .string_literal = dummy_expr_node };
 
                     const set_stmt = try self.allocator.create(nodes.Set);
-                    set_stmt.* = try nodes.Set.init(self.allocator, var_name, dummy_expr, set_token.lineno, set_token.filename);
+                    if (target_attr) |attr| {
+                        set_stmt.* = try nodes.Set.initWithAttr(self.allocator, var_name, attr, dummy_expr, set_token.lineno, set_token.filename);
+                    } else {
+                        set_stmt.* = try nodes.Set.init(self.allocator, var_name, dummy_expr, set_token.lineno, set_token.filename);
+                    }
                     set_stmt.body = body;
 
                     return set_stmt;
@@ -2641,7 +2720,11 @@ pub const Parser = struct {
         _ = self.stream.next();
 
         const set_stmt = try self.allocator.create(nodes.Set);
-        set_stmt.* = try nodes.Set.init(self.allocator, var_name, value_expr, set_token.lineno, set_token.filename);
+        if (target_attr) |attr| {
+            set_stmt.* = try nodes.Set.initWithAttr(self.allocator, var_name, attr, value_expr, set_token.lineno, set_token.filename);
+        } else {
+            set_stmt.* = try nodes.Set.init(self.allocator, var_name, value_expr, set_token.lineno, set_token.filename);
+        }
 
         return set_stmt;
     }

@@ -290,3 +290,38 @@ test "OptimizedLoopContext single item" {
     try std.testing.expect(loop.last);
     try std.testing.expectEqual(@as(i64, 1), loop.length);
 }
+
+test "OptimizedLoopContext nested loop depth" {
+    const outer_items = [_]Value{
+        Value{ .integer = 1 },
+        Value{ .integer = 2 },
+    };
+    const inner_items = [_]Value{
+        Value{ .string = "a" },
+        Value{ .string = "b" },
+    };
+
+    // Top-level loop (depth = 1)
+    const outer_loop = OptimizedLoopContext.init(&outer_items, "i", null);
+    try std.testing.expectEqual(@as(i64, 1), outer_loop.depth);
+    try std.testing.expectEqual(@as(i64, 0), outer_loop.depth0);
+    try std.testing.expectEqual(@as(i64, 1), outer_loop.resolveLoopAttr("depth").?.integer);
+    try std.testing.expectEqual(@as(i64, 0), outer_loop.resolveLoopAttr("depth0").?.integer);
+
+    // Nested loop (depth = 2) - pass outer_loop as parent
+    const inner_loop = OptimizedLoopContext.init(&inner_items, "j", &outer_loop);
+    try std.testing.expectEqual(@as(i64, 2), inner_loop.depth);
+    try std.testing.expectEqual(@as(i64, 1), inner_loop.depth0);
+    try std.testing.expectEqual(@as(i64, 2), inner_loop.resolveLoopAttr("depth").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), inner_loop.resolveLoopAttr("depth0").?.integer);
+
+    // Verify parent_loop is set
+    try std.testing.expect(inner_loop.parent_loop != null);
+    try std.testing.expectEqual(@as(i64, 1), inner_loop.parent_loop.?.depth);
+
+    // Doubly nested loop (depth = 3)
+    const deepest_items = [_]Value{Value{ .boolean = true }};
+    const deepest_loop = OptimizedLoopContext.init(&deepest_items, "k", &inner_loop);
+    try std.testing.expectEqual(@as(i64, 3), deepest_loop.depth);
+    try std.testing.expectEqual(@as(i64, 2), deepest_loop.depth0);
+}

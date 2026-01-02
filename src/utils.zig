@@ -952,3 +952,213 @@ pub fn namespaceGlobal(
 
     return Value{ .dict = dict };
 }
+
+/// strftime_now(format_string) -> formatted current date/time
+///
+/// Formats the current time according to the provided format string.
+/// Uses strftime-compatible format specifiers.
+///
+/// Supported format specifiers:
+/// - %Y - Year with century (e.g., 2026)
+/// - %m - Month as zero-padded decimal (01-12)
+/// - %d - Day as zero-padded decimal (01-31)
+/// - %H - Hour (24-hour) as zero-padded decimal (00-23)
+/// - %M - Minute as zero-padded decimal (00-59)
+/// - %S - Second as zero-padded decimal (00-59)
+/// - %b - Abbreviated month name (Jan, Feb, etc.)
+/// - %B - Full month name (January, February, etc.)
+/// - %a - Abbreviated weekday name (Sun, Mon, etc.)
+/// - %A - Full weekday name (Sunday, Monday, etc.)
+/// - %j - Day of year as zero-padded decimal (001-366)
+/// - %w - Weekday as decimal (0=Sunday, 6=Saturday)
+/// - %% - Literal %
+///
+/// Example:
+///   {{ strftime_now("%d %b %Y") }}  -> "01 Jan 2026"
+///   {{ strftime_now("%Y-%m-%d %H:%M:%S") }}  -> "2026-01-01 12:30:45"
+///
+/// This is for HuggingFace template compatibility.
+pub fn strftimeNowGlobal(
+    allocator: std.mem.Allocator,
+    args: []Value,
+    ctx: ?*anyopaque,
+    env: ?*anyopaque,
+) GlobalError!Value {
+    _ = ctx;
+    _ = env;
+
+    if (args.len < 1) {
+        return error.InvalidArgument;
+    }
+
+    // Get format string from first argument
+    const format = switch (args[0]) {
+        .string => |s| s,
+        else => return error.TypeError,
+    };
+
+    // Get current timestamp
+    const timestamp = std.time.timestamp();
+    const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @intCast(timestamp) };
+    const day_seconds = epoch_seconds.getDaySeconds();
+    const epoch_day = epoch_seconds.getEpochDay();
+    const year_day = epoch_day.calculateYearDay();
+
+    // Format according to strftime spec
+    var buffer = std.ArrayList(u8){};
+    errdefer buffer.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < format.len) {
+        if (format[i] == '%' and i + 1 < format.len) {
+            i += 1;
+            switch (format[i]) {
+                'd' => {
+                    // Day of month (01-31)
+                    const md = year_day.calculateMonthDay();
+                    const day_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{md.day_index + 1});
+                    defer allocator.free(day_str);
+                    try buffer.appendSlice(allocator, day_str);
+                },
+                'm' => {
+                    // Month (01-12)
+                    const md = year_day.calculateMonthDay();
+                    const month_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{md.month.numeric()});
+                    defer allocator.free(month_str);
+                    try buffer.appendSlice(allocator, month_str);
+                },
+                'Y' => {
+                    // Year with century
+                    const year_str = try std.fmt.allocPrint(allocator, "{d}", .{year_day.year});
+                    defer allocator.free(year_str);
+                    try buffer.appendSlice(allocator, year_str);
+                },
+                'y' => {
+                    // Year without century (00-99)
+                    const year_short = @mod(year_day.year, 100);
+                    const year_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{year_short});
+                    defer allocator.free(year_str);
+                    try buffer.appendSlice(allocator, year_str);
+                },
+                'H' => {
+                    // Hour (00-23)
+                    const hour_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{day_seconds.getHoursIntoDay()});
+                    defer allocator.free(hour_str);
+                    try buffer.appendSlice(allocator, hour_str);
+                },
+                'I' => {
+                    // Hour (01-12)
+                    const hours = day_seconds.getHoursIntoDay();
+                    const hour12 = if (hours == 0) 12 else if (hours > 12) hours - 12 else hours;
+                    const hour_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{hour12});
+                    defer allocator.free(hour_str);
+                    try buffer.appendSlice(allocator, hour_str);
+                },
+                'M' => {
+                    // Minute (00-59)
+                    const min_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{day_seconds.getMinutesIntoHour()});
+                    defer allocator.free(min_str);
+                    try buffer.appendSlice(allocator, min_str);
+                },
+                'S' => {
+                    // Second (00-59)
+                    const sec_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{day_seconds.getSecondsIntoMinute()});
+                    defer allocator.free(sec_str);
+                    try buffer.appendSlice(allocator, sec_str);
+                },
+                'p' => {
+                    // AM/PM
+                    const hours = day_seconds.getHoursIntoDay();
+                    try buffer.appendSlice(allocator, if (hours < 12) "AM" else "PM");
+                },
+                'b', 'h' => {
+                    // Abbreviated month name
+                    const md = year_day.calculateMonthDay();
+                    try buffer.appendSlice(allocator, monthAbbrev(md.month));
+                },
+                'B' => {
+                    // Full month name
+                    const md = year_day.calculateMonthDay();
+                    try buffer.appendSlice(allocator, monthFull(md.month));
+                },
+                'a' => {
+                    // Abbreviated weekday name
+                    // Calculate day of week: (days_since_epoch + 4) % 7, where 0=Sunday
+                    // Unix epoch (Jan 1, 1970) was a Thursday (day 4)
+                    const days: i32 = @intCast(epoch_day.day);
+                    const dow: usize = @intCast(@mod(days + 4, 7));
+                    try buffer.appendSlice(allocator, weekday_abbrevs_sunday[dow]);
+                },
+                'A' => {
+                    // Full weekday name
+                    const days: i32 = @intCast(epoch_day.day);
+                    const dow: usize = @intCast(@mod(days + 4, 7));
+                    try buffer.appendSlice(allocator, weekday_full_names_sunday[dow]);
+                },
+                'w' => {
+                    // Weekday as decimal (0=Sunday, 6=Saturday)
+                    const days: i32 = @intCast(epoch_day.day);
+                    const dow = @mod(days + 4, 7);
+                    const weekday_str = try std.fmt.allocPrint(allocator, "{d}", .{dow});
+                    defer allocator.free(weekday_str);
+                    try buffer.appendSlice(allocator, weekday_str);
+                },
+                'j' => {
+                    // Day of year (001-366)
+                    const doy_str = try std.fmt.allocPrint(allocator, "{d:0>3}", .{year_day.day + 1});
+                    defer allocator.free(doy_str);
+                    try buffer.appendSlice(allocator, doy_str);
+                },
+                '%' => {
+                    // Literal %
+                    try buffer.append(allocator, '%');
+                },
+                'n' => {
+                    // Newline
+                    try buffer.append(allocator, '\n');
+                },
+                't' => {
+                    // Tab
+                    try buffer.append(allocator, '\t');
+                },
+                else => {
+                    // Unknown specifier - output as-is
+                    try buffer.append(allocator, '%');
+                    try buffer.append(allocator, format[i]);
+                },
+            }
+        } else {
+            try buffer.append(allocator, format[i]);
+        }
+        i += 1;
+    }
+
+    return Value{ .string = try buffer.toOwnedSlice(allocator) };
+}
+
+const month_abbrevs = [_][]const u8{
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+};
+
+const month_full_names = [_][]const u8{
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+};
+
+// Sunday-indexed weekday arrays (0=Sunday, 6=Saturday) for strftime compatibility
+const weekday_abbrevs_sunday = [_][]const u8{
+    "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat",
+};
+
+const weekday_full_names_sunday = [_][]const u8{
+    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+};
+
+fn monthAbbrev(month: std.time.epoch.Month) []const u8 {
+    return month_abbrevs[month.numeric() - 1];
+}
+
+fn monthFull(month: std.time.epoch.Month) []const u8 {
+    return month_full_names[month.numeric() - 1];
+}

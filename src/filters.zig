@@ -93,16 +93,25 @@ pub const Value = value_mod.Value;
 pub const FilterError = exceptions.TemplateError || std.mem.Allocator.Error || error{ Overflow, InvalidCharacter };
 
 /// Filter function signature
-/// Takes value, args, optional context, optional environment, and returns filtered value
+/// Takes value, args, kwargs, optional context, optional environment, and returns filtered value
 ///
 /// Error set includes:
 /// - `TemplateError` - template-level errors (invalid argument, etc.)
 /// - `std.mem.Allocator.Error` - memory allocation failures
 /// - `error.Overflow` / `error.InvalidCharacter` - numeric conversion errors
+///
+/// # Arguments
+/// - `allocator` - Memory allocator for the filter
+/// - `val` - The value being filtered (left side of |)
+/// - `args` - Positional arguments passed to the filter
+/// - `kwargs` - Keyword arguments passed to the filter (e.g., tojson(indent=4))
+/// - `ctx` - Optional template context
+/// - `env` - Optional environment
 pub const FilterFn = *const fn (
     allocator: std.mem.Allocator,
     val: Value,
     args: []Value,
+    kwargs: *const std.StringHashMap(Value),
     ctx: ?*context.Context,
     env: ?*environment.Environment,
 ) FilterError!Value;
@@ -266,8 +275,9 @@ pub inline fn getBuiltinFilter(name: []const u8) ?FilterFn {
 /// Built-in filters
 pub const BuiltinFilters = struct {
     /// Return the absolute value of a number
-    pub fn abs(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn abs(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -300,8 +310,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Capitalize the first character of a string
-    pub fn capitalize(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn capitalize(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -324,7 +335,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Return default value if value is empty/undefined
-    pub fn default(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn default(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -342,8 +354,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Convert string to lowercase - Phase 4 optimized
-    pub fn lower(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn lower(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -374,8 +387,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Convert string to uppercase - Phase 4 optimized
-    pub fn upper(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn upper(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -406,8 +420,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Return length of string or list
-    pub fn length(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn length(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -416,8 +431,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Reverse a string
-    pub fn reverse(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn reverse(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -435,7 +451,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Replace occurrences of old with new
-    pub fn replace(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn replace(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -470,8 +487,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Strip whitespace from both ends
-    pub fn trim(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn trim(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -483,8 +501,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Strip whitespace from left
-    pub fn lstrip(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn lstrip(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -496,8 +515,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Strip whitespace from right
-    pub fn rstrip(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn rstrip(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -513,7 +533,8 @@ pub const BuiltinFilters = struct {
     // ============================================================================
 
     /// Get attribute from object (for dicts)
-    pub fn attr(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn attr(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -536,7 +557,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Center string with padding
-    pub fn center(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn center(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -576,8 +598,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// HTML escape - Phase 4 optimized with fast path
-    pub fn escape(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn escape(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -620,12 +643,13 @@ pub const BuiltinFilters = struct {
     }
 
     /// Force HTML escape (same as escape for now)
-    pub fn forceescape(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
-        return escape(allocator, val, args, ctx, env);
+    pub fn forceescape(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        return escape(allocator, val, args, kwargs, ctx, env);
     }
 
     /// String formatting (simple version - supports {} placeholders)
-    pub fn format(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn format(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -657,7 +681,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Indent lines with prefix
-    pub fn indent(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn indent(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -697,7 +722,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Join list items with separator
-    pub fn join(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn join(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -730,8 +756,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Strip HTML tags
-    pub fn striptags(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn striptags(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -759,8 +786,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Title case string
-    pub fn title(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn title(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -791,7 +819,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Truncate string to length
-    pub fn truncate(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn truncate(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -837,8 +866,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// URL encode
-    pub fn urlencode(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn urlencode(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -863,8 +893,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Convert URLs to links (simplified)
-    pub fn urlize(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn urlize(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -907,8 +938,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Count words in string
-    pub fn wordcount(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn wordcount(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -933,7 +965,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Word wrap text
-    pub fn wordwrap(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn wordwrap(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -998,8 +1031,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Format as XML attributes
-    pub fn xmlattr(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn xmlattr(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1048,7 +1082,8 @@ pub const BuiltinFilters = struct {
     // ============================================================================
 
     /// Batch items into groups
-    pub fn batch(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn batch(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1093,8 +1128,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Get first item
-    pub fn first(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn first(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1118,8 +1154,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Get last item
-    pub fn last(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn last(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1143,8 +1180,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Convert to list
-    pub fn list(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn list(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1170,7 +1208,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Map function over items (simplified - just converts to string for now)
-    pub fn map(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn map(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1210,8 +1249,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Reject items matching condition
-    pub fn reject(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn reject(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1233,7 +1273,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Reject items by attribute
-    pub fn rejectattr(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn rejectattr(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1266,8 +1307,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Select items matching condition
-    pub fn select(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn select(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1289,7 +1331,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Select items by attribute
-    pub fn selectattr(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn selectattr(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1322,7 +1365,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Slice list
-    pub fn slice(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn slice(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1379,7 +1423,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Sort list
-    pub fn sort(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn sort(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
 
         // Parse arguments: sort(reverse, case_sensitive, attribute)
@@ -1561,8 +1606,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Sum values
-    pub fn sum(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn sum(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1599,7 +1645,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Get unique items
-    pub fn unique(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn unique(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1638,8 +1685,9 @@ pub const BuiltinFilters = struct {
     // ============================================================================
 
     /// Convert to float
-    pub fn float(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn float(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1653,8 +1701,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Convert to integer
-    pub fn int(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn int(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1668,7 +1717,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Round number
-    pub fn round(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn round(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1692,8 +1742,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Minimum value
-    pub fn min(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn min(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1729,8 +1780,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Maximum value
-    pub fn max(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn max(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1770,7 +1822,8 @@ pub const BuiltinFilters = struct {
     // ============================================================================
 
     /// Sort dictionary
-    pub fn dictsort(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn dictsort(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1847,8 +1900,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Get items as list of key-value pairs
-    pub fn items(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn items(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1882,8 +1936,9 @@ pub const BuiltinFilters = struct {
     // ============================================================================
 
     /// Count items
-    pub fn count(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn count(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1896,8 +1951,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Format file size
-    pub fn filesizeformat(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn filesizeformat(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1926,7 +1982,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Group by attribute (simplified)
-    pub fn groupby(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn groupby(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -1982,7 +2039,8 @@ pub const BuiltinFilters = struct {
     }
 
     /// Pretty print with indentation and width support
-    pub fn pprint(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn pprint(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -2215,8 +2273,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Random item
-    pub fn random(_: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn random(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -2234,8 +2293,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Mark as safe (no-op for now, just returns value)
-    pub fn safe(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn safe(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -2255,16 +2315,17 @@ pub const BuiltinFilters = struct {
 
     /// Mark value as safe (alias for safe) - matches Jinja2's do_mark_safe
     /// Usage: {{ "<b>bold</b>"|mark_safe }}
-    pub fn mark_safe(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn mark_safe(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         // Simply delegate to safe filter
-        return BuiltinFilters.safe(allocator, val, args, ctx, env);
+        return BuiltinFilters.safe(allocator, val, args, kwargs, ctx, env);
     }
 
     /// Mark value as unsafe (remove safe marking) - matches Jinja2's do_mark_unsafe
     /// Converts Markup back to plain string, removing safe marking
     /// Usage: {{ markup_value|mark_unsafe }}
-    pub fn mark_unsafe(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn mark_unsafe(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -2281,8 +2342,9 @@ pub const BuiltinFilters = struct {
     }
 
     /// Convert to string
-    pub fn string(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+    pub fn string(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         _ = args;
+        _ = kwargs;
         _ = ctx;
         _ = env;
 
@@ -2291,10 +2353,32 @@ pub const BuiltinFilters = struct {
         return Value{ .string = try allocator.dupe(u8, str) };
     }
 
-    /// Convert to JSON (simplified)
-    pub fn tojson(allocator: std.mem.Allocator, val: Value, args: []Value, ctx: ?*context.Context, env: ?*environment.Environment) !Value {
-        // args, ctx, env are used in recursive calls below
+    /// Convert to JSON with optional indentation
+    /// Usage: {{ data | tojson }} or {{ data | tojson(indent=4) }}
+    pub fn tojson(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        // Get indent_size from kwargs or args
+        var indent_size: ?usize = null;
+        if (kwargs.get("indent")) |indent_val| {
+            if (indent_val.toInteger()) |i| {
+                indent_size = if (i > 0) @intCast(i) else null;
+            }
+        } else if (args.len > 0) {
+            if (args[0].toInteger()) |i| {
+                indent_size = if (i > 0) @intCast(i) else null;
+            }
+        }
 
+        // If indent_size is specified, use pretty printing
+        if (indent_size) |ind| {
+            return tojsonPretty(allocator, val, ind, 0, kwargs, ctx, env);
+        }
+
+        // Compact JSON (no indentation)
+        return tojsonCompact(allocator, val, kwargs, ctx, env);
+    }
+
+    /// Compact JSON serialization (no whitespace)
+    fn tojsonCompact(allocator: std.mem.Allocator, val: Value, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
         return switch (val) {
             .string => |s| {
                 // Escape JSON special characters
@@ -2337,7 +2421,7 @@ pub const BuiltinFilters = struct {
                     if (i > 0) {
                         try result.appendSlice(allocator, ", ");
                     }
-                    var item_json = try tojson(allocator, item, args, ctx, env);
+                    var item_json = try tojsonCompact(allocator, item, kwargs, ctx, env);
                     defer item_json.deinit(allocator);
                     const item_str = try item_json.toString(allocator);
                     defer allocator.free(item_str);
@@ -2356,13 +2440,13 @@ pub const BuiltinFilters = struct {
                     if (!is_first_json) {
                         try result.appendSlice(allocator, ", ");
                     }
-                    var key_json = try tojson(allocator, Value{ .string = entry.key_ptr.* }, args, ctx, env);
+                    var key_json = try tojsonCompact(allocator, Value{ .string = entry.key_ptr.* }, kwargs, ctx, env);
                     defer key_json.deinit(allocator);
                     const key_str = try key_json.toString(allocator);
                     defer allocator.free(key_str);
                     try result.appendSlice(allocator, key_str);
                     try result.appendSlice(allocator, ": ");
-                    var val_json = try tojson(allocator, entry.value_ptr.*, args, ctx, env);
+                    var val_json = try tojsonCompact(allocator, entry.value_ptr.*, kwargs, ctx, env);
                     defer val_json.deinit(allocator);
                     const val_str = try val_json.toString(allocator);
                     defer allocator.free(val_str);
@@ -2396,7 +2480,7 @@ pub const BuiltinFilters = struct {
             .async_result => |ar| {
                 // Serialize the resolved result if available
                 if (ar.value) |v| {
-                    return tojson(allocator, v, args, ctx, env);
+                    return tojsonCompact(allocator, v, kwargs, ctx, env);
                 }
                 return Value{ .string = try allocator.dupe(u8, "null") };
             },
@@ -2427,6 +2511,158 @@ pub const BuiltinFilters = struct {
                     }
                 } else |_| {}
                 // Default: return as quoted type name
+                return Value{ .string = try std.fmt.allocPrint(allocator, "\"<{s}>\"", .{custom.typeName()}) };
+            },
+        };
+    }
+
+    /// Pretty JSON serialization with indentation
+    fn tojsonPretty(allocator: std.mem.Allocator, val: Value, indent_size: usize, depth: usize, kwargs: *const std.StringHashMap(Value), ctx: ?*context.Context, env: ?*environment.Environment) !Value {
+        return switch (val) {
+            .string => |s| {
+                var result = std.ArrayList(u8){};
+                defer result.deinit(allocator);
+                try result.append(allocator, '"');
+                for (s) |c| {
+                    switch (c) {
+                        '"' => try result.appendSlice(allocator, "\\\""),
+                        '\\' => try result.appendSlice(allocator, "\\\\"),
+                        '\n' => try result.appendSlice(allocator, "\\n"),
+                        '\r' => try result.appendSlice(allocator, "\\r"),
+                        '\t' => try result.appendSlice(allocator, "\\t"),
+                        else => try result.append(allocator, c),
+                    }
+                }
+                try result.append(allocator, '"');
+                return Value{ .string = try result.toOwnedSlice(allocator) };
+            },
+            .integer => |i| {
+                return Value{ .string = try std.fmt.allocPrint(allocator, "{}", .{i}) };
+            },
+            .float => |f| {
+                return Value{ .string = try std.fmt.allocPrint(allocator, "{}", .{f}) };
+            },
+            .boolean => |b| {
+                return Value{ .string = try allocator.dupe(u8, if (b) "true" else "false") };
+            },
+            .null => {
+                return Value{ .string = try allocator.dupe(u8, "null") };
+            },
+            .list => |l| {
+                if (l.items.items.len == 0) {
+                    return Value{ .string = try allocator.dupe(u8, "[]") };
+                }
+                var result = std.ArrayList(u8){};
+                defer result.deinit(allocator);
+                try result.appendSlice(allocator, "[\n");
+                const inner_indent = depth + 1;
+                for (l.items.items, 0..) |item, i| {
+                    // Add indentation
+                    try result.appendNTimes(allocator, ' ', inner_indent * indent_size);
+                    var item_json = try tojsonPretty(allocator, item, indent_size, inner_indent, kwargs, ctx, env);
+                    defer item_json.deinit(allocator);
+                    const item_str = try item_json.toString(allocator);
+                    defer allocator.free(item_str);
+                    try result.appendSlice(allocator, item_str);
+                    if (i < l.items.items.len - 1) {
+                        try result.append(allocator, ',');
+                    }
+                    try result.append(allocator, '\n');
+                }
+                try result.appendNTimes(allocator, ' ', depth * indent_size);
+                try result.append(allocator, ']');
+                return Value{ .string = try result.toOwnedSlice(allocator) };
+            },
+            .dict => |d| {
+                if (d.map.count() == 0) {
+                    return Value{ .string = try allocator.dupe(u8, "{}") };
+                }
+                var result = std.ArrayList(u8){};
+                defer result.deinit(allocator);
+                try result.appendSlice(allocator, "{\n");
+                const inner_indent = depth + 1;
+                var iter = d.map.iterator();
+                var entry_count: usize = 0;
+                const total = d.map.count();
+                while (iter.next()) |entry| {
+                    // Add indentation
+                    try result.appendNTimes(allocator, ' ', inner_indent * indent_size);
+                    // Key (always a string in JSON)
+                    try result.append(allocator, '"');
+                    for (entry.key_ptr.*) |c| {
+                        switch (c) {
+                            '"' => try result.appendSlice(allocator, "\\\""),
+                            '\\' => try result.appendSlice(allocator, "\\\\"),
+                            else => try result.append(allocator, c),
+                        }
+                    }
+                    try result.appendSlice(allocator, "\": ");
+                    // Value
+                    var val_json = try tojsonPretty(allocator, entry.value_ptr.*, indent_size, inner_indent, kwargs, ctx, env);
+                    defer val_json.deinit(allocator);
+                    const val_str = try val_json.toString(allocator);
+                    defer allocator.free(val_str);
+                    try result.appendSlice(allocator, val_str);
+                    entry_count += 1;
+                    if (entry_count < total) {
+                        try result.append(allocator, ',');
+                    }
+                    try result.append(allocator, '\n');
+                }
+                try result.appendNTimes(allocator, ' ', depth * indent_size);
+                try result.append(allocator, '}');
+                return Value{ .string = try result.toOwnedSlice(allocator) };
+            },
+            .undefined => {
+                return Value{ .string = try allocator.dupe(u8, "null") };
+            },
+            .markup => |m| {
+                var result = std.ArrayList(u8){};
+                defer result.deinit(allocator);
+                try result.append(allocator, '"');
+                for (m.content) |c| {
+                    switch (c) {
+                        '"' => try result.appendSlice(allocator, "\\\""),
+                        '\\' => try result.appendSlice(allocator, "\\\\"),
+                        '\n' => try result.appendSlice(allocator, "\\n"),
+                        '\r' => try result.appendSlice(allocator, "\\r"),
+                        '\t' => try result.appendSlice(allocator, "\\t"),
+                        else => try result.append(allocator, c),
+                    }
+                }
+                try result.append(allocator, '"');
+                return Value{ .string = try result.toOwnedSlice(allocator) };
+            },
+            .async_result => |ar| {
+                if (ar.value) |v| {
+                    return tojsonPretty(allocator, v, indent_size, depth, kwargs, ctx, env);
+                }
+                return Value{ .string = try allocator.dupe(u8, "null") };
+            },
+            .callable => {
+                return Value{ .string = try allocator.dupe(u8, "\"<callable>\"") };
+            },
+            .custom => |custom| {
+                if (custom.toString(allocator)) |maybe_str| {
+                    if (maybe_str) |str| {
+                        defer allocator.free(str);
+                        var result = std.ArrayList(u8){};
+                        defer result.deinit(allocator);
+                        try result.append(allocator, '"');
+                        for (str) |c| {
+                            switch (c) {
+                                '"' => try result.appendSlice(allocator, "\\\""),
+                                '\\' => try result.appendSlice(allocator, "\\\\"),
+                                '\n' => try result.appendSlice(allocator, "\\n"),
+                                '\r' => try result.appendSlice(allocator, "\\r"),
+                                '\t' => try result.appendSlice(allocator, "\\t"),
+                                else => try result.append(allocator, c),
+                            }
+                        }
+                        try result.append(allocator, '"');
+                        return Value{ .string = try result.toOwnedSlice(allocator) };
+                    }
+                } else |_| {}
                 return Value{ .string = try std.fmt.allocPrint(allocator, "\"<{s}>\"", .{custom.typeName()}) };
             },
         };

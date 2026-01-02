@@ -358,3 +358,56 @@ test "if with or operator" {
 
     try testing.expect(std.mem.indexOf(u8, result, "either") != null);
 }
+
+test "nested loop depth tracking" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var env = environment.Environment.init(allocator);
+    defer env.deinit();
+
+    var rt = runtime.Runtime.init(&env, allocator);
+    defer rt.deinit();
+
+    // Test loop.depth and loop.depth0 with nested loops
+    const source =
+        \\{% for i in outer %}
+        \\outer={{ loop.depth }}/{{ loop.depth0 }}
+        \\{% for j in inner %}
+        \\inner={{ loop.depth }}/{{ loop.depth0 }}
+        \\{% endfor %}
+        \\{% endfor %}
+    ;
+    
+    // Create outer list
+    const outer_list = try allocator.create(value.List);
+    outer_list.* = value.List.init(allocator);
+    defer outer_list.deinit(allocator);
+    try outer_list.append(value.Value{ .integer = 1 });
+    
+    // Create inner list
+    const inner_list = try allocator.create(value.List);
+    inner_list.* = value.List.init(allocator);
+    defer inner_list.deinit(allocator);
+    try inner_list.append(value.Value{ .integer = 10 });
+
+    var vars = std.StringHashMap(value.Value).init(allocator);
+    defer vars.deinit();
+    
+    const outer_key = try allocator.dupe(u8, "outer");
+    defer allocator.free(outer_key);
+    const inner_key = try allocator.dupe(u8, "inner");
+    defer allocator.free(inner_key);
+    
+    try vars.put(outer_key, value.Value{ .list = outer_list });
+    try vars.put(inner_key, value.Value{ .list = inner_list });
+
+    const result = try rt.renderString(source, vars, "test");
+    defer allocator.free(result);
+
+    // Outer loop: depth=1, depth0=0
+    try testing.expect(std.mem.indexOf(u8, result, "outer=1/0") != null);
+    // Inner loop: depth=2, depth0=1
+    try testing.expect(std.mem.indexOf(u8, result, "inner=2/1") != null);
+}

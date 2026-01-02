@@ -231,3 +231,78 @@ test "visit output statement with plain text" {
 
     try testing.expectEqualStrings("Hello", result);
 }
+
+test "renderWithOptions basic rendering" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var env = environment.Environment.init(allocator);
+    // Note: env.deinit() will clean up cached templates
+    defer env.deinit();
+
+    // Create a simple template (will be cached by environment)
+    const template = try env.fromString("Hello {{ name }}!", "test");
+    // Don't deinit template - it's managed by the cache
+
+    // Compile it
+    var comp = compiler.Compiler.init(&env, "test", allocator);
+    defer comp.deinit();
+    var compiled = try comp.compile(template, false);
+    defer compiled.deinit();
+
+    // Create context with a variable
+    var vars = std.StringHashMap(value.Value).init(allocator);
+    defer {
+        var iter = vars.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.*.deinit(allocator);
+        }
+        vars.deinit();
+    }
+    const name_str = try allocator.dupe(u8, "World");
+    try vars.put("name", value.Value{ .string = name_str });
+    var ctx = try context.Context.init(&env, vars, "test", allocator);
+    defer ctx.deinit();
+
+    // Render with options (no timeout, no tracing)
+    const result = try compiled.renderWithOptions(&ctx, allocator, .{});
+    defer allocator.free(result);
+
+    try testing.expectEqualStrings("Hello World!", result);
+}
+
+test "renderWithOptions with timeout succeeds for quick templates" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var env = environment.Environment.init(allocator);
+    // Note: env.deinit() will clean up cached templates
+    defer env.deinit();
+
+    // Create a simple template (will be cached by environment)
+    const template = try env.fromString("Quick: {{ 1 + 2 }}", "test");
+    // Don't deinit template - it's managed by the cache
+
+    // Compile it
+    var comp = compiler.Compiler.init(&env, "test", allocator);
+    defer comp.deinit();
+    var compiled = try comp.compile(template, false);
+    defer compiled.deinit();
+
+    // Create empty context
+    var vars = std.StringHashMap(value.Value).init(allocator);
+    defer vars.deinit();
+    var ctx = try context.Context.init(&env, vars, "test", allocator);
+    defer ctx.deinit();
+
+    // Render with generous timeout (should succeed)
+    const result = try compiled.renderWithOptions(&ctx, allocator, .{
+        .timeout_ms = 10000, // 10 second timeout
+        .debug_trace = false,
+    });
+    defer allocator.free(result);
+
+    try testing.expectEqualStrings("Quick: 3", result);
+}

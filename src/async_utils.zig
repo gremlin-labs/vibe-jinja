@@ -143,6 +143,53 @@
 //! - Support native async frames
 //! - Integrate with standard event loops
 //! - Provide zero-allocation async iterators
+//!
+//! ## Zig Async Status (as of Zig 0.15)
+//!
+//! Zig's async/await was removed in Zig 0.11 and is being redesigned. Current status:
+//! - **Removed**: The original `async`/`await`/`suspend`/`resume` keywords
+//! - **Planned**: New design focusing on structured concurrency
+//! - **Timeline**: No stable release date announced yet
+//!
+//! Track progress: https://github.com/ziglang/zig/issues/6025
+//!
+//! ## Migration Path
+//!
+//! When Zig async stabilizes, the following changes would be beneficial:
+//!
+//! ### 1. AsyncIterator → Native Async Iterator
+//! ```zig
+//! // Current (callback-based)
+//! pub fn autoAwait(allocator: Allocator, value: Value) !Value
+//!
+//! // Future (native async)
+//! pub async fn autoAwait(value: Value) Value
+//! ```
+//!
+//! ### 2. Filter/Test Functions → Async Functions
+//! ```zig
+//! // Current
+//! pub const FilterFn = *const fn (Allocator, Value, []Value, ...) anyerror!Value;
+//!
+//! // Future (optional async variant)
+//! pub const AsyncFilterFn = async fn (Value, []Value, ...) Value;
+//! ```
+//!
+//! ### 3. Template Rendering → Async Streaming
+//! ```zig
+//! // Current (blocking)
+//! pub fn render(ctx: *Context, allocator: Allocator) ![]const u8
+//!
+//! // Future (async streaming)
+//! pub async fn renderAsync(ctx: *Context, writer: anytype) !void
+//! ```
+//!
+//! ## Current Workarounds
+//!
+//! Until native async is available, use:
+//! - `AsyncTracker` for tracking pending operations
+//! - Callback-based patterns via `AsyncCallback`
+//! - Polling via `AsyncResult` value type
 
 const std = @import("std");
 const value_mod = @import("value.zig");

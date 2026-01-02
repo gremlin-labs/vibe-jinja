@@ -306,6 +306,110 @@ pub const CompiledTemplate = struct {
         return try allocator.dupe(u8, result);
     }
 
+    /// Render the template with options (timeout and debug tracing support)
+    ///
+    /// This method provides enhanced rendering with:
+    /// - **Timeout enforcement**: Fails fast with TimeoutError if rendering exceeds timeout_ms
+    /// - **Debug tracing**: Logs filter/test execution with timing when debug_trace is enabled
+    ///
+    /// Use this for debugging hangs and performance issues.
+    ///
+    /// # Arguments
+    /// - `ctx`: Context containing variables and template state
+    /// - `allocator`: Memory allocator for rendering
+    /// - `options`: RenderOptions with timeout_ms and debug_trace settings
+    ///
+    /// # Returns
+    /// Rendered template output as a string. The caller is responsible for freeing the memory.
+    ///
+    /// # Errors
+    /// - `error.TimeoutError` - Rendering exceeded timeout_ms
+    /// - Template rendering errors
+    /// - `error.OutOfMemory` - Memory allocation failed
+    ///
+    /// # Example
+    /// ```zig
+    /// const result = try compiled.renderWithOptions(ctx, allocator, .{
+    ///     .timeout_ms = 5000,  // 5 second timeout
+    ///     .debug_trace = true, // Enable filter tracing
+    /// });
+    /// ```
+    pub fn renderWithOptions(
+        self: *Self,
+        ctx: *context.Context,
+        allocator: std.mem.Allocator,
+        options: environment.RenderOptions,
+    ) ![]const u8 {
+        // Record start time for timeout checking
+        const start_time = std.time.milliTimestamp();
+
+        // Store options in context for access during rendering
+        ctx.render_options = options;
+
+        // Log render start if tracing
+        if (options.debug_trace) {
+            std.debug.print("[RENDER] START template={s}\n", .{self.template.base.filename orelse "<string>"});
+        }
+
+        // Phase 2 optimization: Use arena for all intermediate allocations
+        const estimated_size: usize = 4096;
+        var arena = render_arena.RenderArena.init(allocator, estimated_size);
+        defer arena.deinit();
+
+        const arena_alloc = arena.allocator();
+
+        // Check timeout before starting
+        if (options.timeout_ms) |timeout| {
+            const elapsed = @as(u64, @intCast(std.time.milliTimestamp() - start_time));
+            if (elapsed > timeout) {
+                if (options.debug_trace) {
+                    std.debug.print("[RENDER] TIMEOUT before start (elapsed={d}ms, limit={d}ms)\n", .{ elapsed, timeout });
+                }
+                return exceptions.TemplateError.TimeoutError;
+            }
+        }
+
+        // Use bytecode if available, otherwise use AST interpretation
+        const result = if (self.bytecode) |*bc| blk: {
+            var vm = bytecode_mod.BytecodeVM.init(arena_alloc, bc, ctx);
+            defer vm.deinit();
+            break :blk try vm.execute();
+        } else blk: {
+            // Fall back to AST interpretation with timeout checking
+            var compiler_inst = Compiler.init(self.environment, self.template.base.filename, arena_alloc);
+            defer compiler_inst.deinit();
+
+            // Store start time and timeout in compiler for periodic checking
+            compiler_inst.render_start_time = start_time;
+            compiler_inst.render_timeout_ms = options.timeout_ms;
+            compiler_inst.debug_trace = options.debug_trace;
+
+            var frame = Frame.init("root", null, arena_alloc);
+            defer frame.deinit();
+
+            break :blk try compiler_inst.visitTemplate(self.template, &frame, ctx);
+        };
+
+        // Final timeout check
+        if (options.timeout_ms) |timeout| {
+            const elapsed = @as(u64, @intCast(std.time.milliTimestamp() - start_time));
+            if (elapsed > timeout) {
+                if (options.debug_trace) {
+                    std.debug.print("[RENDER] TIMEOUT after completion (elapsed={d}ms, limit={d}ms)\n", .{ elapsed, timeout });
+                }
+                return exceptions.TemplateError.TimeoutError;
+            }
+        }
+
+        if (options.debug_trace) {
+            const elapsed = @as(u64, @intCast(std.time.milliTimestamp() - start_time));
+            std.debug.print("[RENDER] COMPLETE template={s} elapsed={d}ms\n", .{ self.template.base.filename orelse "<string>", elapsed });
+        }
+
+        // Copy result to caller's allocator (only allocation that escapes arena)
+        return try allocator.dupe(u8, result);
+    }
+
     /// Deinitialize the compiled template
     pub fn deinit(self: *Self) void {
         if (self.bytecode) |*bc| {
@@ -329,6 +433,11 @@ pub const Compiler = struct {
     frames: std.ArrayList(*Frame),
     current_frame: ?*Frame,
 
+    // Debug/timeout fields (set by renderWithOptions)
+    render_start_time: i64 = 0,
+    render_timeout_ms: ?u64 = null,
+    debug_trace: bool = false,
+
     const Self = @This();
 
     /// Initialize a new compiler
@@ -339,6 +448,9 @@ pub const Compiler = struct {
             .allocator = allocator,
             .frames = std.ArrayList(*Frame){},
             .current_frame = null,
+            .render_start_time = 0,
+            .render_timeout_ms = null,
+            .debug_trace = false,
         };
     }
 
@@ -604,9 +716,33 @@ pub const Compiler = struct {
         };
     }
 
+    /// Check if timeout has been exceeded (for renderWithOptions)
+    /// Returns TimeoutError if timeout exceeded, otherwise null
+    fn checkTimeout(self: *Self) !void {
+        if (self.render_timeout_ms) |timeout| {
+            const elapsed = @as(u64, @intCast(std.time.milliTimestamp() - self.render_start_time));
+            if (elapsed > timeout) {
+                if (self.debug_trace) {
+                    std.debug.print("[TIMEOUT] Execution timeout exceeded (elapsed={d}ms, limit={d}ms)\n", .{ elapsed, timeout });
+                }
+                return exceptions.TemplateError.TimeoutError;
+            }
+        }
+    }
+
     /// Visit Filter node - apply filter to expression
     /// Optimized hot path for filter execution
+    /// Includes debug tracing and timeout checking when enabled via renderWithOptions
     pub fn visitFilter(self: *Self, node: *nodes.FilterExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
+        // Check timeout before filter execution
+        try self.checkTimeout();
+
+        // Debug trace: log filter entry
+        const filter_start = if (self.debug_trace) std.time.milliTimestamp() else 0;
+        if (self.debug_trace) {
+            std.debug.print("[FILTER] {s} args={d} kwargs={d} ENTER\n", .{ node.name, node.args.items.len, node.kwargs.count() });
+        }
+
         // Evaluate base expression
         var base_val = try self.visitExpression(&node.node, frame, ctx);
         defer base_val.deinit(self.allocator);
@@ -641,6 +777,22 @@ pub const Compiler = struct {
             args_allocated = true;
         }
 
+        // Evaluate kwargs
+        var kwargs = std.StringHashMap(value_mod.Value).init(self.allocator);
+        defer {
+            var iter = kwargs.iterator();
+            while (iter.next()) |entry| {
+                entry.value_ptr.*.deinit(self.allocator);
+            }
+            kwargs.deinit();
+        }
+        var kwarg_iter = node.kwargs.iterator();
+        while (kwarg_iter.next()) |entry| {
+            var kwarg_expr = entry.value_ptr.*;
+            const kwarg_val = try self.visitExpression(&kwarg_expr, frame, ctx);
+            try kwargs.put(entry.key_ptr.*, kwarg_val);
+        }
+
         // Get filter from environment
         const filter = self.environment.getFilter(node.name) orelse {
             // Clean up stack-allocated args if used
@@ -648,6 +800,9 @@ pub const Compiler = struct {
                 for (args) |*arg| {
                     arg.deinit(self.allocator);
                 }
+            }
+            if (self.debug_trace) {
+                std.debug.print("[FILTER] {s} ERROR: filter not found\n", .{node.name});
             }
             return exceptions.TemplateError.RuntimeError;
         };
@@ -663,6 +818,7 @@ pub const Compiler = struct {
                     self.allocator,
                     base_val,
                     args,
+                    &kwargs,
                     ctx,
                     self.environment,
                 );
@@ -672,6 +828,7 @@ pub const Compiler = struct {
                     self.allocator,
                     base_val,
                     args,
+                    &kwargs,
                     ctx,
                     self.environment,
                 );
@@ -682,10 +839,17 @@ pub const Compiler = struct {
                 self.allocator,
                 base_val,
                 args,
+                &kwargs,
                 ctx,
                 self.environment,
             );
         };
+
+        // Debug trace: log filter exit with timing
+        if (self.debug_trace) {
+            const filter_elapsed = @as(u64, @intCast(std.time.milliTimestamp() - filter_start));
+            std.debug.print("[FILTER] {s} EXIT ({d}ms)\n", .{ node.name, filter_elapsed });
+        }
 
         // Clean up stack-allocated args if used
         if (!args_allocated) {
@@ -1173,7 +1337,17 @@ pub const Compiler = struct {
     }
 
     /// Visit TestExpr node - evaluate test expression (value is test)
+    /// Includes debug tracing when enabled via renderWithOptions
     pub fn visitTest(self: *Self, node: *nodes.TestExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
+        // Check timeout before test execution
+        try self.checkTimeout();
+
+        // Debug trace: log test entry
+        const test_start = if (self.debug_trace) std.time.milliTimestamp() else 0;
+        if (self.debug_trace) {
+            std.debug.print("[TEST] {s} args={d} ENTER\n", .{ node.name, node.args.items.len });
+        }
+
         // Evaluate the expression to test
         var val = try self.visitExpression(&node.node, frame, ctx);
         defer val.deinit(self.allocator);
@@ -1194,6 +1368,9 @@ pub const Compiler = struct {
 
         // Look up test function from environment
         const test_func = self.environment.getTest(node.name) orelse {
+            if (self.debug_trace) {
+                std.debug.print("[TEST] {s} ERROR: test not found\n", .{node.name});
+            }
             return exceptions.TemplateError.RuntimeError;
         };
 
@@ -1223,6 +1400,12 @@ pub const Compiler = struct {
                 break :blk test_func.func(val, args.items, ctx_to_pass, env_to_pass);
             }
         } else test_func.func(val, args.items, ctx_to_pass, env_to_pass);
+
+        // Debug trace: log test exit with timing
+        if (self.debug_trace) {
+            const test_elapsed = @as(u64, @intCast(std.time.milliTimestamp() - test_start));
+            std.debug.print("[TEST] {s} result={} EXIT ({d}ms)\n", .{ node.name, result, test_elapsed });
+        }
 
         return value_pool.getBool(result);
     }
@@ -1390,6 +1573,32 @@ pub const Compiler = struct {
             if (left_float != null and right_float != null) {
                 return value_mod.Value{ .float = left_float.? + right_float.? };
             }
+        }
+
+        // List concatenation: [1,2] + [3,4] = [1,2,3,4]
+        const left_is_list = left == .list;
+        const right_is_list = right == .list;
+        if (left_is_list and right_is_list) {
+            const result_list = try self.allocator.create(value_mod.List);
+            result_list.* = value_mod.List.init(self.allocator);
+            errdefer {
+                result_list.deinit(self.allocator);
+                self.allocator.destroy(result_list);
+            }
+
+            // Copy elements from left list
+            for (left.list.items.items) |item| {
+                const item_copy = try item.deepCopy(self.allocator);
+                try result_list.append(item_copy);
+            }
+
+            // Copy elements from right list
+            for (right.list.items.items) |item| {
+                const item_copy = try item.deepCopy(self.allocator);
+                try result_list.append(item_copy);
+            }
+
+            return value_mod.Value{ .list = result_list };
         }
 
         // String concatenation (handles string + number, number + string, string + string)
@@ -1713,6 +1922,9 @@ pub const Compiler = struct {
         // NOTE: We still deep copy the loop variable per iteration for now
         // The main optimization is avoiding Dict creation for loop.index etc.
         while (opt_loop.hasMore()) {
+            // Check timeout at each iteration to detect infinite loops
+            try self.checkTimeout();
+
             // Set loop variable (deep copy - still needed for proper ownership)
             const current_item = opt_loop.getCurrentItem();
             const item_copy = try current_item.deepCopy(self.allocator);
@@ -1912,12 +2124,28 @@ pub const Compiler = struct {
                 try filter_args.append(self.allocator, arg_val);
             }
 
+            // Evaluate kwargs
+            var filter_kwargs = std.StringHashMap(value_mod.Value).init(self.allocator);
+            defer {
+                var iter = filter_kwargs.iterator();
+                while (iter.next()) |entry| {
+                    entry.value_ptr.*.deinit(self.allocator);
+                }
+                filter_kwargs.deinit();
+            }
+            var kwarg_iter = node.kwargs.iterator();
+            while (kwarg_iter.next()) |entry| {
+                var kwarg_expr = entry.value_ptr.*;
+                const kwarg_val = try self.visitExpression(&kwarg_expr, frame, ctx);
+                try filter_kwargs.put(entry.key_ptr.*, kwarg_val);
+            }
+
             // Apply filter with empty value (function-style call)
             var empty_val = value_mod.Value{ .string = try self.allocator.dupe(u8, "") };
             defer empty_val.deinit(self.allocator);
 
             // Call the filter function directly
-            const result = try filter.func(self.allocator, empty_val, filter_args.items, ctx, self.environment);
+            const result = try filter.func(self.allocator, empty_val, filter_args.items, &filter_kwargs, ctx, self.environment);
             return result;
         }
 
@@ -1939,6 +2167,24 @@ pub const Compiler = struct {
                 for (node.args.items) |arg| {
                     const arg_val = try self.visitExpression(@constCast(&arg), frame, ctx);
                     try call_args.append(self.allocator, arg_val);
+                }
+
+                // If there are kwargs, build a dict and pass it as the last argument
+                // This enables global functions like namespace() to receive kwargs
+                if (node.kwargs.count() > 0) {
+                    const kwargs_dict = try self.allocator.create(value_mod.Dict);
+                    errdefer self.allocator.destroy(kwargs_dict);
+                    kwargs_dict.* = value_mod.Dict.init(self.allocator);
+                    errdefer kwargs_dict.deinit(self.allocator);
+
+                    var kwarg_iter = node.kwargs.iterator();
+                    while (kwarg_iter.next()) |entry| {
+                        var kwarg_expr = entry.value_ptr.*;
+                        const kwarg_val = try self.visitExpression(&kwarg_expr, frame, ctx);
+                        try kwargs_dict.set(entry.key_ptr.*, kwarg_val);
+                    }
+
+                    try call_args.append(self.allocator, value_mod.Value{ .dict = kwargs_dict });
                 }
 
                 // Call the function if it has a function pointer
@@ -2416,6 +2662,7 @@ pub const Compiler = struct {
     }
 
     /// Visit Set node - assign variable
+    /// Supports both simple assignment and namespace attribute assignment ({% set ns.attr = val %})
     pub fn visitSet(self: *Self, node: *nodes.Set, frame: *Frame, ctx: *context.Context) ![]const u8 {
         var value: value_mod.Value = undefined;
 
@@ -2437,10 +2684,51 @@ pub const Compiler = struct {
             value = try self.visitExpression(&node.value, frame, ctx);
         }
 
-        // Set variable in frame (deep copy)
-        const value_copy = try value.deepCopy(self.allocator);
-        defer value.deinit(self.allocator);
-        try frame.set(node.name, value_copy);
+        // Check if this is namespace attribute assignment ({% set ns.attr = val %})
+        if (node.target_attr) |attr| {
+            // Namespace attribute assignment
+            // 1. Get the namespace dict - walk up frame hierarchy first
+            var ns_value: ?Value = null;
+            var current_frame: ?*Frame = frame;
+            while (current_frame) |f| {
+                if (f.variables.get(node.name)) |v| {
+                    ns_value = v;
+                    break;
+                }
+                current_frame = f.parent;
+            }
+
+            // If not in any frame, try context (for globals)
+            if (ns_value == null) {
+                const ctx_val = ctx.resolve(node.name);
+                if (ctx_val != .undefined) {
+                    ns_value = ctx_val;
+                }
+            }
+
+            if (ns_value) |nv| {
+                if (nv == .dict) {
+                    // 2. Set the attribute on the namespace dict
+                    // The dict is stored by pointer, so modifications affect the original
+                    try nv.dict.set(attr, value);
+                    // Note: value is moved into the dict, don't deinit it
+                } else {
+                    // Not a dict/namespace - error
+                    value.deinit(self.allocator);
+                    return exceptions.TemplateError.RuntimeError;
+                }
+            } else {
+                // Namespace variable not found - error
+                value.deinit(self.allocator);
+                return exceptions.TemplateError.UndefinedError;
+            }
+        } else {
+            // Simple variable assignment
+            // Set variable in frame (deep copy)
+            const value_copy = try value.deepCopy(self.allocator);
+            defer value.deinit(self.allocator);
+            try frame.set(node.name, value_copy);
+        }
 
         // Set statements don't produce output
         return try self.allocator.dupe(u8, "");
@@ -2514,12 +2802,29 @@ pub const Compiler = struct {
             filter_args.deinit(self.allocator);
         }
 
-        // Extract filter arguments if filter_expr is a FilterExpr
+        // Evaluate kwargs
+        var filter_kwargs = std.StringHashMap(value_mod.Value).init(self.allocator);
+        defer {
+            var iter = filter_kwargs.iterator();
+            while (iter.next()) |entry| {
+                entry.value_ptr.*.deinit(self.allocator);
+            }
+            filter_kwargs.deinit();
+        }
+
+        // Extract filter arguments and kwargs if filter_expr is a FilterExpr
         if (node.filter_expr == .filter) {
             const filter_expr = node.filter_expr.filter;
             for (filter_expr.args.items) |*arg_expr| {
                 const arg_val = try self.visitExpression(arg_expr, frame, ctx);
                 try filter_args.append(self.allocator, arg_val);
+            }
+            // Extract kwargs
+            var kwarg_iter = filter_expr.kwargs.iterator();
+            while (kwarg_iter.next()) |entry| {
+                var kwarg_expr = entry.value_ptr.*;
+                const kwarg_val = try self.visitExpression(&kwarg_expr, frame, ctx);
+                try filter_kwargs.put(entry.key_ptr.*, kwarg_val);
             }
         }
 
@@ -2527,6 +2832,7 @@ pub const Compiler = struct {
             self.allocator,
             body_value,
             filter_args.items,
+            &filter_kwargs,
             ctx,
             self.environment,
         );
@@ -2959,7 +3265,7 @@ pub const Compiler = struct {
 };
 
 /// Convenience function to compile a template
-/// Note: Bytecode disabled for templates with macros/call blocks until bytecode supports them
+/// Note: Bytecode now supports macros and call blocks (Phase 5)
 pub fn compile(env: *environment.Environment, template: *nodes.Template, filename: ?[]const u8, allocator: std.mem.Allocator) !CompiledTemplate {
     var compiler = Compiler.init(env, filename, allocator);
     defer compiler.deinit();
@@ -2978,7 +3284,8 @@ fn templateHasUnsupportedFeatures(template: *nodes.Template) bool {
 
 fn stmtHasUnsupportedFeatures(stmt: *nodes.Stmt) bool {
     switch (stmt.tag) {
-        .macro, .call, .call_block, .import, .from_import, .include, .extends => return true,
+        // Phase 5: macros, call, call_block now supported in bytecode
+        .import, .from_import, .include, .extends => return true,
         .for_loop => {
             const for_stmt: *nodes.For = @ptrCast(@alignCast(stmt));
             for (for_stmt.body.items) |s| {
@@ -3026,6 +3333,8 @@ fn stmtHasUnsupportedFeatures(stmt: *nodes.Stmt) bool {
             const set_stmt: *nodes.Set = @ptrCast(@alignCast(stmt));
             // Set blocks ({% set x %}...{% endset %}) are not supported by bytecode
             if (set_stmt.body != null) return true;
+            // Namespace attribute assignment ({% set ns.attr = val %}) not supported by bytecode
+            if (set_stmt.target_attr != null) return true;
             return false;
         },
         else => return false,

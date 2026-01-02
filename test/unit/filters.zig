@@ -6,6 +6,18 @@ const value = vibe_jinja.value;
 const environment = vibe_jinja.environment;
 const runtime = vibe_jinja.runtime;
 
+/// Helper to call filter functions with empty kwargs for testing
+fn callFilter(
+    comptime filter_fn: filters.FilterFn,
+    allocator: std.mem.Allocator,
+    input: value.Value,
+    args: []value.Value,
+) !value.Value {
+    var empty_kwargs = std.StringHashMap(value.Value).init(allocator);
+    defer empty_kwargs.deinit();
+    return filter_fn(allocator, input, args, &empty_kwargs, null, null);
+}
+
 // ============================================================================
 // String Filters
 // ============================================================================
@@ -18,7 +30,7 @@ test "filter capitalize" {
     var input = value.Value{ .string = try allocator.dupe(u8, "hello") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.capitalize(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.capitalize, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -33,7 +45,7 @@ test "filter lower" {
     var input = value.Value{ .string = try allocator.dupe(u8, "HELLO") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.lower(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.lower, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -48,7 +60,7 @@ test "filter upper" {
     var input = value.Value{ .string = try allocator.dupe(u8, "hello") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.upper(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.upper, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -63,7 +75,7 @@ test "filter trim" {
     var input = value.Value{ .string = try allocator.dupe(u8, "  hello  ") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.trim(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.trim, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -78,7 +90,7 @@ test "filter length" {
     var input = value.Value{ .string = try allocator.dupe(u8, "hello") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.length(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.length, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .integer);
@@ -97,7 +109,7 @@ test "filter default with empty value" {
     defer default_val.deinit(allocator);
 
     var args = [_]value.Value{default_val};
-    var result = try filters.BuiltinFilters.default(allocator, input, &args, null, null);
+    var result = try callFilter(filters.BuiltinFilters.default, allocator, input, &args);
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -116,7 +128,7 @@ test "filter default with non-empty value" {
     defer default_val.deinit(allocator);
 
     var args = [_]value.Value{default_val};
-    var result = try filters.BuiltinFilters.default(allocator, input, &args, null, null);
+    var result = try callFilter(filters.BuiltinFilters.default, allocator, input, &args);
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -138,7 +150,7 @@ test "filter replace" {
     defer new_val.deinit(allocator);
 
     var args = [_]value.Value{ old_val, new_val };
-    var result = try filters.BuiltinFilters.replace(allocator, input, &args, null, null);
+    var result = try callFilter(filters.BuiltinFilters.replace, allocator, input, &args);
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -152,28 +164,28 @@ test "filter abs" {
 
     // Test with positive integer
     const pos_int = value.Value{ .integer = 42 };
-    var result1 = try filters.BuiltinFilters.abs(allocator, pos_int, &[_]value.Value{}, null, null);
+    var result1 = try callFilter(filters.BuiltinFilters.abs, allocator, pos_int, &[_]value.Value{});
     defer result1.deinit(allocator);
     try testing.expect(result1 == .integer);
     try testing.expect(result1.integer == 42);
 
     // Test with negative integer
     const neg_int = value.Value{ .integer = -42 };
-    var result2 = try filters.BuiltinFilters.abs(allocator, neg_int, &[_]value.Value{}, null, null);
+    var result2 = try callFilter(filters.BuiltinFilters.abs, allocator, neg_int, &[_]value.Value{});
     defer result2.deinit(allocator);
     try testing.expect(result2 == .integer);
     try testing.expect(result2.integer == 42);
 
     // Test with positive float
     const pos_float = value.Value{ .float = 3.14 };
-    var result3 = try filters.BuiltinFilters.abs(allocator, pos_float, &[_]value.Value{}, null, null);
+    var result3 = try callFilter(filters.BuiltinFilters.abs, allocator, pos_float, &[_]value.Value{});
     defer result3.deinit(allocator);
     try testing.expect(result3 == .float);
     try testing.expect(result3.float == 3.14);
 
     // Test with negative float
     const neg_float = value.Value{ .float = -3.14 };
-    var result4 = try filters.BuiltinFilters.abs(allocator, neg_float, &[_]value.Value{}, null, null);
+    var result4 = try callFilter(filters.BuiltinFilters.abs, allocator, neg_float, &[_]value.Value{});
     defer result4.deinit(allocator);
     try testing.expect(result4 == .float);
     try testing.expect(result4.float == 3.14);
@@ -187,7 +199,7 @@ test "filter reverse" {
     var input = value.Value{ .string = try allocator.dupe(u8, "hello") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.reverse(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.reverse, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -202,7 +214,7 @@ test "filter lstrip" {
     var input = value.Value{ .string = try allocator.dupe(u8, "  hello") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.lstrip(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.lstrip, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -217,7 +229,7 @@ test "filter rstrip" {
     var input = value.Value{ .string = try allocator.dupe(u8, "hello  ") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.rstrip(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.rstrip, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -237,7 +249,7 @@ test "filter length with list" {
     try list.append(value.Value{ .integer = 3 });
 
     const list_val = value.Value{ .list = list };
-    var result = try filters.BuiltinFilters.length(allocator, list_val, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.length, allocator, list_val, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .integer);
@@ -256,7 +268,7 @@ test "filter length with dict" {
     try dict.set("b", value.Value{ .integer = 2 });
 
     const dict_val = value.Value{ .dict = dict };
-    var result = try filters.BuiltinFilters.length(allocator, dict_val, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.length, allocator, dict_val, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .integer);
@@ -275,7 +287,7 @@ test "filter title basic" {
     var input = value.Value{ .string = try allocator.dupe(u8, "foo bar") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.title(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.title, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -290,7 +302,7 @@ test "filter title with apostrophe" {
     var input = value.Value{ .string = try allocator.dupe(u8, "foo's bar") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.title(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.title, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -314,7 +326,7 @@ test "filter first" {
     try list.append(value.Value{ .integer = 30 });
 
     const list_val = value.Value{ .list = list };
-    var result = try filters.BuiltinFilters.first(allocator, list_val, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.first, allocator, list_val, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .integer);
@@ -334,7 +346,7 @@ test "filter last" {
     try list.append(value.Value{ .integer = 30 });
 
     const list_val = value.Value{ .list = list };
-    var result = try filters.BuiltinFilters.last(allocator, list_val, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.last, allocator, list_val, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .integer);
@@ -362,7 +374,7 @@ test "filter join" {
 
     const list_val = value.Value{ .list = list };
     var args = [_]value.Value{separator};
-    var result = try filters.BuiltinFilters.join(allocator, list_val, &args, null, null);
+    var result = try callFilter(filters.BuiltinFilters.join, allocator, list_val, &args);
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -389,7 +401,7 @@ test "filter sum" {
     try list.append(value.Value{ .integer = 6 });
 
     const list_val = value.Value{ .list = list };
-    var result = try filters.BuiltinFilters.sum(allocator, list_val, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.sum, allocator, list_val, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .integer);
@@ -413,7 +425,7 @@ test "filter sort ascending" {
     try list.append(value.Value{ .integer = 2 });
 
     const list_val = value.Value{ .list = list };
-    var result = try filters.BuiltinFilters.sort(allocator, list_val, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.sort, allocator, list_val, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .list);
@@ -435,7 +447,7 @@ test "filter escape" {
     var input = value.Value{ .string = try allocator.dupe(u8, "<\">&") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.escape(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.escape, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -454,14 +466,14 @@ test "filter round positive" {
 
     // Test 2.7 rounds to 3 (default precision=0 returns integer)
     const input1 = value.Value{ .float = 2.7 };
-    var result1 = try filters.BuiltinFilters.round(allocator, input1, &[_]value.Value{}, null, null);
+    var result1 = try callFilter(filters.BuiltinFilters.round, allocator, input1, &[_]value.Value{});
     defer result1.deinit(allocator);
     try testing.expect(result1 == .integer);
     try testing.expect(result1.integer == 3);
 
     // Test 2.1 rounds to 2
     const input2 = value.Value{ .float = 2.1 };
-    var result2 = try filters.BuiltinFilters.round(allocator, input2, &[_]value.Value{}, null, null);
+    var result2 = try callFilter(filters.BuiltinFilters.round, allocator, input2, &[_]value.Value{});
     defer result2.deinit(allocator);
     try testing.expect(result2 == .integer);
     try testing.expect(result2.integer == 2);
@@ -476,7 +488,7 @@ test "filter round with precision" {
     const input = value.Value{ .float = 2.1234 };
     const precision_arg = value.Value{ .integer = 3 };
     var args = [_]value.Value{precision_arg};
-    var result = try filters.BuiltinFilters.round(allocator, input, &args, null, null);
+    var result = try callFilter(filters.BuiltinFilters.round, allocator, input, &args);
     defer result.deinit(allocator);
     try testing.expect(result == .float);
     // Should be 2.123
@@ -495,7 +507,7 @@ test "filter wordcount" {
     var input = value.Value{ .string = try allocator.dupe(u8, "foo bar baz") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.wordcount(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.wordcount, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .integer);
@@ -516,7 +528,7 @@ test "filter center" {
 
     const width_arg = value.Value{ .integer = 9 };
     var args = [_]value.Value{width_arg};
-    var result = try filters.BuiltinFilters.center(allocator, input, &args, null, null);
+    var result = try callFilter(filters.BuiltinFilters.center, allocator, input, &args);
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -538,7 +550,7 @@ test "filter truncate" {
     const length_arg = value.Value{ .integer = 7 };
     const killwords_arg = value.Value{ .boolean = true };
     var args = [_]value.Value{ length_arg, killwords_arg };
-    var result = try filters.BuiltinFilters.truncate(allocator, input, &args, null, null);
+    var result = try callFilter(filters.BuiltinFilters.truncate, allocator, input, &args);
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -557,7 +569,7 @@ test "filter striptags" {
     var input = value.Value{ .string = try allocator.dupe(u8, "<p>Hello <b>world</b></p>") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.striptags(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.striptags, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -576,7 +588,7 @@ test "filter int from string" {
     var input = value.Value{ .string = try allocator.dupe(u8, "42") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.int(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.int, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .integer);
@@ -590,7 +602,7 @@ test "filter int from float" {
 
     const input = value.Value{ .float = 32.32 };
 
-    var result = try filters.BuiltinFilters.int(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.int, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .integer);
@@ -605,7 +617,7 @@ test "filter float from string" {
     var input = value.Value{ .string = try allocator.dupe(u8, "32.32") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.float(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.float, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .float);
@@ -619,7 +631,7 @@ test "filter float from integer" {
 
     const input = value.Value{ .integer = 42 };
 
-    var result = try filters.BuiltinFilters.float(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.float, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .float);
@@ -638,7 +650,7 @@ test "filter reverse unicode string" {
     var input = value.Value{ .string = try allocator.dupe(u8, "abc") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.reverse(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.reverse, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -665,7 +677,7 @@ test "filter batch" {
     const list_val = value.Value{ .list = list };
     const batch_size = value.Value{ .integer = 3 };
     var args = [_]value.Value{batch_size};
-    var result = try filters.BuiltinFilters.batch(allocator, list_val, &args, null, null);
+    var result = try callFilter(filters.BuiltinFilters.batch, allocator, list_val, &args);
     defer result.deinit(allocator);
 
     try testing.expect(result == .list);
@@ -692,7 +704,7 @@ test "filter unique" {
     try list.append(value.Value{ .integer = 2 });
 
     const list_val = value.Value{ .list = list };
-    var result = try filters.BuiltinFilters.unique(allocator, list_val, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.unique, allocator, list_val, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .list);
@@ -716,7 +728,7 @@ test "filter min" {
     try list.append(value.Value{ .integer = 9 });
 
     const list_val = value.Value{ .list = list };
-    const result = try filters.BuiltinFilters.min(allocator, list_val, &[_]value.Value{}, null, null);
+    const result = try callFilter(filters.BuiltinFilters.min, allocator, list_val, &[_]value.Value{});
     // min/max return values from the list, so don't deinit (list owns them)
 
     try testing.expect(result == .integer);
@@ -736,7 +748,7 @@ test "filter max" {
     try list.append(value.Value{ .integer = 9 });
 
     const list_val = value.Value{ .list = list };
-    const result = try filters.BuiltinFilters.max(allocator, list_val, &[_]value.Value{}, null, null);
+    const result = try callFilter(filters.BuiltinFilters.max, allocator, list_val, &[_]value.Value{});
     // min/max return values from the list, so don't deinit (list owns them)
 
     try testing.expect(result == .integer);
@@ -753,7 +765,7 @@ test "filter min with empty list" {
     defer list.deinit(allocator);
 
     const list_val = value.Value{ .list = list };
-    const result = try filters.BuiltinFilters.min(allocator, list_val, &[_]value.Value{}, null, null);
+    const result = try callFilter(filters.BuiltinFilters.min, allocator, list_val, &[_]value.Value{});
 
     // Empty list returns null
     try testing.expect(result == .null);
@@ -769,7 +781,7 @@ test "filter max with empty list" {
     defer list.deinit(allocator);
 
     const list_val = value.Value{ .list = list };
-    const result = try filters.BuiltinFilters.max(allocator, list_val, &[_]value.Value{}, null, null);
+    const result = try callFilter(filters.BuiltinFilters.max, allocator, list_val, &[_]value.Value{});
 
     // Empty list returns null
     try testing.expect(result == .null);
@@ -787,7 +799,7 @@ test "filter mark_safe creates markup" {
     var input = value.Value{ .string = try allocator.dupe(u8, "<b>bold</b>") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.mark_safe(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.mark_safe, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .markup);
@@ -805,7 +817,7 @@ test "filter mark_unsafe converts markup to string" {
     const markup_val = value.Value{ .markup = &markup };
 
     // Test that mark_unsafe converts to string
-    var result = try filters.BuiltinFilters.mark_unsafe(allocator, markup_val, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.mark_unsafe, allocator, markup_val, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -820,7 +832,7 @@ test "filter mark_unsafe with plain string" {
     var input = value.Value{ .string = try allocator.dupe(u8, "hello") };
     defer input.deinit(allocator);
 
-    var result = try filters.BuiltinFilters.mark_unsafe(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.mark_unsafe, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -834,7 +846,7 @@ test "filter mark_unsafe with integer" {
 
     const input = value.Value{ .integer = 42 };
 
-    var result = try filters.BuiltinFilters.mark_unsafe(allocator, input, &[_]value.Value{}, null, null);
+    var result = try callFilter(filters.BuiltinFilters.mark_unsafe, allocator, input, &[_]value.Value{});
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -865,7 +877,9 @@ test "filter alias d for default" {
 
     const d_filter = env.getFilter("d").?;
     var args = [_]value.Value{default_val};
-    var result = try d_filter.func(allocator, empty_input, &args, null, &env);
+    var empty_kwargs = std.StringHashMap(value.Value).init(allocator);
+    defer empty_kwargs.deinit();
+    var result = try d_filter.func(allocator, empty_input, &args, &empty_kwargs, null, &env);
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);
@@ -888,7 +902,9 @@ test "filter alias e for escape" {
     defer input.deinit(allocator);
 
     const e_filter = env.getFilter("e").?;
-    var result = try e_filter.func(allocator, input, &[_]value.Value{}, null, &env);
+    var empty_kwargs = std.StringHashMap(value.Value).init(allocator);
+    defer empty_kwargs.deinit();
+    var result = try e_filter.func(allocator, input, &[_]value.Value{}, &empty_kwargs, null, &env);
     defer result.deinit(allocator);
 
     try testing.expect(result == .string);

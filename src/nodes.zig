@@ -1111,10 +1111,14 @@ pub const CallBlock = struct {
 };
 
 /// Set statement (variable assignment)
+/// Supports both simple assignment ({% set x = val %}) and namespace attribute
+/// assignment ({% set ns.attr = val %}) for Jinja2 namespace() compatibility.
 pub const Set = struct {
     base: Stmt,
-    /// Variable name
+    /// Variable name (for simple) or namespace name (for namespace attr)
     name: []const u8,
+    /// Optional attribute name for namespace attribute assignment (e.g., "found" in ns.found)
+    target_attr: ?[]const u8,
     /// Value expression
     value: Expression,
     /// Body statements (for set block variant)
@@ -1133,6 +1137,25 @@ pub const Set = struct {
                 .tag = .set,
             },
             .name = try allocator.dupe(u8, name),
+            .target_attr = null,
+            .value = value,
+            .body = null,
+        };
+    }
+
+    /// Initialize with namespace attribute target (e.g., {% set ns.attr = val %})
+    pub fn initWithAttr(allocator: std.mem.Allocator, name: []const u8, attr: []const u8, value: Expression, lineno: usize, filename: ?[]const u8) !Self {
+        return Self{
+            .base = Stmt{
+                .base = Node{
+                    .lineno = lineno,
+                    .filename = filename,
+                    .environment = null,
+                },
+                .tag = .set,
+            },
+            .name = try allocator.dupe(u8, name),
+            .target_attr = try allocator.dupe(u8, attr),
             .value = value,
             .body = null,
         };
@@ -1140,6 +1163,9 @@ pub const Set = struct {
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
+        if (self.target_attr) |attr| {
+            allocator.free(attr);
+        }
         self.value.deinit(allocator);
         if (self.body) |*body| {
             for (body.items) |stmt| {
@@ -1325,14 +1351,82 @@ pub const StringLiteral = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, val: []const u8, lineno: usize, filename: ?[]const u8) !Self {
+        // Process escape sequences in the string
+        const unescaped = try unescapeString(allocator, val);
         return Self{
             .base = Node{
                 .lineno = lineno,
                 .filename = filename,
                 .environment = null,
             },
-            .value = try allocator.dupe(u8, val),
+            .value = unescaped,
         };
+    }
+
+    /// Process escape sequences in a string literal
+    fn unescapeString(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+        // Quick check: if no backslashes, return as-is
+        var has_backslash = false;
+        for (input) |c| {
+            if (c == '\\') {
+                has_backslash = true;
+                break;
+            }
+        }
+        if (!has_backslash) {
+            return try allocator.dupe(u8, input);
+        }
+
+        // Process escape sequences
+        var result = try std.ArrayList(u8).initCapacity(allocator, input.len);
+        errdefer result.deinit(allocator);
+
+        var i: usize = 0;
+        while (i < input.len) {
+            if (input[i] == '\\' and i + 1 < input.len) {
+                const next = input[i + 1];
+                switch (next) {
+                    'n' => {
+                        try result.append(allocator, '\n');
+                        i += 2;
+                    },
+                    'r' => {
+                        try result.append(allocator, '\r');
+                        i += 2;
+                    },
+                    't' => {
+                        try result.append(allocator, '\t');
+                        i += 2;
+                    },
+                    '\\' => {
+                        try result.append(allocator, '\\');
+                        i += 2;
+                    },
+                    '\'' => {
+                        try result.append(allocator, '\'');
+                        i += 2;
+                    },
+                    '"' => {
+                        try result.append(allocator, '"');
+                        i += 2;
+                    },
+                    '0' => {
+                        try result.append(allocator, 0);
+                        i += 2;
+                    },
+                    else => {
+                        // Unknown escape sequence - keep as is
+                        try result.append(allocator, input[i]);
+                        i += 1;
+                    },
+                }
+            } else {
+                try result.append(allocator, input[i]);
+                i += 1;
+            }
+        }
+
+        return try result.toOwnedSlice(allocator);
     }
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
@@ -1536,10 +1630,22 @@ pub const FilterExpr = struct {
     node: Expression,
     /// Filter name
     name: []const u8,
-    /// Filter arguments
+    /// Filter positional arguments
     args: std.ArrayList(Expression),
+    /// Filter keyword arguments (kwargs)
+    kwargs: std.StringHashMap(Expression),
 
     const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, node: Expression, name: []const u8, lineno: usize, filename: ?[]const u8) !Self {
+        return Self{
+            .base = Node.init(.filter_expr, lineno, filename, null),
+            .node = node,
+            .name = name,
+            .args = std.ArrayList(Expression).init(allocator),
+            .kwargs = std.StringHashMap(Expression).init(allocator),
+        };
+    }
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         self.node.deinit(allocator);
@@ -1548,6 +1654,13 @@ pub const FilterExpr = struct {
             arg.deinit(allocator);
         }
         self.args.deinit(allocator);
+        // Free kwargs keys and deinit expression values
+        var iter = self.kwargs.iterator();
+        while (iter.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+            entry.value_ptr.*.deinit(allocator);
+        }
+        self.kwargs.deinit();
     }
 };
 
@@ -2240,11 +2353,27 @@ pub const Expression = union(enum) {
             try filter_args.append(allocator, arg_val);
         }
 
+        // Evaluate kwargs
+        var filter_kwargs = std.StringHashMap(value_mod.Value).init(allocator);
+        defer {
+            var iter = filter_kwargs.iterator();
+            while (iter.next()) |entry| {
+                entry.value_ptr.*.deinit(allocator);
+            }
+            filter_kwargs.deinit();
+        }
+        var kwarg_iter = node.kwargs.iterator();
+        while (kwarg_iter.next()) |entry| {
+            const kwarg_val = try entry.value_ptr.*.eval(ctx, allocator);
+            try filter_kwargs.put(entry.key_ptr.*, kwarg_val);
+        }
+
         // Apply filter
         const filtered_value = try filter.func(
             allocator,
             base_val,
             filter_args.items,
+            &filter_kwargs,
             ctx,
             env,
         );

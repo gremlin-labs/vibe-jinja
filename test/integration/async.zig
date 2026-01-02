@@ -388,8 +388,9 @@ test "environment - add async filter" {
 
     // Define a simple async filter (same as sync for testing)
     const asyncUpperFilter = struct {
-        fn filter(alloc: std.mem.Allocator, val: context.Value, args: []context.Value, ctx: ?*context.Context, e: ?*environment.Environment) !context.Value {
+        fn filter(alloc: std.mem.Allocator, val: context.Value, args: []context.Value, kwargs: *const std.StringHashMap(context.Value), ctx: ?*context.Context, e: ?*environment.Environment) !context.Value {
             _ = args;
+            _ = kwargs;
             _ = ctx;
             _ = e;
 

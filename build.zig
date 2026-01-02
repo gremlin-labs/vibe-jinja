@@ -260,6 +260,18 @@ pub fn build(b: *std.Build) void {
     });
     const run_async_tests = b.addRunArtifact(async_tests);
     
+    // Add filters integration test module
+    const filters_integration_test_module = b.addModule("filters_integration_test", .{
+        .root_source_file = b.path("test/integration/filters.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    filters_integration_test_module.addImport("vibe_jinja", root_module);
+    const filters_integration_tests = b.addTest(.{
+        .root_module = filters_integration_test_module,
+    });
+    const run_filters_integration_tests = b.addRunArtifact(filters_integration_tests);
+    
     // Add unit test modules
     const utils_test_module = b.addModule("utils_test", .{
         .root_source_file = b.path("test/unit/utils.zig"),
@@ -343,7 +355,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_test_expressions_tests.step);
     test_step.dependOn(&run_control_flow_unit_tests.step);
     test_step.dependOn(&run_control_flow_tests.step);
-    // DISABLED: test_step.dependOn(&run_macros_tests.step); // TODO: Fix "macro caller variable" test
+    test_step.dependOn(&run_macros_tests.step);
     test_step.dependOn(&run_set_with_tests.step);
     test_step.dependOn(&run_filter_block_tests.step);
     test_step.dependOn(&run_raw_blocks_tests.step);
@@ -379,13 +391,14 @@ pub fn build(b: *std.Build) void {
     
     const integration_test_step = b.step("test:integration", "Run integration tests only");
     integration_test_step.dependOn(&run_control_flow_tests.step);
-    // DISABLED: integration_test_step.dependOn(&run_macros_tests.step); // TODO: Fix "macro caller variable" test
+    integration_test_step.dependOn(&run_macros_tests.step);
     integration_test_step.dependOn(&run_set_with_tests.step);
     integration_test_step.dependOn(&run_filter_block_tests.step);
     integration_test_step.dependOn(&run_raw_blocks_tests.step);
     integration_test_step.dependOn(&run_autoescape_tests.step);
     integration_test_step.dependOn(&run_regression_tests.step);
     integration_test_step.dependOn(&run_async_tests.step);
+    integration_test_step.dependOn(&run_filters_integration_tests.step);
     
     // Individual integration test steps (for debugging)
     const control_flow_step = b.step("test:control_flow", "Run control flow integration tests");
@@ -402,6 +415,38 @@ pub fn build(b: *std.Build) void {
     autoescape_step.dependOn(&run_autoescape_tests.step);
     const regression_step = b.step("test:regression", "Run regression integration tests");
     regression_step.dependOn(&run_regression_tests.step);
+    const filters_integration_step = b.step("test:filters", "Run filters integration tests");
+    filters_integration_step.dependOn(&run_filters_integration_tests.step);
+    
+    // HuggingFace compatibility tests (Llama 3.2, etc.)
+    const huggingface_test_module = b.addModule("huggingface_test", .{
+        .root_source_file = b.path("test/integration/huggingface_compat.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    huggingface_test_module.addImport("vibe_jinja", root_module);
+    const huggingface_tests = b.addTest(.{
+        .root_module = huggingface_test_module,
+    });
+    const run_huggingface_tests = b.addRunArtifact(huggingface_tests);
+    const huggingface_step = b.step("test:huggingface", "Run HuggingFace compatibility tests");
+    huggingface_step.dependOn(&run_huggingface_tests.step);
+    integration_test_step.dependOn(&run_huggingface_tests.step);
+
+    // Production template tests (real HuggingFace templates)
+    const production_test_module = b.addModule("production_test", .{
+        .root_source_file = b.path("test/integration/production_templates.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    production_test_module.addImport("vibe_jinja", root_module);
+    const production_tests = b.addTest(.{
+        .root_module = production_test_module,
+    });
+    const run_production_tests = b.addRunArtifact(production_tests);
+    const production_step = b.step("test:production", "Run production HuggingFace template tests");
+    production_step.dependOn(&run_production_tests.step);
+    integration_test_step.dependOn(&run_production_tests.step);
     
     // Slice and globals tests (new feature tests)
     const slice_globals_test_module = b.addModule("slice_globals_test", .{

@@ -61,6 +61,8 @@ pub const Context = struct {
     owns_vars: bool,
     /// Keys that this context allocated (via set()) and needs to free
     owned_keys: std.StringHashMap(void),
+    /// Render options (timeout, debug tracing) - set during renderWithOptions
+    render_options: environment.RenderOptions = .{},
 
     const Self = @This();
 

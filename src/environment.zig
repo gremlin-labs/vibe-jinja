@@ -17,6 +17,17 @@ const utils = @import("utils.zig");
 /// Re-export Value type for convenience
 pub const Value = value_mod.Value;
 
+/// Render options for template execution with debugging support
+/// Used by renderWithOptions() for timeout enforcement and debug tracing
+pub const RenderOptions = struct {
+    /// Execution timeout in milliseconds (null = no timeout)
+    /// If set, rendering will fail with TimeoutError if it exceeds this duration
+    timeout_ms: ?u64 = null,
+    /// Enable debug tracing for filter/test execution
+    /// When true, logs entry/exit and timing for each filter/test call
+    debug_trace: bool = false,
+};
+
 /// Re-export cache types for convenience
 pub const TemplateCacheEntry = cache_mod.TemplateCacheEntry;
 pub const LRUCache = cache_mod.LRUCache;
@@ -393,6 +404,13 @@ pub const Environment = struct {
         const raise_callable = try self.allocator.create(value_mod.Callable);
         raise_callable.* = value_mod.Callable.initWithFunc(raise_name, utils.raiseExceptionGlobal, false);
         try self.addGlobal("raise_exception", Value{ .callable = raise_callable });
+
+        // strftime_now(format_string) - Format current date/time (HuggingFace template compatibility)
+        const strftime_name = try self.allocator.dupe(u8, "strftime_now");
+        errdefer self.allocator.free(strftime_name);
+        const strftime_callable = try self.allocator.create(value_mod.Callable);
+        strftime_callable.* = value_mod.Callable.initWithFunc(strftime_name, utils.strftimeNowGlobal, false);
+        try self.addGlobal("strftime_now", Value{ .callable = strftime_callable });
     }
 
     /// Deinitialize the environment and free allocated memory

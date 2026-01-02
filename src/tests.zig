@@ -221,20 +221,30 @@ pub inline fn getBuiltinTest(name: []const u8) ?TestFn {
 
 /// Built-in tests
 pub const BuiltinTests = struct {
-    /// Check if value is defined (not empty)
+    /// Check if value is defined (not the undefined type)
+    /// In Jinja2, `is defined` checks whether a variable exists, not whether it's truthy
+    /// A value of `false`, `0`, `""`, or `null` is still "defined"
     pub fn defined(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
         _ = args;
         _ = ctx;
         _ = env;
-        return val.length() > 0 and (val.isTruthy() catch false);
+        // A value is defined if it's not the undefined type
+        return switch (val) {
+            .undefined => false,
+            else => true,
+        };
     }
 
-    /// Check if value is undefined (empty)
+    /// Check if value is undefined
+    /// Returns true only for undefined variables
     pub fn @"undefined"(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
         _ = args;
         _ = ctx;
         _ = env;
-        return val.length() == 0 or !(val.isTruthy() catch false);
+        return switch (val) {
+            .undefined => true,
+            else => false,
+        };
     }
 
     /// Check if value equals another value
