@@ -8,6 +8,8 @@ Vibe Jinja is a complete implementation of the Jinja2 templating language in Zig
 
 This project brings the power and flexibility of Jinja2's template engine to the Zig ecosystem, enabling developers to use familiar Jinja syntax in high-performance Zig applications. Whether you're building web applications, code generators, or configuration management tools, Vibe Jinja provides a robust templating solution with zero runtime dependencies.
 
+We built vibe-jinja as a core component of our AI IDE, [Vibe Mode](https://vibemode.ai) - more details at [vibemode.ai](https://vibemode.ai).
+
 ## 🏆 Performance Parity with Python Jinja2
 
 vibe-jinja has achieved **full performance parity** with Python Jinja2:
