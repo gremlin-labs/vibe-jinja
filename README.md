@@ -1,5 +1,7 @@
 # Vibe Jinja
 
+![Vibe Jinja - A Jinja2 implementation in pure Zig](public/gremlinlabs-vibe-jinja.jpg)
+
 **A high-performance Jinja2-compatible templating engine for Zig**
 
 Vibe Jinja is a complete implementation of the Jinja2 templating language in Zig, designed for performance, safety, and full feature parity with the Python reference implementation. Built with Zig 0.15.2, it provides a type-safe, memory-safe alternative to Jinja2 while maintaining full template compatibility.

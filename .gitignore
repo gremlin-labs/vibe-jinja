@@ -1,4 +1,25 @@
+# Zig build artifacts
 .zig-cache
 zig-out
+
+# Reference implementations (for development)
 references
+
+# Generated documentation
 docs
+
+# Environment and secrets
+.env
+.env.*
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
