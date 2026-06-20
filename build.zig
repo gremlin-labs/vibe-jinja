@@ -19,6 +19,18 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 
+    const chat_template_cli_module = b.addModule("chat_template_cli", .{
+        .root_source_file = b.path("src/chat_template_cli.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    chat_template_cli_module.addImport("vibe_jinja", root_module);
+    const chat_template_cli = b.addExecutable(.{
+        .name = "vibe-jinja-render-chat-template",
+        .root_module = chat_template_cli_module,
+    });
+    b.installArtifact(chat_template_cli);
+
     const lib_unit_tests = b.addTest(.{
         .root_module = root_module,
     });
