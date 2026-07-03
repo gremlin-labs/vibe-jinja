@@ -13,11 +13,71 @@
 
 const std = @import("std");
 
+/// Maximum arena capacity retained between renders by the thread-local cache.
+/// A pathologically large render frees back down to this on release.
+const max_retained_bytes: usize = 1 * 1024 * 1024;
+
+/// Thread-local cached arena reused across render() calls. Backed by
+/// page_allocator (caller-independent, invisible to leak-checking test
+/// allocators); chunks are retained between renders so steady-state renders
+/// never touch a backing allocator except for the returned result string.
+threadlocal var cached_arena: ?std.heap.ArenaAllocator = null;
+threadlocal var cached_in_use: bool = false;
+
+/// A per-render arena scope. Obtain with `acquire`, free with `release`.
+/// Not copyable while in use (the Allocator interface points into it).
+pub const ScopedArena = struct {
+    ptr: *std.heap.ArenaAllocator,
+    from_cache: bool,
+    backing: std.mem.Allocator,
+
+    pub fn allocator(self: *const ScopedArena) std.mem.Allocator {
+        return self.ptr.allocator();
+    }
+
+    pub fn release(self: *ScopedArena) void {
+        if (self.from_cache) {
+            _ = self.ptr.reset(.{ .retain_with_limit = max_retained_bytes });
+            cached_in_use = false;
+        } else {
+            self.ptr.deinit();
+            self.backing.destroy(self.ptr);
+        }
+    }
+};
+
+/// Acquire the thread-local render arena. If a render is already live on this
+/// thread (reentrant render, e.g. an extension rendering a template
+/// mid-render), falls back to a fresh arena on the caller's allocator so the
+/// cached arena is never corrupted.
+pub fn acquire(backing: std.mem.Allocator) !ScopedArena {
+    if (!cached_in_use) {
+        if (cached_arena == null) {
+            cached_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        }
+        cached_in_use = true;
+        return .{ .ptr = &cached_arena.?, .from_cache = true, .backing = backing };
+    }
+    const ptr = try backing.create(std.heap.ArenaAllocator);
+    ptr.* = std.heap.ArenaAllocator.init(backing);
+    return .{ .ptr = ptr, .from_cache = false, .backing = backing };
+}
+
+/// Free the thread-local cached arena. Optional — the cache is retained for
+/// the thread's lifetime by design; call from tests or leak-sensitive hosts.
+pub fn deinitThreadArena() void {
+    if (cached_arena) |*a| {
+        std.debug.assert(!cached_in_use);
+        a.deinit();
+        cached_arena = null;
+    }
+}
+
 /// Arena allocator wrapper for render operations
 pub const RenderArena = struct {
     arena: std.heap.ArenaAllocator,
 
-    /// Pre-allocated output buffer to reduce reallocations
+    /// Output buffer (allocated on demand from the arena)
     output_buffer: std.ArrayList(u8),
 
     /// Statistics for diagnostics
@@ -30,18 +90,14 @@ pub const RenderArena = struct {
 
     const Self = @This();
 
-    /// Initialize with estimated output size for pre-allocation
+    /// Initialize. `estimated_output_size` is retained for API compatibility
+    /// but no longer forces an eager backing-allocator chunk allocation — the
+    /// output buffer grows on demand from the arena.
     pub fn init(backing: std.mem.Allocator, estimated_output_size: usize) Self {
-        var arena = std.heap.ArenaAllocator.init(backing);
-        const arena_alloc = arena.allocator();
-
-        // Pre-allocate output buffer with estimated size
-        const output = std.ArrayList(u8).initCapacity(arena_alloc, estimated_output_size) catch
-            std.ArrayList(u8){};
-
+        _ = estimated_output_size;
         return Self{
-            .arena = arena,
-            .output_buffer = output,
+            .arena = std.heap.ArenaAllocator.init(backing),
+            .output_buffer = std.ArrayList(u8){},
         };
     }
 

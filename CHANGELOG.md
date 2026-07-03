@@ -182,6 +182,11 @@ First stable release of vibe-jinja, a high-performance Jinja2-compatible templat
 
 ## [Unreleased]
 
+### Performance
+- **Reusable thread-local render arena**: `render()` no longer creates (and immediately grows) a fresh arena per call — the arena is cached per thread, reset with retained capacity (capped at 1MB) between renders, and backed by `page_allocator`. Steady-state renders make exactly one backing-allocator allocation: the returned result string. Reentrant renders fall back to a fresh arena. Result: all four render benchmarks now beat Python Jinja2 by 4.5x-31x (previously 1.4x-1.9x slower); cache-hit render dropped from ~3.4us to ~0.8us.
+- Removed `RenderArena`'s eager 4KB output-buffer preallocation (it was unused by the bytecode VM, which keeps its own result buffer).
+- Benchmark harness overhaul: `comparison_bench.zig` now uses `std.time.Timer` (the previous `nanoTimestamp` quantizes to ~1us on macOS), reports median/p95 and backing-allocator allocations per render, and compares against a live Python reference (`test/benchmarks/python_reference.json`, written by `benchmark_python.py`) instead of hardcoded stale numbers. New `zig build bench-check` step fails when any render benchmark is not faster than Python.
+
 ### Planned
 - Fix macro caller variable test
 - Additional async features

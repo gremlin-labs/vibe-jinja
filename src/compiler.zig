@@ -242,13 +242,12 @@ pub const CompiledTemplate = struct {
     /// Render the template with given context
     /// Uses arena allocation for all intermediate memory, only final result uses caller's allocator
     pub fn render(self: *Self, ctx: *context.Context, allocator: std.mem.Allocator) ![]const u8 {
-        // Phase 2 optimization: Use arena for all intermediate allocations
-        // Estimate output size (conservative: 4KB default)
-        const estimated_size: usize = 4096;
-        var arena = render_arena.RenderArena.init(allocator, estimated_size);
-        defer arena.deinit();
+        // Reuse the thread-local arena across renders: steady-state renders
+        // touch the backing allocator only for the returned result string.
+        var scoped = try render_arena.acquire(allocator);
+        defer scoped.release();
 
-        const arena_alloc = arena.allocator();
+        const arena_alloc = scoped.allocator();
 
         // Use bytecode if available, otherwise use AST interpretation
         const result = if (self.bytecode) |*bc| blk: {
@@ -294,12 +293,11 @@ pub const CompiledTemplate = struct {
             return error.AsyncNotEnabled;
         }
 
-        // Phase 2 optimization: Use arena for all intermediate allocations
-        const estimated_size: usize = 4096;
-        var arena = render_arena.RenderArena.init(allocator, estimated_size);
-        defer arena.deinit();
+        // Reuse the thread-local arena across renders (see render()).
+        var scoped = try render_arena.acquire(allocator);
+        defer scoped.release();
 
-        const arena_alloc = arena.allocator();
+        const arena_alloc = scoped.allocator();
 
         // Always use AST interpretation for async - bytecode async executor is incomplete
         // (doesn't support filters, complex expressions, etc.)
@@ -362,12 +360,11 @@ pub const CompiledTemplate = struct {
             std.debug.print("[RENDER] START template={s}\n", .{self.template.base.filename orelse "<string>"});
         }
 
-        // Phase 2 optimization: Use arena for all intermediate allocations
-        const estimated_size: usize = 4096;
-        var arena = render_arena.RenderArena.init(allocator, estimated_size);
-        defer arena.deinit();
+        // Reuse the thread-local arena across renders (see render()).
+        var scoped = try render_arena.acquire(allocator);
+        defer scoped.release();
 
-        const arena_alloc = arena.allocator();
+        const arena_alloc = scoped.allocator();
 
         // Check timeout before starting
         if (options.timeout_ms) |timeout| {

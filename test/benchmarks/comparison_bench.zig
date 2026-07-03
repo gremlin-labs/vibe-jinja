@@ -139,10 +139,41 @@ fn printStats(stats: BenchStats, ref: ?PythonRef) void {
     std.debug.print("\n", .{});
 }
 
+/// In --check mode a render benchmark fails the gate when the Zig average or
+/// median is not strictly below the Python reference for that benchmark.
+const CheckOutcome = struct {
+    failures: usize = 0,
+    compared: usize = 0,
+
+    fn judge(self: *CheckOutcome, name: []const u8, stats: BenchStats, ref: ?PythonRef) void {
+        const r = ref orelse {
+            std.debug.print("  CHECK SKIP {s}: no Python reference\n", .{name});
+            return;
+        };
+        self.compared += 1;
+        const avg_ok = @as(f64, @floatFromInt(stats.avg_ns)) < r.avg_ns;
+        const median_ok = r.median_ns == 0 or @as(f64, @floatFromInt(stats.median_ns)) < r.median_ns;
+        if (!(avg_ok and median_ok)) {
+            self.failures += 1;
+            std.debug.print("  CHECK FAIL {s}: zig avg {d}ns median {d}ns vs python avg {d:.0}ns median {d:.0}ns\n", .{ name, stats.avg_ns, stats.median_ns, r.avg_ns, r.median_ns });
+        }
+    }
+};
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+
+    var check_mode = false;
+    {
+        const args = try std.process.argsAlloc(allocator);
+        defer std.process.argsFree(allocator, args);
+        for (args[1..]) |arg| {
+            if (std.mem.eql(u8, arg, "--check")) check_mode = true;
+        }
+    }
+    var check = CheckOutcome{};
 
     std.debug.print("\n", .{});
     std.debug.print("╔═══════════════════════════════════════════════════════════════════╗\n", .{});
@@ -174,6 +205,7 @@ pub fn main() !void {
 
         const stats = try benchRender(&compiled, &ctx, allocator, 10_000, 200);
         printStats(stats, refs.simple_template);
+        check.judge("Simple Template", stats, refs.simple_template);
     }
 
     // === Loop Template ===
@@ -203,6 +235,7 @@ pub fn main() !void {
 
         const stats = try benchRender(&compiled, &ctx, allocator, 5_000, 200);
         printStats(stats, refs.loop_template);
+        check.judge("Loop Template", stats, refs.loop_template);
     }
 
     // === Conditional Template ===
@@ -224,6 +257,7 @@ pub fn main() !void {
 
         const stats = try benchRender(&compiled, &ctx, allocator, 10_000, 200);
         printStats(stats, refs.conditional);
+        check.judge("Conditional", stats, refs.conditional);
     }
 
     // === Filter Chain ===
@@ -247,6 +281,7 @@ pub fn main() !void {
 
         const stats = try benchRender(&compiled, &ctx, allocator, 5_000, 200);
         printStats(stats, refs.filter_chain);
+        check.judge("Filter Chain", stats, refs.filter_chain);
     }
 
     // Run filter fast path benchmarks
@@ -255,6 +290,18 @@ pub fn main() !void {
     std.debug.print("═══════════════════════════════════════════════════════════════════\n", .{});
     std.debug.print("Note: Python reference from {s} (regenerate with benchmark_python.py)\n", .{reference_path});
     std.debug.print("═══════════════════════════════════════════════════════════════════\n", .{});
+
+    if (check_mode) {
+        if (check.compared < 4) {
+            std.debug.print("CHECK FAIL: only {d}/4 benchmarks had Python references (run benchmark_python.py)\n", .{check.compared});
+            std.process.exit(1);
+        }
+        if (check.failures > 0) {
+            std.debug.print("CHECK FAIL: {d} benchmark(s) not faster than Python\n", .{check.failures});
+            std.process.exit(1);
+        }
+        std.debug.print("CHECK OK: all {d} render benchmarks faster than Python\n", .{check.compared});
+    }
 }
 
 // === Additional Filter Benchmarks ===
