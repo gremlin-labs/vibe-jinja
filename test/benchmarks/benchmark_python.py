@@ -6,16 +6,25 @@ Compare against vibe-jinja (Zig) implementation
 Run: python3 test/benchmarks/benchmark_python.py
 """
 
+import json
+import os
+import platform
 import time
 import statistics
+from datetime import datetime, timezone
 from jinja2 import Environment, DictLoader
 
-def benchmark(name, func, iterations=1000, warmup=10):
+# Machine-readable results, written to python_reference.json for the Zig
+# comparison benchmark (test/benchmarks/comparison_bench.zig) to read.
+RESULTS = {}
+REFERENCE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python_reference.json")
+
+def benchmark(name, func, iterations=1000, warmup=10, key=None):
     """Run a benchmark and collect timing statistics."""
     # Warmup
     for _ in range(warmup):
         func()
-    
+
     # Collect samples
     samples = []
     for _ in range(iterations):
@@ -23,7 +32,7 @@ def benchmark(name, func, iterations=1000, warmup=10):
         func()
         elapsed = time.perf_counter_ns() - start
         samples.append(elapsed)
-    
+
     samples.sort()
     total = sum(samples)
     avg = total / len(samples)
@@ -32,7 +41,7 @@ def benchmark(name, func, iterations=1000, warmup=10):
     median = samples[len(samples) // 2]
     p95 = samples[int(len(samples) * 0.95)]
     ops_per_sec = 1_000_000_000 / avg if avg > 0 else 0
-    
+
     print(f"  {name}:")
     print(f"    Iterations: {iterations}")
     print(f"    Total time: {total // 1_000_000}ms")
@@ -40,8 +49,27 @@ def benchmark(name, func, iterations=1000, warmup=10):
     print(f"    Median: {median}ns | P95: {p95}ns")
     print(f"    Throughput: {ops_per_sec:.0f} ops/sec")
     print()
-    
+
+    if key is not None:
+        RESULTS[key] = {
+            "avg_ns": round(avg),
+            "median_ns": median,
+            "min_ns": min_val,
+        }
     return avg
+
+def write_reference():
+    """Write machine-readable reference results next to this script."""
+    payload = dict(RESULTS)
+    payload["_meta"] = {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "python": platform.python_version(),
+        "machine": platform.machine(),
+    }
+    with open(REFERENCE_PATH, "w") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+        f.write("\n")
+    print(f"  Wrote {REFERENCE_PATH}")
 
 def main():
     print("╔═══════════════════════════════════════════════════════════╗")
@@ -61,20 +89,20 @@ def main():
     simple_template = env.from_string("Hello {{ name }}!")
     def bench_simple():
         return simple_template.render(name="World")
-    benchmark("Simple Template", bench_simple, iterations=1000)
+    benchmark("Simple Template", bench_simple, iterations=1000, key="simple_template")
     
     # Loop Template
     loop_template = env.from_string("{% for item in items %}{{ item }}{% endfor %}")
     items = list(range(10))
     def bench_loop():
         return loop_template.render(items=items)
-    benchmark("Loop Template", bench_loop, iterations=100)
+    benchmark("Loop Template", bench_loop, iterations=100, key="loop_template")
     
     # Conditional Template
     cond_template = env.from_string("{% if condition %}True{% else %}False{% endif %}")
     def bench_conditional():
         return cond_template.render(condition=True)
-    benchmark("Conditional Template", bench_conditional, iterations=1000)
+    benchmark("Conditional Template", bench_conditional, iterations=1000, key="conditional")
     
     # Nested Conditionals
     nested_template = env.from_string("{% if a %}{% if b %}nested{% endif %}{% endif %}")
@@ -89,7 +117,7 @@ def main():
     filter_template = env.from_string("{{ text|upper|lower|trim|length }}")
     def bench_filters():
         return filter_template.render(text="  Hello World  ")
-    benchmark("Filter Chain", bench_filters, iterations=500)
+    benchmark("Filter Chain", bench_filters, iterations=500, key="filter_chain")
     
     # Individual filter lookup (approximate - Python doesn't expose this directly)
     def bench_filter_lookup():
@@ -155,6 +183,8 @@ def main():
     print(f"    Speedup: {speedup:.2f}x")
     print()
     
+    write_reference()
+    print()
     print("═══════════════════════════════════════════════════════════")
     print("  Benchmarks complete")
     print("═══════════════════════════════════════════════════════════")

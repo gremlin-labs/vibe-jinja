@@ -523,6 +523,8 @@ pub fn build(b: *std.Build) void {
     });
     comparison_bench.linkLibC();
     const run_comparison_bench = b.addRunArtifact(comparison_bench);
+    // The bench reads test/benchmarks/python_reference.json relative to the repo root.
+    run_comparison_bench.setCwd(b.path("."));
     const comparison_bench_step = b.step("bench-compare", "Run comparison benchmarks vs Python Jinja2");
     comparison_bench_step.dependOn(&run_comparison_bench.step);
 

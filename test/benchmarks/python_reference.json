@@ -1,0 +1,27 @@
+{
+  "_meta": {
+    "generated_at": "2026-07-03T06:08:12+00:00",
+    "machine": "arm64",
+    "python": "3.13.3"
+  },
+  "conditional": {
+    "avg_ns": 4078,
+    "median_ns": 4125,
+    "min_ns": 3208
+  },
+  "filter_chain": {
+    "avg_ns": 4154,
+    "median_ns": 4042,
+    "min_ns": 3416
+  },
+  "loop_template": {
+    "avg_ns": 4818,
+    "median_ns": 4958,
+    "min_ns": 3875
+  },
+  "simple_template": {
+    "avg_ns": 4238,
+    "median_ns": 4208,
+    "min_ns": 3166
+  }
+}
