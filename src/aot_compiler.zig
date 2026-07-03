@@ -5,7 +5,7 @@
 //! eliminating all runtime parsing, bytecode interpretation, and allocation overhead.
 //!
 //! Usage:
-//!   const aot = @import("aot_compiler.zig");
+//!   const aot = @import("vibe_jinja").aot_compiler;
 //!   const code = try aot.compileToZig(allocator, "Hello {{ name }}!", "hello");
 //!   // code contains Zig source that can be written to a file
 //!

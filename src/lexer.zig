@@ -45,7 +45,6 @@
 
 const std = @import("std");
 const defaults = @import("defaults.zig");
-const environment = @import("environment.zig");
 
 /// Token types matching Jinja2
 pub const TokenKind = enum {
@@ -217,8 +216,6 @@ pub const TokenStream = struct {
 
 /// Jinja2-compatible lexer
 pub const Lexer = struct {
-    /// Environment for configuration (optional, uses defaults if null)
-    environment: ?*environment.Environment,
     /// Source code to tokenize
     source: []const u8,
     /// Filename (for error reporting)
@@ -254,9 +251,8 @@ pub const Lexer = struct {
     };
 
     /// Initialize lexer with environment
-    pub fn init(env: *environment.Environment, source: []const u8, filename: ?[]const u8) Self {
+    pub fn init(env: anytype, source: []const u8, filename: ?[]const u8) Self {
         return Self{
-            .environment = env,
             .source = source,
             .filename = filename,
             .cursor = 0,
@@ -277,7 +273,6 @@ pub const Lexer = struct {
     /// Initialize lexer with defaults (backward compatibility)
     pub fn initDefault(source: []const u8, path: []const u8) Self {
         return Self{
-            .environment = null,
             .source = source,
             .filename = if (path.len > 0) path else null,
             .cursor = 0,
@@ -299,6 +294,9 @@ pub const Lexer = struct {
     pub fn tokenize(self: *Self, allocator: std.mem.Allocator) !TokenStream {
         var tokens = std.ArrayList(Token){};
         defer tokens.deinit(allocator);
+        // Rough upper-bound heuristic (about one token per 4 source bytes) to
+        // avoid repeated growth reallocations while tokenizing large templates.
+        try tokens.ensureTotalCapacity(allocator, self.source.len / 4 + 8);
 
         while (self.cursor < self.source.len) {
             const token = try self.nextToken(allocator);

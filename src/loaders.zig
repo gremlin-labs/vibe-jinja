@@ -107,6 +107,7 @@
 //! filename. Provide explicit filenames when possible for better debugging.
 
 const std = @import("std");
+const defaults = @import("defaults.zig");
 const exceptions = @import("exceptions.zig");
 const crypto = std.crypto;
 
@@ -315,7 +316,7 @@ pub const FileSystemLoader = struct {
             defer file.close();
 
             // Read file contents - convert read errors to RuntimeError
-            const contents = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch {
+            const contents = file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES) catch {
                 return exceptions.TemplateError.RuntimeError;
             };
             return contents;
@@ -1022,7 +1023,7 @@ pub const PackageLoader = struct {
         defer file.close();
 
         // Read file contents - convert read errors to runtime errors
-        const contents = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch {
+        const contents = file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES) catch {
             return exceptions.TemplateError.RuntimeError;
         };
         return contents;
@@ -1232,7 +1233,7 @@ pub const ModuleLoader = struct {
             defer file.close();
 
             // Read file contents
-            const contents = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch {
+            const contents = file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES) catch {
                 return exceptions.TemplateError.RuntimeError;
             };
             return contents;

@@ -4,6 +4,7 @@ const vibe_jinja = @import("vibe_jinja");
 const environment = vibe_jinja.environment;
 const runtime = vibe_jinja.runtime;
 const value = vibe_jinja.value;
+const loaders = vibe_jinja.loaders;
 
 // ============================================================================
 // Corner Case Tests (Jinja2 TestCorner)
@@ -231,6 +232,63 @@ test "regression - variable reuse" {
     defer allocator.free(result);
 
     try testing.expectEqualStrings("012", result);
+}
+
+test "regression - include cycle returns runtime error" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var env = environment.Environment.init(allocator);
+    defer env.deinit();
+
+    const main_source = "Before {% include 'main.jinja' %} After";
+
+    var mapping = std.StringHashMap([]const u8).init(allocator);
+    try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
+
+    var loader = loaders.DictLoader.init(allocator, mapping);
+    env.loader = &loader.loader;
+
+    var rt = runtime.Runtime.init(&env, allocator);
+    defer rt.deinit();
+
+    var vars = std.StringHashMap(value.Value).init(allocator);
+    defer vars.deinit();
+
+    try testing.expectError(error.RuntimeError, rt.renderString(main_source, vars, "main.jinja"));
+}
+
+test "regression - inheritance cycle returns runtime error" {
+    const allocator = std.heap.page_allocator;
+
+    var env = environment.Environment.init(allocator);
+    defer env.deinit();
+
+    const parent_source =
+        \\{% extends "child.jinja" %}
+        \\{% block content %}Parent{% endblock %}
+    ;
+
+    const child_source =
+        \\{% extends "parent.jinja" %}
+        \\{% block content %}Child{% endblock %}
+    ;
+
+    var mapping = std.StringHashMap([]const u8).init(allocator);
+    try mapping.put(try allocator.dupe(u8, "parent.jinja"), try allocator.dupe(u8, parent_source));
+    try mapping.put(try allocator.dupe(u8, "child.jinja"), try allocator.dupe(u8, child_source));
+
+    var loader = loaders.DictLoader.init(allocator, mapping);
+    env.loader = &loader.loader;
+
+    var rt = runtime.Runtime.init(&env, allocator);
+    defer rt.deinit();
+
+    var vars = std.StringHashMap(value.Value).init(allocator);
+    defer vars.deinit();
+
+    try testing.expectError(error.RuntimeError, rt.renderString(child_source, vars, "child.jinja"));
 }
 
 // ============================================================================

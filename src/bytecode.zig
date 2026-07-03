@@ -80,8 +80,17 @@ fn normalizeSliceIndex(index: ?i64, length: i64, step: i64, is_start: bool) i64 
     }
 }
 
+/// Value trees are data-driven and can nest arbitrarily; beyond this depth the
+/// hash folds to a sentinel instead of recursing further.
+const max_value_hash_depth: usize = 64;
+
 /// Compute hash for a Value (for loop.changed())
 fn computeValueHashBytecode(val: value_mod.Value) u64 {
+    return computeValueHashBytecodeDepth(val, 0);
+}
+
+fn computeValueHashBytecodeDepth(val: value_mod.Value, depth: usize) u64 {
+    if (depth >= max_value_hash_depth) return 0x9E37_79B9_7F4A_7C15;
     return switch (val) {
         .integer => |i| @as(u64, @bitCast(i)),
         .float => |f| @as(u64, @bitCast(f)),
@@ -92,7 +101,7 @@ fn computeValueHashBytecode(val: value_mod.Value) u64 {
         .list => |l| blk: {
             var h: u64 = 0;
             for (l.items.items) |item| {
-                h = h *% 31 +% computeValueHashBytecode(item);
+                h = h *% 31 +% computeValueHashBytecodeDepth(item, depth + 1);
             }
             break :blk h;
         },
@@ -101,7 +110,7 @@ fn computeValueHashBytecode(val: value_mod.Value) u64 {
             var iter = d.map.iterator();
             while (iter.next()) |entry| {
                 h = h *% 31 +% std.hash.Wyhash.hash(0, entry.key_ptr.*);
-                h = h *% 31 +% computeValueHashBytecode(entry.value_ptr.*);
+                h = h *% 31 +% computeValueHashBytecodeDepth(entry.value_ptr.*, depth + 1);
             }
             break :blk h;
         },
@@ -633,6 +642,7 @@ pub const BytecodeGenerator = struct {
         // Add macro parameters
         for (macro.args.items) |arg| {
             var param = MacroParam{
+                // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: compile-time macro metadata owns parameter names for cached bytecode, not per-render allocation.
                 .name = try self.allocator.dupe(u8, arg.name),
                 .has_default = arg.default_value != null,
                 .default_expr_idx = null,
@@ -1240,12 +1250,15 @@ pub const BytecodeVM = struct {
     current_caller: ?CallerInfo = null,
     /// Macro frame stack for nested macro calls
     macro_frames: std.ArrayList(MacroFrame),
+    /// Recursion depth of evaluateConstantExpr (bounded; see that function)
+    const_eval_depth: usize = 0,
 
     const Self = @This();
     const Value = value_mod.Value;
     const Context = @import("context.zig").Context;
     const Environment = @import("environment.zig").Environment;
     const MAX_LOCALS = 64; // Maximum local variables per scope
+    const MAX_INLINE_ARGS = 8;
 
     /// State for a single loop iteration
     const LoopState = struct {
@@ -1263,6 +1276,98 @@ pub const BytecodeVM = struct {
         return_pc: u32, // PC to return to after macro
         caller: ?CallerInfo, // Caller info if called with {% call %}
     };
+
+    const ArgBuffer = struct {
+        allocator: std.mem.Allocator,
+        inline_items: [MAX_INLINE_ARGS]Value = undefined,
+        heap_items: ?[]Value = null,
+        len: usize = 0,
+
+        fn initFromStack(vm: *Self, count: usize) !ArgBuffer {
+            var buffer = ArgBuffer{
+                .allocator = vm.allocator,
+                .len = count,
+            };
+            const args = if (count <= MAX_INLINE_ARGS)
+                buffer.inline_items[0..count]
+            else blk: {
+                buffer.heap_items = try vm.allocator.alloc(Value, count);
+                break :blk buffer.heap_items.?;
+            };
+
+            var i: usize = count;
+            while (i > 0) {
+                i -= 1;
+                args[i] = vm.stack.pop() orelse Value{ .null = {} };
+            }
+
+            return buffer;
+        }
+
+        fn items(self: *ArgBuffer) []Value {
+            if (self.heap_items) |items_slice| return items_slice;
+            return self.inline_items[0..self.len];
+        }
+
+        fn deinit(self: *ArgBuffer) void {
+            const args = self.items();
+            for (args) |*arg| {
+                arg.deinit(self.allocator);
+            }
+            self.freeStorage();
+        }
+
+        fn freeStorage(self: *ArgBuffer) void {
+            if (self.heap_items) |items_slice| {
+                self.allocator.free(items_slice);
+            }
+        }
+    };
+
+    const BoolBuffer = struct {
+        allocator: std.mem.Allocator,
+        inline_items: [MAX_INLINE_ARGS]bool = undefined,
+        heap_items: ?[]bool = null,
+        len: usize = 0,
+
+        fn init(allocator: std.mem.Allocator, count: usize, default: bool) !BoolBuffer {
+            var buffer = BoolBuffer{
+                .allocator = allocator,
+                .len = count,
+            };
+            const items_slice = if (count <= MAX_INLINE_ARGS)
+                buffer.inline_items[0..count]
+            else blk: {
+                buffer.heap_items = try allocator.alloc(bool, count);
+                break :blk buffer.heap_items.?;
+            };
+            @memset(items_slice, default);
+            return buffer;
+        }
+
+        fn items(self: *BoolBuffer) []bool {
+            if (self.heap_items) |items_slice| return items_slice;
+            return self.inline_items[0..self.len];
+        }
+
+        fn deinit(self: *BoolBuffer) void {
+            if (self.heap_items) |items_slice| {
+                self.allocator.free(items_slice);
+            }
+        }
+    };
+
+    fn createList(self: *Self, capacity: usize) !*value_mod.List {
+        const list = try self.allocator.create(value_mod.List);
+        list.* = value_mod.List.init(self.allocator);
+        errdefer list.deinit(self.allocator);
+
+        if (capacity > 0) {
+            try list.items.ensureTotalCapacity(self.allocator, capacity);
+        }
+
+        return list;
+    }
 
     /// Initialize a new VM
     pub fn init(allocator: std.mem.Allocator, bytecode: *const Bytecode, ctx: *Context) Self {
@@ -1475,18 +1580,9 @@ pub const BytecodeVM = struct {
                     }
 
                     // Pop positional arguments from stack (in reverse order)
-                    var args = try self.allocator.alloc(Value, arg_count);
-                    defer {
-                        for (args) |*arg| {
-                            arg.deinit(self.allocator);
-                        }
-                        self.allocator.free(args);
-                    }
-                    var i: usize = arg_count;
-                    while (i > 0) {
-                        i -= 1;
-                        args[i] = self.stack.pop() orelse Value{ .null = {} };
-                    }
+                    var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
+                    defer args_buffer.deinit();
+                    const args = args_buffer.items();
 
                     // Pop value to filter
                     const val = self.stack.pop() orelse Value{ .null = {} };
@@ -1524,12 +1620,11 @@ pub const BytecodeVM = struct {
                         continue;
                     }
 
-                    // Convert to uppercase
-                    const result = try self.allocator.alloc(u8, str.len);
-                    for (str, 0..) |c, i| {
-                        result[i] = std.ascii.toUpper(c);
+                    // Convert to uppercase in place; toString returned an owned buffer.
+                    const result = @constCast(str);
+                    for (result) |*c| {
+                        c.* = std.ascii.toUpper(c.*);
                     }
-                    self.allocator.free(str);
                     try self.stack.append(self.allocator, Value{ .string = result });
                 },
                 .FILTER_LOWER => {
@@ -1554,12 +1649,11 @@ pub const BytecodeVM = struct {
                         continue;
                     }
 
-                    // Convert to lowercase
-                    const result = try self.allocator.alloc(u8, str.len);
-                    for (str, 0..) |c, i| {
-                        result[i] = std.ascii.toLower(c);
+                    // Convert to lowercase in place; toString returned an owned buffer.
+                    const result = @constCast(str);
+                    for (result) |*c| {
+                        c.* = std.ascii.toLower(c.*);
                     }
-                    self.allocator.free(str);
                     try self.stack.append(self.allocator, Value{ .string = result });
                 },
                 .FILTER_ESCAPE => {
@@ -1766,18 +1860,9 @@ pub const BytecodeVM = struct {
                     const arg_count = instr.operand >> 16;
 
                     // Pop arguments from stack (in reverse order)
-                    var args = try self.allocator.alloc(Value, arg_count);
-                    defer {
-                        for (args) |*arg| {
-                            arg.deinit(self.allocator);
-                        }
-                        self.allocator.free(args);
-                    }
-                    var i: usize = arg_count;
-                    while (i > 0) {
-                        i -= 1;
-                        args[i] = self.stack.pop() orelse Value{ .null = {} };
-                    }
+                    var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
+                    defer args_buffer.deinit();
+                    const args = args_buffer.items();
 
                     // Pop value to test
                     const val = self.stack.pop() orelse Value{ .null = {} };
@@ -1804,27 +1889,15 @@ pub const BytecodeVM = struct {
                 },
                 .BUILD_LIST => {
                     const count = instr.operand;
-                    const list_ptr = try self.allocator.create(value_mod.List);
-                    list_ptr.* = value_mod.List.init(self.allocator);
-                    errdefer {
-                        list_ptr.deinit(self.allocator);
-                        self.allocator.destroy(list_ptr);
-                    }
+                    const list_ptr = try self.createList(count);
 
-                    // Collect elements from stack (in reverse order)
-                    var temp = std.ArrayList(Value){};
-                    defer temp.deinit(self.allocator);
-                    var i: u32 = 0;
-                    while (i < count) : (i += 1) {
-                        const elem = self.stack.pop() orelse Value{ .null = {} };
-                        try temp.append(self.allocator, elem);
-                    }
+                    try list_ptr.items.resize(self.allocator, count);
 
-                    // Append in reverse to restore original order
-                    var j: usize = temp.items.len;
-                    while (j > 0) {
-                        j -= 1;
-                        try list_ptr.append(temp.items[j]);
+                    // Pop in reverse to restore original list order directly.
+                    var i: usize = count;
+                    while (i > 0) {
+                        i -= 1;
+                        list_ptr.items.items[i] = self.stack.pop() orelse Value{ .null = {} };
                     }
 
                     try self.stack.append(self.allocator, Value{ .list = list_ptr });
@@ -1834,18 +1907,9 @@ pub const BytecodeVM = struct {
                     const arg_count = instr.operand;
                     
                     // Pop arguments from stack (in reverse order)
-                    var args = try self.allocator.alloc(Value, arg_count);
-                    defer {
-                        for (args) |*arg| {
-                            arg.deinit(self.allocator);
-                        }
-                        self.allocator.free(args);
-                    }
-                    var call_i: usize = arg_count;
-                    while (call_i > 0) {
-                        call_i -= 1;
-                        args[call_i] = self.stack.pop() orelse Value{ .null = {} };
-                    }
+                    var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
+                    defer args_buffer.deinit();
+                    const args = args_buffer.items();
                     
                     // Pop function value
                     const func_val = self.stack.pop() orelse Value{ .null = {} };
@@ -1883,18 +1947,9 @@ pub const BytecodeVM = struct {
                         try self.stack.append(self.allocator, result);
                     } else {
                         // Pop arguments from stack (in reverse order)
-                        var args = try self.allocator.alloc(Value, arg_count);
-                        defer {
-                            for (args) |*arg| {
-                                arg.deinit(self.allocator);
-                            }
-                            self.allocator.free(args);
-                        }
-                        var global_i: usize = arg_count;
-                        while (global_i > 0) {
-                            global_i -= 1;
-                            args[global_i] = self.stack.pop() orelse Value{ .null = {} };
-                        }
+                        var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
+                        defer args_buffer.deinit();
+                        const args = args_buffer.items();
                         
                         if (self.environment.getGlobal(func_name)) |global_val| {
                             if (global_val == .callable) {
@@ -1976,18 +2031,9 @@ pub const BytecodeVM = struct {
                     }
                     
                     // Pop arguments from stack (in reverse order)
-                    var args = try self.allocator.alloc(Value, arg_count);
-                    defer self.allocator.free(args);
-                    var cycle_i: usize = arg_count;
-                    while (cycle_i > 0) {
-                        cycle_i -= 1;
-                        args[cycle_i] = self.stack.pop() orelse Value{ .null = {} };
-                    }
-                    defer {
-                        for (args) |*arg| {
-                            arg.deinit(self.allocator);
-                        }
-                    }
+                    var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
+                    defer args_buffer.deinit();
+                    const args = args_buffer.items();
                     
                     // Get current loop index
                     const idx: usize = @intCast(@mod(self.loop_index0, @as(i64, @intCast(arg_count))));
@@ -2377,8 +2423,9 @@ pub const BytecodeVM = struct {
         // Look up macro - first in runtime_macros, then in bytecode.macros
         const macro_idx = self.runtime_macros.get(macro_name) orelse {
             // Try AST-based macro lookup via context
-            if (self.context.getMacro(macro_name)) |ast_macro| {
+            if (self.context.getMacro(macro_name)) |ast_macro_handle| {
                 // Fall back to AST execution for macros defined via AST
+                const ast_macro = @as(*nodes.Macro, @ptrCast(@alignCast(ast_macro_handle)));
                 return try self.executeAstMacro(ast_macro, arg_count, kwargs_count, caller);
             }
             return Value{ .string = try self.allocator.dupe(u8, "") };
@@ -2399,7 +2446,6 @@ pub const BytecodeVM = struct {
             // Clean up any unused kwargs (those not matching a parameter)
             var iter = kwargs_map.iterator();
             while (iter.next()) |entry| {
-                self.allocator.free(entry.key_ptr.*);
                 entry.value_ptr.*.deinit(self.allocator);
             }
             kwargs_map.deinit();
@@ -2414,26 +2460,21 @@ pub const BytecodeVM = struct {
 
             if (key_idx_val.toInteger()) |key_idx| {
                 const key_name = self.bytecode.names.items[@as(usize, @intCast(key_idx))];
-                const key_copy = try self.allocator.dupe(u8, key_name);
-                try kwargs_map.put(key_copy, val);
+                try kwargs_map.put(key_name, val);
             } else {
                 val.deinit(self.allocator);
             }
         }
 
         // Pop positional args from stack
-        var args = try self.allocator.alloc(Value, arg_count);
-        defer self.allocator.free(args);
-        var arg_i: usize = arg_count;
-        while (arg_i > 0) {
-            arg_i -= 1;
-            args[arg_i] = self.stack.pop() orelse Value{ .null = {} };
-        }
+        var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
+        defer args_buffer.freeStorage();
+        const args = args_buffer.items();
 
         // Track which positional args we use (so we can free unused ones)
-        var used_positional = try self.allocator.alloc(bool, arg_count);
-        defer self.allocator.free(used_positional);
-        @memset(used_positional, false);
+        var used_positional_buffer = try BoolBuffer.init(self.allocator, arg_count, false);
+        defer used_positional_buffer.deinit();
+        const used_positional = used_positional_buffer.items();
 
         // Assign args to parameters - kwargs take priority over positional
         for (macro_info.params.items, 0..) |param, i| {
@@ -2443,7 +2484,6 @@ pub const BytecodeVM = struct {
             // 1. Check keyword argument first (overrides positional)
             if (kwargs_map.fetchRemove(param.name)) |kv| {
                 param_value = kv.value;
-                self.allocator.free(kv.key); // Free the key since we're using it
                 found = true;
             }
             // 2. Then check positional argument
@@ -2483,8 +2523,8 @@ pub const BytecodeVM = struct {
 
         // Build varargs list from unused positional args (beyond parameters)
         // In Jinja2, varargs captures extra positional arguments
-        const varargs_list = try self.allocator.create(value_mod.List);
-        varargs_list.* = value_mod.List.init(self.allocator);
+        const varargs_capacity = if (args.len > macro_info.params.items.len) args.len - macro_info.params.items.len else 0;
+        const varargs_list = try self.createList(varargs_capacity);
         for (args, 0..) |arg, i| {
             if (i >= macro_info.params.items.len) {
                 // Extra positional arg - add to varargs
@@ -2503,23 +2543,13 @@ pub const BytecodeVM = struct {
         const kwargs_dict = try self.allocator.create(value_mod.Dict);
         kwargs_dict.* = value_mod.Dict.init(self.allocator);
 
-        // First, collect remaining kwargs and move to dict
-        // Dict.set duplicates keys, so we move values but need to free original keys
-        var keys_to_free = std.ArrayList([]const u8){};
-        defer keys_to_free.deinit(self.allocator);
-
+        // Dict.set duplicates borrowed name-pool keys; values move into kwargs_dict.
         var remaining_iter = kwargs_map.iterator();
         while (remaining_iter.next()) |entry| {
-            // Dict.set duplicates the key internally, value is moved
             try kwargs_dict.set(entry.key_ptr.*, entry.value_ptr.*);
-            try keys_to_free.append(self.allocator, entry.key_ptr.*);
         }
 
-        // Now clear the map and free original keys
         kwargs_map.clearRetainingCapacity();
-        for (keys_to_free.items) |key| {
-            self.allocator.free(key);
-        }
 
         const kwargs_key = try self.allocator.dupe(u8, "kwargs");
         try frame.variables.put(kwargs_key, Value{ .dict = kwargs_dict });
@@ -2648,18 +2678,9 @@ pub const BytecodeVM = struct {
                         }
                     }
 
-                    var filter_args = try self.allocator.alloc(Value, filter_arg_count);
-                    defer self.allocator.free(filter_args);
-                    var fi: usize = filter_arg_count;
-                    while (fi > 0) {
-                        fi -= 1;
-                        filter_args[fi] = self.stack.pop() orelse Value{ .null = {} };
-                    }
-                    defer {
-                        for (filter_args) |*fa| {
-                            fa.deinit(self.allocator);
-                        }
-                    }
+                    var filter_args_buffer = try ArgBuffer.initFromStack(self, filter_arg_count);
+                    defer filter_args_buffer.deinit();
+                    const filter_args = filter_args_buffer.items();
 
                     const val = self.stack.pop() orelse Value{ .null = {} };
                     defer val.deinit(self.allocator);
@@ -2673,12 +2694,13 @@ pub const BytecodeVM = struct {
                 },
                 .BUILD_LIST => {
                     const count = instr.operand;
-                    const list = try self.allocator.create(value_mod.List);
-                    list.* = value_mod.List.init(self.allocator);
-                    var li: usize = 0;
-                    while (li < count) : (li += 1) {
-                        const item = self.stack.pop() orelse Value{ .null = {} };
-                        try list.items.insert(self.allocator, 0, item);
+                    const list = try self.createList(count);
+                    try list.items.resize(self.allocator, count);
+
+                    var li: usize = count;
+                    while (li > 0) {
+                        li -= 1;
+                        list.items.items[li] = self.stack.pop() orelse Value{ .null = {} };
                     }
                     try self.stack.append(self.allocator, Value{ .list = list });
                 },
@@ -2832,8 +2854,15 @@ pub const BytecodeVM = struct {
         return Value{ .string = macro_output };
     }
 
-    /// Evaluate a constant expression (used for default argument values)
+    /// Evaluate a constant expression (used for default argument values).
+    /// Depth-limited: constant expressions nest via list literals; beyond the
+    /// limit the expression is treated as a template error rather than recursing.
     fn evaluateConstantExpr(self: *Self, expr: *nodes.Expression) !Value {
+        if (self.const_eval_depth >= 64) {
+            return exceptions.TemplateError.RuntimeError;
+        }
+        self.const_eval_depth += 1;
+        defer self.const_eval_depth -= 1;
         return switch (expr.*) {
             .string_literal => |lit| Value{ .string = try self.allocator.dupe(u8, lit.value) },
             .integer_literal => |lit| Value{ .integer = lit.value },
@@ -3356,18 +3385,9 @@ pub const BytecodeVM = struct {
                     }
 
                     // Pop positional arguments from stack (in reverse order)
-                    var args = try self.allocator.alloc(Value, arg_count);
-                    defer {
-                        for (args) |*arg| {
-                            arg.deinit(self.allocator);
-                        }
-                        self.allocator.free(args);
-                    }
-                    var i: usize = arg_count;
-                    while (i > 0) {
-                        i -= 1;
-                        args[i] = self.stack.pop() orelse Value{ .null = {} };
-                    }
+                    var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
+                    defer args_buffer.deinit();
+                    const args = args_buffer.items();
 
                     // Pop value to filter
                     const val = self.stack.pop() orelse Value{ .null = {} };
@@ -3405,18 +3425,9 @@ pub const BytecodeVM = struct {
                     const arg_count = instr.operand >> 16;
 
                     // Pop arguments from stack (in reverse order)
-                    var args = try self.allocator.alloc(Value, arg_count);
-                    defer {
-                        for (args) |*arg| {
-                            arg.deinit(self.allocator);
-                        }
-                        self.allocator.free(args);
-                    }
-                    var i: usize = arg_count;
-                    while (i > 0) {
-                        i -= 1;
-                        args[i] = self.stack.pop() orelse Value{ .null = {} };
-                    }
+                    var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
+                    defer args_buffer.deinit();
+                    const args = args_buffer.items();
 
                     // Pop value to test
                     const val = self.stack.pop() orelse Value{ .null = {} };
@@ -3455,27 +3466,13 @@ pub const BytecodeVM = struct {
                 },
                 .BUILD_LIST => {
                     const count = instr.operand;
-                    const list_ptr = try self.allocator.create(value_mod.List);
-                    list_ptr.* = value_mod.List.init(self.allocator);
-                    errdefer {
-                        list_ptr.deinit(self.allocator);
-                        self.allocator.destroy(list_ptr);
-                    }
+                    const list_ptr = try self.createList(count);
+                    try list_ptr.items.resize(self.allocator, count);
 
-                    // Collect elements from stack (in reverse order)
-                    var temp = std.ArrayList(Value){};
-                    defer temp.deinit(self.allocator);
-                    var i: u32 = 0;
-                    while (i < count) : (i += 1) {
-                        const elem = self.stack.pop() orelse Value{ .null = {} };
-                        try temp.append(self.allocator, elem);
-                    }
-
-                    // Append in reverse to restore original order
-                    var j: usize = temp.items.len;
-                    while (j > 0) {
-                        j -= 1;
-                        try list_ptr.append(temp.items[j]);
+                    var i: usize = count;
+                    while (i > 0) {
+                        i -= 1;
+                        list_ptr.items.items[i] = self.stack.pop() orelse Value{ .null = {} };
                     }
 
                     try self.stack.append(self.allocator, Value{ .list = list_ptr });

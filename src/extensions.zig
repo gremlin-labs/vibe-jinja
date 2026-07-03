@@ -76,13 +76,12 @@ const parser = @import("parser.zig");
 const filters = @import("filters.zig");
 const tests = @import("tests.zig");
 const lexer = @import("lexer.zig");
-const environment = @import("environment.zig");
 
 /// Extension interface for custom tags, filters, and tests
 pub const Extension = struct {
     allocator: std.mem.Allocator,
     name: []const u8,
-    environment: ?*environment.Environment,
+    environment: ?*anyopaque,
 
     // Tags that this extension handles
     tags: std.ArrayList([]const u8),
@@ -112,9 +111,9 @@ pub const Extension = struct {
     }
 
     /// Bind extension to an environment
-    pub fn bind(self: *Self, env: *environment.Environment) !Self {
+    pub fn bind(self: *Self, env: anytype) !Self {
         var bound = try Self.init(self.allocator, self.name);
-        bound.environment = env;
+        bound.environment = @ptrCast(env);
         bound.priority = self.priority;
 
         // Copy tags

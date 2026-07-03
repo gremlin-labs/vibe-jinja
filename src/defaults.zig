@@ -35,6 +35,11 @@
 //! // Uses all defaults from this module
 //! ```
 
+/// Maximum size in bytes for a template file read from disk (loaders and the
+/// eval-file helpers). Templates larger than this fail with a template error
+/// instead of buffering an unbounded, attacker-influenceable file into memory.
+pub const MAX_TEMPLATE_SIZE_BYTES: usize = 10 * 1024 * 1024;
+
 /// Default block start string: "{%"
 pub const BLOCK_START_STRING = "{%";
 

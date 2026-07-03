@@ -1,0 +1,8 @@
+# Suppressions for fallow-zig audits (see ../fallow-zig/rule-packs/vibe-jinja/).
+# Format: https://github.com/fallow-rs/fallow (zig/vibe-mlx-analyzer branch) spec §17.
+
+[[suppressions]]
+rule = "zig-alloc-inside-token-loop"
+path = "src/environment.zig"
+expires = "2026-10-01"
+reason = "environment.zig is marked file-level hot for its render-time filter/test lookups, but Environment.overlay() is a one-time derived-environment constructor (creates a scoped/sandboxed Environment), not a render-time hot path -- its allocator.create() calls inside the extension-rebind loop run once per overlay() call, not per render."

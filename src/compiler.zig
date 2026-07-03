@@ -4,7 +4,7 @@ const nodes = @import("nodes.zig");
 const context = @import("context.zig");
 const exceptions = @import("exceptions.zig");
 const value_mod = @import("value.zig");
-const runtime = @import("runtime.zig");
+const runtime_types = @import("runtime_types.zig");
 const bytecode_mod = @import("bytecode.zig");
 const loop_context_mod = @import("loop_context.zig");
 const value_pool = @import("value_pool.zig");
@@ -25,8 +25,17 @@ fn normalizeIndex(idx: i64, len: i64) i64 {
     return idx;
 }
 
+/// Value trees are data-driven and can nest arbitrarily; beyond this depth the
+/// hash folds to a sentinel instead of recursing further.
+const max_value_hash_depth: usize = 64;
+
 /// Compute a simple hash for a value (used by loop.changed())
 fn computeValueHash(val: value_mod.Value) u64 {
+    return computeValueHashDepth(val, 0);
+}
+
+fn computeValueHashDepth(val: value_mod.Value, depth: usize) u64 {
+    if (depth >= max_value_hash_depth) return 0x9E37_79B9_7F4A_7C15;
     return switch (val) {
         .integer => |i| @as(u64, @bitCast(i)),
         .float => |f| @as(u64, @bitCast(f)),
@@ -42,7 +51,7 @@ fn computeValueHash(val: value_mod.Value) u64 {
         .list => |l| blk: {
             var h: u64 = 0;
             for (l.items.items) |item| {
-                h = h *% 31 +% computeValueHash(item);
+                h = h *% 31 +% computeValueHashDepth(item, depth + 1);
             }
             break :blk h;
         },
@@ -53,7 +62,7 @@ fn computeValueHash(val: value_mod.Value) u64 {
                 for (entry.key_ptr.*) |c| {
                     h = h *% 31 +% c;
                 }
-                h = h *% 31 +% computeValueHash(entry.value_ptr.*);
+                h = h *% 31 +% computeValueHashDepth(entry.value_ptr.*, depth + 1);
             }
             break :blk h;
         },
@@ -138,13 +147,14 @@ pub const Frame = struct {
         };
     }
 
-    /// Get autoescape setting, checking parent frames
+    /// Get autoescape setting, checking parent frames (iterative walk — the
+    /// chain depth is template-driven, so no recursion here)
     pub fn getAutoescape(self: *Self, env: *environment.Environment, template_name: ?[]const u8) bool {
-        if (self.autoescape) |ae| {
-            return ae;
-        }
-        if (self.parent) |parent| {
-            return parent.getAutoescape(env, template_name);
+        var frame: ?*Self = self;
+        while (frame) |f| : (frame = f.parent) {
+            if (f.autoescape) |ae| {
+                return ae;
+            }
         }
         return env.shouldAutoescape(template_name);
     }
@@ -164,38 +174,39 @@ pub const Frame = struct {
         }
     }
 
-    /// Resolve a variable, checking parent frames
+    /// Resolve a variable, checking parent frames (iterative walk)
     /// Returns null if not found (caller should check context/environment)
-    /// Note: Not inline due to recursion
     pub fn resolve(self: *Self, name: []const u8) ?Value {
-        if (self.variables.get(name)) |value| {
-            return value;
-        }
-        if (self.parent) |parent| {
-            return parent.resolve(name);
+        var frame: ?*Self = self;
+        while (frame) |f| : (frame = f.parent) {
+            if (f.variables.get(name)) |value| {
+                return value;
+            }
         }
         return null;
     }
 
-    /// Resolve a loop attribute (e.g., loop.index) using optimized loop context
+    /// Resolve a loop attribute (e.g., loop.index) using the optimized loop
+    /// context from this frame or the nearest parent (iterative walk)
     /// Returns null if not in a loop or attribute not found
     pub fn resolveLoopAttr(self: *Self, attr: []const u8) ?Value {
-        if (self.opt_loop) |opt| {
-            return opt.resolveLoopAttr(attr);
-        }
-        if (self.parent) |parent| {
-            return parent.resolveLoopAttr(attr);
+        var frame: ?*Self = self;
+        while (frame) |f| : (frame = f.parent) {
+            if (f.opt_loop) |opt| {
+                return opt.resolveLoopAttr(attr);
+            }
         }
         return null;
     }
 
-    /// Get the optimized loop context from this frame or parent
+    /// Get the optimized loop context from this frame or the nearest parent
+    /// (iterative walk)
     pub fn getOptLoop(self: *Self) ?*OptimizedLoopContext {
-        if (self.opt_loop) |opt| {
-            return opt;
-        }
-        if (self.parent) |parent| {
-            return parent.getOptLoop();
+        var frame: ?*Self = self;
+        while (frame) |f| : (frame = f.parent) {
+            if (f.opt_loop) |opt| {
+                return opt;
+            }
         }
         return null;
     }
@@ -486,9 +497,8 @@ pub const Compiler = struct {
     pub fn visitTemplate(self: *Self, node: *nodes.Template, frame: *Frame, ctx: *context.Context) ![]const u8 {
         // Create template reference (self) and add to context
         // Use context's allocator since context owns and frees the template_ref
-        const template_ref = try ctx.allocator.create(runtime.TemplateReference);
-        errdefer ctx.allocator.destroy(template_ref);
-        template_ref.* = runtime.TemplateReference.init(ctx.allocator, node, ctx, self);
+        const template_ref = try ctx.allocator.create(runtime_types.TemplateReference);
+        template_ref.* = runtime_types.TemplateReference.init(ctx.allocator, node, ctx, self);
         ctx.setTemplateRef(template_ref);
 
         // First, handle extends statements (must be at top level)
@@ -514,20 +524,7 @@ pub const Compiler = struct {
         for (node.body.items[body_start_idx..]) |stmt| {
             if (stmt.tag == .block) {
                 const block_stmt = @as(*nodes.Block, @ptrCast(@alignCast(stmt)));
-                // Prepend child block to existing stack (or create new stack)
-                const name_copy = try self.allocator.dupe(u8, block_stmt.name);
-                errdefer self.allocator.free(name_copy);
-
-                if (ctx.blocks.getPtr(block_stmt.name)) |existing_stack_ptr| {
-                    // Prepend child block to existing stack
-                    // Insert at index 0, shifting parent blocks to the right
-                    try existing_stack_ptr.insert(self.allocator, 0, block_stmt);
-                } else {
-                    // Create new stack with just this block
-                    var new_stack = std.ArrayList(*nodes.Block){};
-                    try new_stack.append(self.allocator, block_stmt);
-                    try ctx.blocks.put(name_copy, new_stack);
-                }
+                try ctx.prependBlock(block_stmt.name, block_stmt);
             }
         }
 
@@ -2093,7 +2090,8 @@ pub const Compiler = struct {
         }
 
         // Check if it's a macro
-        if (ctx.getMacro(func_name)) |macro| {
+        if (ctx.getMacro(func_name)) |macro_handle| {
+            const macro = @as(*nodes.Macro, @ptrCast(@alignCast(macro_handle)));
             // Convert to Expression list for callMacro
             var expr_args = std.ArrayList(nodes.Expression){};
             defer expr_args.deinit(self.allocator);
@@ -2289,17 +2287,19 @@ pub const Compiler = struct {
                 const name_str = try macro_expr_val.toString(self.allocator);
                 defer self.allocator.free(name_str);
                 // Look up macro by name
-                const macro = ctx.getMacro(name_str) orelse {
+                const macro_handle = ctx.getMacro(name_str) orelse {
                     return exceptions.TemplateError.RuntimeError;
                 };
+                const macro = @as(*nodes.Macro, @ptrCast(@alignCast(macro_handle)));
                 return try self.callMacro(macro, node.args.items, node.kwargs, frame, ctx, null);
             },
         };
 
         // Look up macro by name
-        const macro = ctx.getMacro(macro_name) orelse {
+        const macro_handle = ctx.getMacro(macro_name) orelse {
             return exceptions.TemplateError.RuntimeError;
         };
+        const macro = @as(*nodes.Macro, @ptrCast(@alignCast(macro_handle)));
 
         return try self.callMacro(macro, node.args.items, node.kwargs, frame, ctx, null);
     }
@@ -2495,9 +2495,10 @@ pub const Compiler = struct {
         };
 
         // Look up macro
-        const macro = ctx.getMacro(macro_name) orelse {
+        const macro_handle = ctx.getMacro(macro_name) orelse {
             return exceptions.TemplateError.RuntimeError;
         };
+        const macro = @as(*nodes.Macro, @ptrCast(@alignCast(macro_handle)));
 
         // Render call block body to pass as caller
         var caller_body = std.ArrayList(u8){};
@@ -2519,14 +2520,7 @@ pub const Compiler = struct {
         var args = std.ArrayList(nodes.Expression){};
         defer args.deinit(self.allocator);
         var kwargs = std.StringHashMap(nodes.Expression).init(self.allocator);
-        defer {
-            var kw_iter = kwargs.iterator();
-            while (kw_iter.next()) |entry| {
-                self.allocator.free(entry.key_ptr.*);
-                entry.value_ptr.*.deinit(self.allocator);
-            }
-            kwargs.deinit();
-        }
+        defer kwargs.deinit();
 
         if (node.call_expr == .call_expr) {
             const call = node.call_expr.call_expr;
@@ -2535,8 +2529,7 @@ pub const Compiler = struct {
             }
             var kw_iter = call.kwargs.iterator();
             while (kw_iter.next()) |entry| {
-                const key = try self.allocator.dupe(u8, entry.key_ptr.*);
-                try kwargs.put(key, entry.value_ptr.*);
+                try kwargs.put(entry.key_ptr.*, entry.value_ptr.*);
             }
         }
 
@@ -2881,6 +2874,8 @@ pub const Compiler = struct {
         defer self.allocator.free(template_name_str);
 
         // Load parent template
+        var cycle_guard = try self.environment.enterTemplateLoad(template_name_str);
+        defer cycle_guard.deinit();
         const parent_template = try self.environment.getTemplate(template_name_str);
 
         // Set parent on current template
@@ -2888,12 +2883,19 @@ pub const Compiler = struct {
 
         // Recursively process parent template's inheritance chain
         // This ensures all ancestor blocks are registered
-        try self.processParentBlocks(parent_template, ctx);
+        try self.processParentBlocks(parent_template, ctx, 0);
     }
+
+    /// Inheritance chains deeper than this are treated as template errors — the
+    /// per-name cycle guard cannot bound depth across distinct template names.
+    const max_inheritance_depth: usize = 32;
 
     /// Recursively process parent template blocks
     /// This handles multi-level inheritance (grandparent -> parent -> child)
-    fn processParentBlocks(self: *Self, parent_template: *nodes.Template, ctx: *context.Context) !void {
+    fn processParentBlocks(self: *Self, parent_template: *nodes.Template, ctx: *context.Context, depth: usize) !void {
+        if (depth >= max_inheritance_depth) {
+            return exceptions.TemplateError.RuntimeError;
+        }
         // First process grandparent if parent extends another template
         // Find extends statement in parent template
         for (parent_template.body.items) |stmt| {
@@ -2911,11 +2913,13 @@ pub const Compiler = struct {
                 const template_name_str = try template_expr_val.toString(self.allocator);
                 defer self.allocator.free(template_name_str);
 
+                var cycle_guard = try self.environment.enterTemplateLoad(template_name_str);
+                defer cycle_guard.deinit();
                 const grandparent_template = try self.environment.getTemplate(template_name_str);
                 parent_template.parent = grandparent_template;
 
                 // Recursively process grandparent
-                try self.processParentBlocks(grandparent_template, ctx);
+                try self.processParentBlocks(grandparent_template, ctx, depth + 1);
                 break;
             }
         }
@@ -2948,7 +2952,8 @@ pub const Compiler = struct {
             // but if it has actual content (not overridden), it's an error.
             // Check if this is the topmost block in the stack (meaning no child override)
             if (ctx.blocks.get(node.name)) |block_stack| {
-                if (block_stack.items.len > 0 and block_stack.items[0] == node) {
+                const node_handle: *anyopaque = @ptrCast(node);
+                if (block_stack.items.len > 0 and block_stack.items[0] == node_handle) {
                     // This required block is at the top of the stack = not overridden
                     // Check if it has actual content (non-whitespace)
                     if (try self.blockHasContent(node)) {
@@ -3014,7 +3019,8 @@ pub const Compiler = struct {
     /// Returns the rendered content of the next block in the stack
     pub fn renderBlock(self: *Self, block_name: []const u8, current_block: *nodes.Block, frame: *Frame, ctx: *context.Context) ![]const u8 {
         // Get the super block (parent block in stack)
-        if (ctx.getSuperBlock(block_name, current_block)) |super_block| {
+        if (ctx.getSuperBlock(block_name, current_block)) |super_block_handle| {
+            const super_block = @as(*nodes.Block, @ptrCast(@alignCast(super_block_handle)));
             // Render the super block
             return try self.visitBlock(super_block, frame, ctx);
         }
@@ -3035,6 +3041,8 @@ pub const Compiler = struct {
         defer self.allocator.free(template_name_str);
 
         // Load included template
+        var cycle_guard = try self.environment.enterTemplateLoad(template_name_str);
+        defer cycle_guard.deinit();
         const included_template = self.environment.getTemplate(template_name_str) catch |err| {
             if (err == exceptions.TemplateError.TemplateNotFound) {
                 if (node.ignore_missing) {
@@ -3069,6 +3077,16 @@ pub const Compiler = struct {
         return try self.visitTemplate(included_template, &include_frame, &include_ctx);
     }
 
+    fn createTemplateModule(self: *Self, template: *nodes.Template, ctx: *context.Context) !runtime_types.TemplateModule {
+        var module_frame = Frame.init("module", null, self.allocator);
+        defer module_frame.deinit();
+
+        const body = try self.visitTemplate(template, &module_frame, ctx);
+        errdefer self.allocator.free(body);
+
+        return try runtime_types.TemplateModule.initFromRenderedBody(self.allocator, template, ctx, body);
+    }
+
     /// Visit Import node - import a template as a module
     pub fn visitImport(self: *Self, node: *nodes.Import, frame: *Frame, ctx: *context.Context) ![]const u8 {
         // Evaluate template name expression
@@ -3080,6 +3098,8 @@ pub const Compiler = struct {
         defer self.allocator.free(template_name_str);
 
         // Load imported template
+        var cycle_guard = try self.environment.enterTemplateLoad(template_name_str);
+        defer cycle_guard.deinit();
         const imported_template = try self.environment.getTemplate(template_name_str);
 
         // Create context for imported template
@@ -3096,9 +3116,9 @@ pub const Compiler = struct {
         defer import_ctx.deinit();
 
         // Create template module
-        const module = try self.allocator.create(runtime.TemplateModule);
+        const module = try self.allocator.create(runtime_types.TemplateModule);
         errdefer self.allocator.destroy(module);
-        module.* = try runtime.TemplateModule.init(self.allocator, imported_template, &import_ctx);
+        module.* = try self.createTemplateModule(imported_template, &import_ctx);
 
         // Store module in context with target name
         try ctx.setImportedModule(node.target, module);
@@ -3118,6 +3138,8 @@ pub const Compiler = struct {
         defer self.allocator.free(template_name_str);
 
         // Load imported template
+        var cycle_guard = try self.environment.enterTemplateLoad(template_name_str);
+        defer cycle_guard.deinit();
         const imported_template = try self.environment.getTemplate(template_name_str);
 
         // Create context for imported template
@@ -3134,9 +3156,9 @@ pub const Compiler = struct {
         defer import_ctx.deinit();
 
         // Create template module
-        const module = try self.allocator.create(runtime.TemplateModule);
+        const module = try self.allocator.create(runtime_types.TemplateModule);
         errdefer self.allocator.destroy(module);
-        module.* = try runtime.TemplateModule.init(self.allocator, imported_template, &import_ctx);
+        module.* = try self.createTemplateModule(imported_template, &import_ctx);
 
         // Import specific names from module
         for (node.imports.items) |import_name| {
@@ -3153,24 +3175,15 @@ pub const Compiler = struct {
                 const val_copy = try copyValueForImport(self.allocator, val);
                 errdefer val_copy.deinit(self.allocator);
 
-                const name_copy = try self.allocator.dupe(u8, final_name);
-                errdefer self.allocator.free(name_copy);
-
-                try ctx.set(name_copy, val_copy);
+                try ctx.set(final_name, val_copy);
             } else {
                 // Name not found in module - create undefined value
-                const name_copy = try self.allocator.dupe(u8, final_name);
-                errdefer self.allocator.free(name_copy);
-
-                const original_name_copy = try self.allocator.dupe(u8, original_name);
-                errdefer self.allocator.free(original_name_copy);
-
                 const undefined_val = context.Value{ .undefined = value_mod.Undefined{
-                    .name = original_name_copy,
+                    .name = original_name,
                     .behavior = self.environment.undefined_behavior,
                 } };
 
-                try ctx.set(name_copy, undefined_val);
+                try ctx.set(final_name, undefined_val);
             }
         }
 
@@ -3277,36 +3290,39 @@ pub fn compile(env: *environment.Environment, template: *nodes.Template, filenam
 /// Check if a template uses features not supported by bytecode
 fn templateHasUnsupportedFeatures(template: *nodes.Template) bool {
     for (template.body.items) |stmt| {
-        if (stmtHasUnsupportedFeatures(stmt)) return true;
+        if (stmtHasUnsupportedFeatures(stmt, 0)) return true;
     }
     return false;
 }
 
-fn stmtHasUnsupportedFeatures(stmt: *nodes.Stmt) bool {
+fn stmtHasUnsupportedFeatures(stmt: *nodes.Stmt, depth: usize) bool {
+    // Parser bounds AST nesting; at this backstop depth, conservatively report
+    // "unsupported" so the template routes to the interpreter instead of bytecode.
+    if (depth >= 256) return true;
     switch (stmt.tag) {
         // Phase 5: macros, call, call_block now supported in bytecode
         .import, .from_import, .include, .extends => return true,
         .for_loop => {
             const for_stmt: *nodes.For = @ptrCast(@alignCast(stmt));
             for (for_stmt.body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s)) return true;
+                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
             }
             for (for_stmt.else_body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s)) return true;
+                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
             }
             return false;
         },
         .if_stmt => {
             const if_stmt: *nodes.If = @ptrCast(@alignCast(stmt));
             for (if_stmt.body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s)) return true;
+                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
             }
             for (if_stmt.else_body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s)) return true;
+                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
             }
             for (if_stmt.elif_bodies.items) |body| {
                 for (body.items) |s| {
-                    if (stmtHasUnsupportedFeatures(s)) return true;
+                    if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
                 }
             }
             return false;
@@ -3314,14 +3330,14 @@ fn stmtHasUnsupportedFeatures(stmt: *nodes.Stmt) bool {
         .block => {
             const block_stmt: *nodes.Block = @ptrCast(@alignCast(stmt));
             for (block_stmt.body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s)) return true;
+                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
             }
             return false;
         },
         .with => {
             const with_stmt: *nodes.With = @ptrCast(@alignCast(stmt));
             for (with_stmt.body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s)) return true;
+                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
             }
             return false;
         },

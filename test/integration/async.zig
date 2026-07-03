@@ -388,7 +388,7 @@ test "environment - add async filter" {
 
     // Define a simple async filter (same as sync for testing)
     const asyncUpperFilter = struct {
-        fn filter(alloc: std.mem.Allocator, val: context.Value, args: []context.Value, kwargs: *const std.StringHashMap(context.Value), ctx: ?*context.Context, e: ?*environment.Environment) !context.Value {
+        fn filter(alloc: std.mem.Allocator, val: context.Value, args: []context.Value, kwargs: *const std.StringHashMap(context.Value), ctx: ?*anyopaque, e: ?*anyopaque) !context.Value {
             _ = args;
             _ = kwargs;
             _ = ctx;
@@ -424,7 +424,7 @@ test "environment - add async test" {
 
     // Define a simple async test (same as sync for testing)
     const asyncDefinedTest = struct {
-        fn testFn(val: context.Value, args: []const context.Value, ctx: ?*context.Context, e: ?*environment.Environment) bool {
+        fn testFn(val: context.Value, args: []const context.Value, ctx: ?*anyopaque, e: ?*anyopaque) bool {
             _ = args;
             _ = ctx;
             _ = e;

@@ -333,6 +333,21 @@ test "filter first" {
     try testing.expect(result.integer == 10);
 }
 
+test "filter first string uses caller allocator" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var input = value.Value{ .string = try allocator.dupe(u8, "abc") };
+    defer input.deinit(allocator);
+
+    var result = try callFilter(filters.BuiltinFilters.first, allocator, input, &[_]value.Value{});
+    defer result.deinit(allocator);
+
+    try testing.expect(result == .string);
+    try testing.expectEqualStrings("a", result.string);
+}
+
 test "filter last" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -351,6 +366,21 @@ test "filter last" {
 
     try testing.expect(result == .integer);
     try testing.expect(result.integer == 30);
+}
+
+test "filter last string uses caller allocator" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var input = value.Value{ .string = try allocator.dupe(u8, "abc") };
+    defer input.deinit(allocator);
+
+    var result = try callFilter(filters.BuiltinFilters.last, allocator, input, &[_]value.Value{});
+    defer result.deinit(allocator);
+
+    try testing.expect(result == .string);
+    try testing.expectEqualStrings("c", result.string);
 }
 
 // ============================================================================
@@ -1384,3 +1414,21 @@ test "template filter chained" {
 
 // Note: Sort and unique filter tests with lists are covered in the unit tests
 // that test the filter functions directly.
+
+test "filter truncate clamps negative length instead of crashing" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var input = value.Value{ .string = try allocator.dupe(u8, "Joel is a slug") };
+    defer input.deinit(allocator);
+
+    // Before the clamp this underflowed an @intCast and crashed the renderer.
+    const length_arg = value.Value{ .integer = -5 };
+    var args = [_]value.Value{length_arg};
+    var result = try callFilter(filters.BuiltinFilters.truncate, allocator, input, &args);
+    defer result.deinit(allocator);
+
+    try testing.expect(result == .string);
+    try testing.expectEqualStrings("...", result.string);
+}

@@ -356,7 +356,8 @@ test "test callable" {
     var filter_name = value.Value{ .string = try allocator.dupe(u8, "upper") };
     defer filter_name.deinit(allocator);
     // Filter names are callable when an environment is provided
-    try testing.expect(tests.BuiltinTests.callable(filter_name, &[_]value.Value{}, null, &env));
+    const callable_test = env.getTest("callable").?;
+    try testing.expect(callable_test.func(filter_name, &[_]value.Value{}, null, &env));
 }
 
 test "test sameas" {
@@ -432,12 +433,13 @@ test "test filter" {
     // Test with existing filter
     var filter_name = value.Value{ .string = try allocator.dupe(u8, "upper") };
     defer filter_name.deinit(allocator);
-    try testing.expect(tests.BuiltinTests.filter(filter_name, &[_]value.Value{}, null, &env));
+    const filter_test = env.getTest("filter").?;
+    try testing.expect(filter_test.func(filter_name, &[_]value.Value{}, null, &env));
 
     // Test with non-existent filter
     var bad_name = value.Value{ .string = try allocator.dupe(u8, "nonexistent") };
     defer bad_name.deinit(allocator);
-    try testing.expect(!tests.BuiltinTests.filter(bad_name, &[_]value.Value{}, null, &env));
+    try testing.expect(!filter_test.func(bad_name, &[_]value.Value{}, null, &env));
 
     // Test without environment
     try testing.expect(!tests.BuiltinTests.filter(filter_name, &[_]value.Value{}, null, null));
@@ -454,12 +456,13 @@ test "test test" {
     // Test with existing test
     var test_name = value.Value{ .string = try allocator.dupe(u8, "defined") };
     defer test_name.deinit(allocator);
-    try testing.expect(tests.BuiltinTests.@"test"(test_name, &[_]value.Value{}, null, &env));
+    const test_test = env.getTest("test").?;
+    try testing.expect(test_test.func(test_name, &[_]value.Value{}, null, &env));
 
     // Test with non-existent test
     var bad_name = value.Value{ .string = try allocator.dupe(u8, "nonexistent") };
     defer bad_name.deinit(allocator);
-    try testing.expect(!tests.BuiltinTests.@"test"(bad_name, &[_]value.Value{}, null, &env));
+    try testing.expect(!test_test.func(bad_name, &[_]value.Value{}, null, &env));
 
     // Test without environment
     try testing.expect(!tests.BuiltinTests.@"test"(test_name, &[_]value.Value{}, null, null));

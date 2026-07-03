@@ -191,7 +191,7 @@ fn _eval_file(allocator: std.mem.Allocator, path: []const u8, debug: bool) ![]co
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    const content = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    const content = try file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);
 
     return try _eval(allocator, content, debug);
 }
@@ -236,7 +236,7 @@ fn _eval(allocator: std.mem.Allocator, content: []const u8, debug: bool) ![]cons
 /// Evaluate a template node
 fn evalTemplate(template: *nodes_mod.Template, allocator: std.mem.Allocator) ![]const u8 {
     // Get environment from template
-    const env = template.base.environment orelse {
+    const env_ptr = template.base.environment orelse {
         // Create default environment if none
         var default_env = environment_mod.Environment.init(allocator);
         defer default_env.deinit();
@@ -256,6 +256,7 @@ fn evalTemplate(template: *nodes_mod.Template, allocator: std.mem.Allocator) ![]
 
         return try out.toOwnedSlice(allocator);
     };
+    const env = @as(*environment_mod.Environment, @ptrCast(@alignCast(env_ptr)));
 
     // Create context with environment
     var empty_vars = std.StringHashMap(context.Value).init(allocator);
@@ -303,7 +304,7 @@ fn test_eval(allocator: std.mem.Allocator, path: []const u8, debug: bool) !void 
     const source_file = try std.fs.cwd().openFile(source_path, .{});
     defer source_file.close();
 
-    const source = try source_file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    const source = try source_file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);
     defer allocator.free(source);
 
     const expected_path = try std.mem.concat(allocator, u8, &[_][]const u8{ path, "/test.html" });
@@ -312,7 +313,7 @@ fn test_eval(allocator: std.mem.Allocator, path: []const u8, debug: bool) !void 
     const expected_file = try std.fs.cwd().openFile(expected_path, .{});
     defer expected_file.close();
 
-    const expected = try expected_file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    const expected = try expected_file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);
     defer allocator.free(expected);
 
     const actual = try _eval(allocator, source, debug);

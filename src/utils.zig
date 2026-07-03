@@ -36,8 +36,6 @@
 
 const std = @import("std");
 const value_mod = @import("value.zig");
-const context = @import("context.zig");
-const environment = @import("environment.zig");
 
 /// Re-export Value type for convenience
 pub const Value = value_mod.Value;
@@ -210,10 +208,10 @@ pub const FilterChainExecutor = struct {
     /// The final result is cloned to the backing allocator for caller ownership
     pub fn execute(
         self: *Self,
-        env: *environment.Environment,
+        env: anytype,
         initial_value: Value,
         filter_names: []const []const u8,
-        ctx: ?*context.Context,
+        ctx: ?*anyopaque,
     ) !Value {
         const arena_alloc = self.arena.allocator();
         var current = try initial_value.deepCopy(arena_alloc);
@@ -254,10 +252,10 @@ pub const FilterChainExecutor = struct {
     /// For filters that take arguments (e.g., truncate(30))
     pub fn executeWithArgs(
         self: *Self,
-        env: *environment.Environment,
+        env: anytype,
         initial_value: Value,
         filter_calls: []const FilterCall,
-        ctx: ?*context.Context,
+        ctx: ?*anyopaque,
     ) !Value {
         const arena_alloc = self.arena.allocator();
         var current = try initial_value.deepCopy(arena_alloc);
@@ -340,14 +338,7 @@ pub inline fn fastBoolToString(b: bool) []const u8 {
     return if (b) "True" else "False";
 }
 
-/// Pass argument type for decorators
-/// Determines what should be passed as the first argument to filters/tests/functions
-pub const PassArg = enum {
-    none, // No special argument passed
-    context, // Pass Context as first argument
-    eval_context, // Pass EvalContext as first argument (not yet implemented)
-    environment, // Pass Environment as first argument
-};
+pub const PassArg = @import("pass_arg.zig").PassArg;
 
 /// Internal code marker
 /// Functions marked as internal should not appear in tracebacks

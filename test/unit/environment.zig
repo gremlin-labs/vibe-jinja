@@ -528,8 +528,8 @@ fn customTestFilter(
     value: jinja.Value,
     _: []jinja.Value,
     _: *const std.StringHashMap(jinja.Value),
-    _: ?*jinja.context.Context,
-    _: ?*Environment,
+    _: ?*anyopaque,
+    _: ?*anyopaque,
 ) !jinja.Value {
     _ = value;
     return jinja.Value{ .string = "filtered" };

@@ -443,3 +443,29 @@ test "loader choice loader fallback" {
 
     try testing.expectEqualStrings("Fallback content", content);
 }
+
+test "loader filesystem loader rejects oversized template" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const test_dir = "test/templates_oversized";
+    try std.fs.cwd().makePath(test_dir);
+    defer std.fs.cwd().deleteTree(test_dir) catch |err| {
+        std.log.warn("cleanup of {s} failed: {s}", .{ test_dir, @errorName(err) });
+    };
+
+    const test_file = "test/templates_oversized/huge.jinja";
+    const file = try std.fs.cwd().createFile(test_file, .{});
+    // One byte past the template size limit; seek+write keeps the file sparse.
+    try file.seekTo(vibe_jinja.defaults.MAX_TEMPLATE_SIZE_BYTES);
+    try file.writeAll("x");
+    file.close();
+
+    const searchpath = [_][]const u8{test_dir};
+    var loader = try loaders.FileSystemLoader.init(allocator, &searchpath);
+    defer loader.deinit();
+
+    const result = loader.getLoader().load("huge.jinja");
+    try testing.expectError(exceptions.TemplateError.RuntimeError, result);
+}

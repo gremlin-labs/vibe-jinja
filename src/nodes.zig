@@ -83,7 +83,7 @@
 //!
 //! ## 3. Environment references are borrowed, not owned
 //!
-//! Nodes store `?*environment.Environment` for filter/test lookup during evaluation.
+//! Nodes store an opaque environment pointer for filter/test lookup during evaluation.
 //! This is a borrowed reference - nodes never free the Environment.
 //!
 //! ## 4. String ownership
@@ -116,9 +116,7 @@
 //! ```
 
 const std = @import("std");
-const environment = @import("environment.zig");
 const value_mod = @import("value.zig");
-const context_mod = @import("context.zig");
 const exceptions = @import("exceptions.zig");
 
 /// Error set for expression evaluation that combines allocator and template errors
@@ -144,7 +142,7 @@ pub const Node = struct {
     /// Filename where this node appears (if available)
     filename: ?[]const u8,
     /// Environment reference (set during parsing)
-    environment: ?*environment.Environment,
+    environment: ?*anyopaque,
 
     const Self = @This();
 
@@ -523,7 +521,7 @@ pub const Output = struct {
     /// Evaluate the output node
     /// Returns string representation of the output
     /// Context is required for variable resolution in expressions
-    pub fn eval(self: *const Self, ctx: *context_mod.Context, allocator: std.mem.Allocator) ![]const u8 {
+    pub fn eval(self: *const Self, ctx: anytype, allocator: std.mem.Allocator) ![]const u8 {
         if (self.nodes.items.len == 0) {
             // Plain text output
             return try allocator.dupe(u8, self.content);
@@ -2199,7 +2197,7 @@ pub const Expression = union(enum) {
 
     /// Evaluate expression with context
     /// Context is required for variable resolution, filters, tests, etc.
-    pub fn eval(self: *const Expression, ctx: *context_mod.Context, allocator: std.mem.Allocator) EvalError!value_mod.Value {
+    pub fn eval(self: *const Expression, ctx: anytype, allocator: std.mem.Allocator) EvalError!value_mod.Value {
         return switch (self.*) {
             .string_literal => |lit| try lit.eval(allocator),
             .integer_literal => |lit| try lit.eval(allocator),
@@ -2229,7 +2227,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate name expression - resolve variable from context
-    fn evalName(self: *const Expression, node: *Name, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalName(self: *const Expression, node: *Name, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         // Resolve name from context
         const val = ctx.resolve(node.name);
@@ -2250,7 +2248,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate binary expression
-    fn evalBinExpr(self: *const Expression, node: *BinExpr, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalBinExpr(self: *const Expression, node: *BinExpr, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
 
         // Evaluate left and right operands
@@ -2286,7 +2284,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate unary expression
-    fn evalUnaryExpr(self: *const Expression, node: *UnaryExpr, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalUnaryExpr(self: *const Expression, node: *UnaryExpr, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
 
         // Evaluate operand
@@ -2327,7 +2325,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate filter expression
-    fn evalFilter(self: *const Expression, node: *FilterExpr, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalFilter(self: *const Expression, node: *FilterExpr, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         // Evaluate base expression
         var base_val = try node.node.eval(ctx, allocator);
@@ -2382,7 +2380,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate getattr expression
-    fn evalGetattr(self: *const Expression, node: *Getattr, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalGetattr(self: *const Expression, node: *Getattr, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         // Evaluate object expression
         var obj_val = try node.node.eval(ctx, allocator);
@@ -2393,7 +2391,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate getitem expression
-    fn evalGetitem(self: *const Expression, node: *Getitem, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalGetitem(self: *const Expression, node: *Getitem, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         // Evaluate object expression
         var obj_val = try node.node.eval(ctx, allocator);
@@ -2408,7 +2406,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate list literal expression
-    fn evalListLiteral(self: *const Expression, node: *ListLiteral, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalListLiteral(self: *const Expression, node: *ListLiteral, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         // Create a new list
         const list = try allocator.create(value_mod.List);
@@ -2427,7 +2425,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate test expression
-    fn evalTestExpr(self: *const Expression, node: *TestExpr, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalTestExpr(self: *const Expression, node: *TestExpr, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         // Evaluate base expression
         var base_val = try node.node.eval(ctx, allocator);
@@ -2475,7 +2473,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate conditional expression (x if y else z)
-    fn evalCondExpr(self: *const Expression, node: *CondExpr, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalCondExpr(self: *const Expression, node: *CondExpr, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         // Evaluate condition
         var cond_val = try node.condition.eval(ctx, allocator);
@@ -2490,7 +2488,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate function call expression
-    fn evalCallExpr(self: *const Expression, node: *CallExpr, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalCallExpr(self: *const Expression, node: *CallExpr, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         // Evaluate function expression
         var func_val = try node.func.eval(ctx, allocator);
@@ -2557,7 +2555,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate NSRef expression - namespace reference
-    fn evalNSRef(self: *const Expression, node: *NSRef, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalNSRef(self: *const Expression, node: *NSRef, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         // Resolve namespace from context
         const namespace_val = ctx.resolve(node.name);
@@ -2582,7 +2580,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate Concat expression - concatenate expressions as strings
-    fn evalConcat(self: *const Expression, node: *Concat, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalConcat(self: *const Expression, node: *Concat, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         var result = std.ArrayList(u8){};
         defer result.deinit(allocator);
@@ -2602,7 +2600,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate ImportedName expression - get imported name value
-    fn evalImportedName(self: *const Expression, node: *ImportedName, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalImportedName(self: *const Expression, node: *ImportedName, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         // Imported names are resolved from context (from import statements)
         const val = ctx.resolve(node.importname);
@@ -2613,7 +2611,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate ContextReference expression - get current template context
-    fn evalContextReference(self: *const Expression, node: *ContextReference, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalContextReference(self: *const Expression, node: *ContextReference, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         _ = node;
 
@@ -2645,7 +2643,7 @@ pub const Expression = union(enum) {
     }
 
     /// Evaluate DerivedContextReference expression - get current context including locals
-    fn evalDerivedContextReference(self: *const Expression, node: *DerivedContextReference, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn evalDerivedContextReference(self: *const Expression, node: *DerivedContextReference, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         _ = self;
         _ = node;
 
@@ -2685,7 +2683,7 @@ pub const Expression = union(enum) {
     }
 
     /// Helper to get attribute from object
-    fn getAttribute(obj: value_mod.Value, attr: []const u8, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn getAttribute(obj: value_mod.Value, attr: []const u8, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         // Handle undefined with chainable behavior
         if (obj == .undefined) {
             const u = obj.undefined;
@@ -2768,7 +2766,7 @@ pub const Expression = union(enum) {
     }
 
     /// Helper to get item from object
-    fn getItem(obj: value_mod.Value, index: value_mod.Value, ctx: *context_mod.Context, allocator: std.mem.Allocator) !value_mod.Value {
+    fn getItem(obj: value_mod.Value, index: value_mod.Value, ctx: anytype, allocator: std.mem.Allocator) !value_mod.Value {
         // Handle undefined with chainable behavior
         if (obj == .undefined) {
             const u = obj.undefined;

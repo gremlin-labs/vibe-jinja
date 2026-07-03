@@ -4,22 +4,50 @@ const TokenKind = @import("lexer.zig").TokenKind;
 const TokenStream = @import("lexer.zig").TokenStream;
 const exceptions = @import("exceptions.zig");
 const nodes = @import("nodes.zig");
-const environment = @import("environment.zig");
+
+pub const ParseError = exceptions.TemplateError || std.mem.Allocator.Error;
+
+pub const ExtensionRegistryHandle = struct {
+    ptr: *anyopaque,
+    handlesTagFn: *const fn (*anyopaque, []const u8) bool,
+    parseTagFn: *const fn (*anyopaque, *Parser, []const u8) ParseError!?*nodes.Stmt,
+
+    pub fn handlesTag(self: ExtensionRegistryHandle, tag: []const u8) bool {
+        return self.handlesTagFn(self.ptr, tag);
+    }
+
+    pub fn parseTag(self: ExtensionRegistryHandle, pars: *Parser, tag: []const u8) ParseError!?*nodes.Stmt {
+        return try self.parseTagFn(self.ptr, pars, tag);
+    }
+};
 
 /// Parser for Jinja templates
 /// Converts tokens into an AST (Abstract Syntax Tree)
+/// Maximum expression nesting depth accepted by the recursive-descent parser.
+/// Bounds every downstream AST recursion; adversarially nested templates fail
+/// with SyntaxError instead of exhausting the native stack.
+const max_expr_depth: usize = 256;
+
 pub const Parser = struct {
-    environment: *environment.Environment,
+    environment: *anyopaque,
+    extension_registry: ?ExtensionRegistryHandle,
     stream: TokenStream,
     filename: ?[]const u8,
     allocator: std.mem.Allocator,
+    /// Current expression nesting depth (bounded by `max_expr_depth`).
+    expr_depth: usize = 0,
 
     const Self = @This();
 
     /// Initialize parser with environment and token stream
-    pub fn init(env: *environment.Environment, stream: TokenStream, filename: ?[]const u8, allocator: std.mem.Allocator) Self {
+    pub fn init(env: anytype, stream: TokenStream, filename: ?[]const u8, allocator: std.mem.Allocator) Self {
+        const Env = @typeInfo(@TypeOf(env)).pointer.child;
         return Self{
-            .environment = env,
+            .environment = @ptrCast(env),
+            .extension_registry = if (@hasDecl(Env, "parserExtensionRegistry"))
+                env.parserExtensionRegistry()
+            else
+                null,
             .stream = stream,
             .filename = filename,
             .allocator = allocator,
@@ -212,7 +240,7 @@ pub const Parser = struct {
                     }
 
                     // Check if this is an extension tag
-                    if (self.environment.extension_registry) |registry| {
+                    if (self.extension_registry) |registry| {
                         // Try to get tag name
                         if (nt.kind == .NAME) {
                             const tag_name = nt.value;
@@ -394,6 +422,11 @@ pub const Parser = struct {
 
     /// Parse OR expression (lowest precedence)
     fn parseOr(self: *Self) (exceptions.TemplateError || std.mem.Allocator.Error)!?nodes.Expression {
+        if (self.expr_depth >= max_expr_depth) {
+            return exceptions.TemplateError.SyntaxError;
+        }
+        self.expr_depth += 1;
+        defer self.expr_depth -= 1;
         var left = try self.parseAnd() orelse return null;
 
         while (self.stream.hasNext()) {
@@ -2419,7 +2452,7 @@ pub const Parser = struct {
     fn containsNameReference(self: *Self, stmts: []*nodes.Stmt, name: []const u8) bool {
         _ = self;
         for (stmts) |stmt| {
-            if (stmtContainsNameReference(stmt, name)) {
+            if (stmtContainsNameReference(stmt, name, 0)) {
                 return true;
             }
         }
@@ -3324,12 +3357,15 @@ pub const Parser = struct {
 };
 
 /// Check if a statement or its children reference a given variable name
-fn stmtContainsNameReference(stmt: *nodes.Stmt, name: []const u8) bool {
+fn stmtContainsNameReference(stmt: *nodes.Stmt, name: []const u8, depth: usize) bool {
+    // Parser bounds expression nesting at max_expr_depth; this cap is a backstop.
+    // At the cap, conservatively report "references it" so callers keep the dep.
+    if (depth >= max_expr_depth) return true;
     return switch (stmt.tag) {
         .output => {
             const output = @as(*nodes.Output, @ptrCast(@alignCast(stmt)));
             for (output.nodes.items) |*expr| {
-                if (exprContainsNameReference(expr, name)) {
+                if (exprContainsNameReference(expr, name, depth + 1)) {
                     return true;
                 }
             }
@@ -3337,40 +3373,40 @@ fn stmtContainsNameReference(stmt: *nodes.Stmt, name: []const u8) bool {
         },
         .for_loop => {
             const for_stmt = @as(*nodes.For, @ptrCast(@alignCast(stmt)));
-            if (exprContainsNameReference(&for_stmt.iter, name)) return true;
+            if (exprContainsNameReference(&for_stmt.iter, name, depth + 1)) return true;
             for (for_stmt.body.items) |s| {
-                if (stmtContainsNameReference(s, name)) return true;
+                if (stmtContainsNameReference(s, name, depth + 1)) return true;
             }
             for (for_stmt.else_body.items) |s| {
-                if (stmtContainsNameReference(s, name)) return true;
+                if (stmtContainsNameReference(s, name, depth + 1)) return true;
             }
             return false;
         },
         .if_stmt => {
             const if_stmt = @as(*nodes.If, @ptrCast(@alignCast(stmt)));
-            if (exprContainsNameReference(&if_stmt.condition, name)) return true;
+            if (exprContainsNameReference(&if_stmt.condition, name, depth + 1)) return true;
             for (if_stmt.body.items) |s| {
-                if (stmtContainsNameReference(s, name)) return true;
+                if (stmtContainsNameReference(s, name, depth + 1)) return true;
             }
             for (if_stmt.elif_conditions.items) |*cond| {
-                if (exprContainsNameReference(cond, name)) return true;
+                if (exprContainsNameReference(cond, name, depth + 1)) return true;
             }
             for (if_stmt.elif_bodies.items) |body| {
                 for (body.items) |s| {
-                    if (stmtContainsNameReference(s, name)) return true;
+                    if (stmtContainsNameReference(s, name, depth + 1)) return true;
                 }
             }
             for (if_stmt.else_body.items) |s| {
-                if (stmtContainsNameReference(s, name)) return true;
+                if (stmtContainsNameReference(s, name, depth + 1)) return true;
             }
             return false;
         },
         .set => {
             const set_stmt = @as(*nodes.Set, @ptrCast(@alignCast(stmt)));
-            if (exprContainsNameReference(&set_stmt.value, name)) return true;
+            if (exprContainsNameReference(&set_stmt.value, name, depth + 1)) return true;
             if (set_stmt.body) |*body| {
                 for (body.items) |s| {
-                    if (stmtContainsNameReference(s, name)) return true;
+                    if (stmtContainsNameReference(s, name, depth + 1)) return true;
                 }
             }
             return false;
@@ -3378,80 +3414,81 @@ fn stmtContainsNameReference(stmt: *nodes.Stmt, name: []const u8) bool {
         .with => {
             const with_stmt = @as(*nodes.With, @ptrCast(@alignCast(stmt)));
             for (with_stmt.values.items) |*val| {
-                if (exprContainsNameReference(val, name)) return true;
+                if (exprContainsNameReference(val, name, depth + 1)) return true;
             }
             for (with_stmt.body.items) |s| {
-                if (stmtContainsNameReference(s, name)) return true;
+                if (stmtContainsNameReference(s, name, depth + 1)) return true;
             }
             return false;
         },
         .filter_block => {
             const filter_block = @as(*nodes.FilterBlock, @ptrCast(@alignCast(stmt)));
-            if (exprContainsNameReference(&filter_block.filter_expr, name)) return true;
+            if (exprContainsNameReference(&filter_block.filter_expr, name, depth + 1)) return true;
             for (filter_block.body.items) |s| {
-                if (stmtContainsNameReference(s, name)) return true;
+                if (stmtContainsNameReference(s, name, depth + 1)) return true;
             }
             return false;
         },
         .call => {
             const call_stmt = @as(*nodes.Call, @ptrCast(@alignCast(stmt)));
-            if (exprContainsNameReference(&call_stmt.macro_expr, name)) return true;
+            if (exprContainsNameReference(&call_stmt.macro_expr, name, depth + 1)) return true;
             for (call_stmt.args.items) |*arg| {
-                if (exprContainsNameReference(arg, name)) return true;
+                if (exprContainsNameReference(arg, name, depth + 1)) return true;
             }
             return false;
         },
         .expr_stmt => {
             const expr_stmt = @as(*nodes.ExprStmt, @ptrCast(@alignCast(stmt)));
-            return exprContainsNameReference(&expr_stmt.node, name);
+            return exprContainsNameReference(&expr_stmt.node, name, depth + 1);
         },
         else => false,
     };
 }
 
 /// Check if an expression or its children reference a given variable name
-fn exprContainsNameReference(expr: *const nodes.Expression, name: []const u8) bool {
+fn exprContainsNameReference(expr: *const nodes.Expression, name: []const u8, depth: usize) bool {
+    if (depth >= max_expr_depth) return true;
     return switch (expr.*) {
         .name => |n| std.mem.eql(u8, n.name, name),
-        .bin_expr => |b| exprContainsNameReference(&b.left, name) or exprContainsNameReference(&b.right, name),
-        .unary_expr => |u| exprContainsNameReference(&u.node, name),
+        .bin_expr => |b| exprContainsNameReference(&b.left, name, depth + 1) or exprContainsNameReference(&b.right, name, depth + 1),
+        .unary_expr => |u| exprContainsNameReference(&u.node, name, depth + 1),
         .filter => |f| {
-            if (exprContainsNameReference(&f.node, name)) return true;
+            if (exprContainsNameReference(&f.node, name, depth + 1)) return true;
             for (f.args.items) |*arg| {
-                if (exprContainsNameReference(arg, name)) return true;
+                if (exprContainsNameReference(arg, name, depth + 1)) return true;
             }
             return false;
         },
-        .getattr => |g| exprContainsNameReference(&g.node, name),
-        .getitem => |g| exprContainsNameReference(&g.node, name) or exprContainsNameReference(&g.arg, name),
+        .getattr => |g| exprContainsNameReference(&g.node, name, depth + 1),
+        .getitem => |g| exprContainsNameReference(&g.node, name, depth + 1) or exprContainsNameReference(&g.arg, name, depth + 1),
         .test_expr => |t| {
-            if (exprContainsNameReference(&t.node, name)) return true;
+            if (exprContainsNameReference(&t.node, name, depth + 1)) return true;
             for (t.args.items) |*arg| {
-                if (exprContainsNameReference(arg, name)) return true;
+                if (exprContainsNameReference(arg, name, depth + 1)) return true;
             }
             return false;
         },
         .cond_expr => |c| {
-            return exprContainsNameReference(&c.condition, name) or
-                exprContainsNameReference(&c.true_expr, name) or
-                exprContainsNameReference(&c.false_expr, name);
+            return exprContainsNameReference(&c.condition, name, depth + 1) or
+                exprContainsNameReference(&c.true_expr, name, depth + 1) or
+                exprContainsNameReference(&c.false_expr, name, depth + 1);
         },
         .call_expr => |c| {
-            if (exprContainsNameReference(&c.func, name)) return true;
+            if (exprContainsNameReference(&c.func, name, depth + 1)) return true;
             for (c.args.items) |*arg| {
-                if (exprContainsNameReference(arg, name)) return true;
+                if (exprContainsNameReference(arg, name, depth + 1)) return true;
             }
             return false;
         },
         .list_literal => |l| {
             for (l.elements.items) |*elem| {
-                if (exprContainsNameReference(elem, name)) return true;
+                if (exprContainsNameReference(elem, name, depth + 1)) return true;
             }
             return false;
         },
         .concat => |c| {
             for (c.nodes.items) |*node| {
-                if (exprContainsNameReference(node, name)) return true;
+                if (exprContainsNameReference(node, name, depth + 1)) return true;
             }
             return false;
         },
@@ -3460,7 +3497,7 @@ fn exprContainsNameReference(expr: *const nodes.Expression, name: []const u8) bo
 }
 
 /// Convenience function to parse tokens into a Template
-pub fn parse(env: *environment.Environment, stream: TokenStream, filename: ?[]const u8, allocator: std.mem.Allocator) !*nodes.Template {
+pub fn parse(env: anytype, stream: TokenStream, filename: ?[]const u8, allocator: std.mem.Allocator) !*nodes.Template {
     var parser = Parser.init(env, stream, filename, allocator);
     return try parser.parse();
 }

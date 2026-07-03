@@ -8,8 +8,7 @@ const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
 const nodes = @import("nodes.zig");
 const value_mod = @import("value.zig");
-const runtime = @import("runtime.zig");
-const cache_mod = @import("cache.zig");
+const cache_mod = @import("template_cache.zig");
 const optimizer_mod = @import("optimizer.zig");
 const extensions = @import("extensions.zig");
 const utils = @import("utils.zig");
@@ -96,7 +95,7 @@ pub const Environment = struct {
     keep_trailing_newline: bool,
     autoescape: AutoescapeConfig,
     optimized: bool,
-    undefined_behavior: runtime.UndefinedBehavior,
+    undefined_behavior: value_mod.UndefinedBehavior,
     /// Whether sandboxing is enabled (restricts unsafe operations)
     sandboxed: bool = false,
     /// Whether async mode is enabled (allows async filters, tests, and rendering)
@@ -119,6 +118,7 @@ pub const Environment = struct {
     tests_map: std.StringHashMap(*tests.Test),
     globals_map: std.StringHashMap(Value),
     extension_registry: ?*extensions.ExtensionRegistry,
+    active_template_loads: std.StringHashMap(usize),
 
     // Cache
     template_cache: ?*LRUCache,
@@ -175,6 +175,7 @@ pub const Environment = struct {
             .tests_map = std.StringHashMap(*tests.Test).init(allocator),
             .globals_map = std.StringHashMap(Value).init(allocator),
             .extension_registry = null,
+            .active_template_loads = std.StringHashMap(usize).init(allocator),
             .template_cache = if (defaults.CACHE_SIZE > 0) blk: {
                 const lru_cache = allocator.create(LRUCache) catch return Self{
                     .allocator = allocator,
@@ -198,6 +199,7 @@ pub const Environment = struct {
                     .tests_map = std.StringHashMap(*tests.Test).init(allocator),
                     .globals_map = std.StringHashMap(Value).init(allocator),
                     .extension_registry = null,
+                    .active_template_loads = std.StringHashMap(usize).init(allocator),
                     .template_cache = null,
                     .cache_size = defaults.CACHE_SIZE,
                     .auto_reload = defaults.AUTO_RELOAD,
@@ -209,12 +211,18 @@ pub const Environment = struct {
             .auto_reload = defaults.AUTO_RELOAD,
         };
 
-        // Register builtin filters
-        env.registerBuiltinFilters() catch {};
-        // Register builtin tests
-        env.registerBuiltinTests() catch {};
-        // Register builtin globals (range, dict, lipsum, cycler, joiner, namespace)
-        env.registerBuiltinGlobals() catch {};
+        // Registration can only fail on allocation; init() cannot return an error
+        // without breaking every caller, so log loudly instead of failing silently —
+        // an environment missing builtins produces baffling template errors later.
+        env.registerBuiltinFilters() catch |err| {
+            std.log.err("vibe-jinja: failed to register builtin filters: {s}", .{@errorName(err)});
+        };
+        env.registerBuiltinTests() catch |err| {
+            std.log.err("vibe-jinja: failed to register builtin tests: {s}", .{@errorName(err)});
+        };
+        env.registerBuiltinGlobals() catch |err| {
+            std.log.err("vibe-jinja: failed to register builtin globals: {s}", .{@errorName(err)});
+        };
 
         return env;
     }
@@ -295,6 +303,58 @@ pub const Environment = struct {
         try self.addFilter("e", filters.BuiltinFilters.escape); // Alias for escape
     }
 
+    fn filterExistsTest(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
+        _ = args;
+        _ = ctx;
+
+        const env_ptr = env orelse return false;
+        const self = @as(*Self, @ptrCast(@alignCast(env_ptr)));
+
+        return switch (val) {
+            .string => |filter_name| self.getFilter(filter_name) != null,
+            else => false,
+        };
+    }
+
+    fn testExistsTest(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
+        _ = args;
+        _ = ctx;
+
+        const env_ptr = env orelse return false;
+        const self = @as(*Self, @ptrCast(@alignCast(env_ptr)));
+
+        return switch (val) {
+            .string => |test_name| self.getTest(test_name) != null,
+            else => false,
+        };
+    }
+
+    fn callableTest(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
+        _ = args;
+        _ = ctx;
+
+        if (tests.BuiltinTests.callable(val, &.{}, null, null)) {
+            return true;
+        }
+
+        const env_ptr = env orelse return false;
+        const self = @as(*Self, @ptrCast(@alignCast(env_ptr)));
+
+        return switch (val) {
+            .string => |name| blk: {
+                if (self.getGlobal(name)) |global_val| {
+                    if (global_val.isCallable() or global_val == .callable) {
+                        break :blk true;
+                    }
+                }
+                if (self.getFilter(name) != null) break :blk true;
+                if (self.getTest(name) != null) break :blk true;
+                break :blk false;
+            },
+            else => false,
+        };
+    }
+
     /// Register all builtin tests
     fn registerBuiltinTests(self: *Self) !void {
         try self.addTest("defined", tests.BuiltinTests.defined);
@@ -317,12 +377,12 @@ pub const Environment = struct {
         try self.addTest("mapping", tests.BuiltinTests.mapping);
         try self.addTest("sequence", tests.BuiltinTests.sequence);
         try self.addTest("iterable", tests.BuiltinTests.iterable);
-        try self.addTest("callable", tests.BuiltinTests.callable);
+        try self.addTest("callable", callableTest);
         try self.addTest("sameas", tests.BuiltinTests.sameas);
         try self.addTest("escaped", tests.BuiltinTests.escaped);
         try self.addTest("in", tests.BuiltinTests.in);
-        try self.addTest("filter", tests.BuiltinTests.filter);
-        try self.addTest("test", tests.BuiltinTests.@"test");
+        try self.addTest("filter", filterExistsTest);
+        try self.addTest("test", testExistsTest);
 
         // Comparison operator tests (Jinja2 parity)
         try self.addTest("lt", tests.BuiltinTests.lt);
@@ -461,6 +521,12 @@ pub const Environment = struct {
             self.allocator.destroy(cache);
         }
 
+        var active_iter = self.active_template_loads.iterator();
+        while (active_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.active_template_loads.deinit();
+
         // Free loader if present
         if (self.loader) |loader| {
             loader.deinit();
@@ -528,6 +594,62 @@ pub const Environment = struct {
     /// Pointer to the extension registry, or null if no extensions are registered
     pub fn getExtensionRegistry(self: *Self) ?*extensions.ExtensionRegistry {
         return self.extension_registry;
+    }
+
+    fn registryHandlesTag(registry_ptr: *anyopaque, tag: []const u8) bool {
+        const registry = @as(*extensions.ExtensionRegistry, @ptrCast(@alignCast(registry_ptr)));
+        return registry.handlesTag(tag);
+    }
+
+    fn registryParseTag(registry_ptr: *anyopaque, pars: *parser.Parser, tag: []const u8) parser.ParseError!?*nodes.Stmt {
+        const registry = @as(*extensions.ExtensionRegistry, @ptrCast(@alignCast(registry_ptr)));
+        return registry.parseTag(pars, tag) catch |err| switch (err) {
+            error.OutOfMemory => error.OutOfMemory,
+            else => exceptions.TemplateError.RuntimeError,
+        };
+    }
+
+    pub fn parserExtensionRegistry(self: *Self) ?parser.ExtensionRegistryHandle {
+        const registry = self.extension_registry orelse return null;
+        return .{
+            .ptr = @ptrCast(registry),
+            .handlesTagFn = registryHandlesTag,
+            .parseTagFn = registryParseTag,
+        };
+    }
+
+    pub const TemplateLoadGuard = struct {
+        env: *Self,
+        name: []const u8,
+        active: bool = true,
+
+        pub fn deinit(self: *TemplateLoadGuard) void {
+            if (self.active) {
+                self.env.leaveTemplateLoad(self.name);
+                self.active = false;
+            }
+        }
+    };
+
+    pub fn enterTemplateLoad(self: *Self, name: []const u8) !TemplateLoadGuard {
+        if (self.active_template_loads.contains(name)) {
+            return exceptions.TemplateError.RuntimeError;
+        }
+
+        const name_copy = try self.allocator.dupe(u8, name);
+        errdefer self.allocator.free(name_copy);
+        try self.active_template_loads.put(name_copy, 1);
+
+        return TemplateLoadGuard{
+            .env = self,
+            .name = name,
+        };
+    }
+
+    fn leaveTemplateLoad(self: *Self, name: []const u8) void {
+        if (self.active_template_loads.fetchRemove(name)) |entry| {
+            self.allocator.free(entry.key);
+        }
     }
 
     /// Create a template from a string
@@ -1178,6 +1300,7 @@ pub const Environment = struct {
             .tests_map = self.tests_map, // Share reference
             .globals_map = self.globals_map, // Share reference
             .extension_registry = null, // Will be set up below
+            .active_template_loads = std.StringHashMap(usize).init(self.allocator),
             // Create new cache
             .template_cache = null,
             .cache_size = options.cache_size orelse self.cache_size,

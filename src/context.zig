@@ -1,11 +1,32 @@
 const std = @import("std");
 const environment = @import("environment.zig");
-const nodes = @import("nodes.zig");
 const value_mod = @import("value.zig");
-const runtime = @import("runtime.zig");
 
 /// Re-export Value type for convenience
 pub const Value = value_mod.Value;
+
+const TemplateRefHandle = struct {
+    ptr: *anyopaque,
+    hasBlockFn: *const fn (*anyopaque, []const u8) bool,
+    destroyFn: *const fn (std.mem.Allocator, *anyopaque) void,
+
+    fn hasBlock(self: TemplateRefHandle, name: []const u8) bool {
+        return self.hasBlockFn(self.ptr, name);
+    }
+
+    fn destroy(self: TemplateRefHandle, allocator: std.mem.Allocator) void {
+        self.destroyFn(allocator, self.ptr);
+    }
+};
+
+const ModuleHandle = struct {
+    ptr: *anyopaque,
+    destroyFn: *const fn (std.mem.Allocator, *anyopaque) void,
+
+    fn destroy(self: ModuleHandle, allocator: std.mem.Allocator) void {
+        self.destroyFn(allocator, self.ptr);
+    }
+};
 
 /// Context system for template variable resolution and scoping
 ///
@@ -42,15 +63,15 @@ pub const Context = struct {
     vars: std.StringHashMap(Value),
     /// Blocks available in this context (for template inheritance)
     /// Maps block name to a list of blocks (stack for super() support)
-    blocks: std.StringHashMap(std.ArrayList(*nodes.Block)),
+    blocks: std.StringHashMap(std.ArrayList(*anyopaque)),
     /// Macros available in this context
-    macros: std.StringHashMap(*nodes.Macro),
+    macros: std.StringHashMap(*anyopaque),
     /// Exported variable names
     exported_vars: std.StringHashMap(void),
     /// Imported modules (for import statements)
-    imported_modules: std.StringHashMap(*runtime.TemplateModule),
+    imported_modules: std.StringHashMap(ModuleHandle),
     /// Template reference (self) - allows accessing blocks via self.block_name
-    template_ref: ?*runtime.TemplateReference,
+    template_ref: ?TemplateRefHandle,
     /// Whether this context owns the template_ref (only the context that setTemplateRef was called on)
     owns_template_ref: bool,
     /// Template name
@@ -118,10 +139,10 @@ pub const Context = struct {
             .allocator = allocator,
             .parent = null,
             .vars = new_vars,
-            .blocks = std.StringHashMap(std.ArrayList(*nodes.Block)).init(allocator),
-            .macros = std.StringHashMap(*nodes.Macro).init(allocator),
+            .blocks = std.StringHashMap(std.ArrayList(*anyopaque)).init(allocator),
+            .macros = std.StringHashMap(*anyopaque).init(allocator),
             .exported_vars = std.StringHashMap(void).init(allocator),
-            .imported_modules = std.StringHashMap(*runtime.TemplateModule).init(allocator),
+            .imported_modules = std.StringHashMap(ModuleHandle).init(allocator),
             .template_ref = null,
             .owns_template_ref = false,
             .name = name,
@@ -182,10 +203,10 @@ pub const Context = struct {
             .allocator = allocator,
             .parent = parent,
             .vars = new_vars,
-            .blocks = std.StringHashMap(std.ArrayList(*nodes.Block)).init(allocator),
-            .macros = std.StringHashMap(*nodes.Macro).init(allocator),
+            .blocks = std.StringHashMap(std.ArrayList(*anyopaque)).init(allocator),
+            .macros = std.StringHashMap(*anyopaque).init(allocator),
             .exported_vars = std.StringHashMap(void).init(allocator),
-            .imported_modules = std.StringHashMap(*runtime.TemplateModule).init(allocator),
+            .imported_modules = std.StringHashMap(ModuleHandle).init(allocator),
             .template_ref = null,
             .owns_template_ref = false,
             .name = name,
@@ -274,10 +295,10 @@ pub const Context = struct {
             .allocator = self.allocator,
             .parent = self,
             .vars = new_vars,
-            .blocks = std.StringHashMap(std.ArrayList(*nodes.Block)).init(self.allocator),
-            .macros = std.StringHashMap(*nodes.Macro).init(self.allocator),
+            .blocks = std.StringHashMap(std.ArrayList(*anyopaque)).init(self.allocator),
+            .macros = std.StringHashMap(*anyopaque).init(self.allocator),
             .exported_vars = std.StringHashMap(void).init(self.allocator),
-            .imported_modules = std.StringHashMap(*runtime.TemplateModule).init(self.allocator),
+            .imported_modules = std.StringHashMap(ModuleHandle).init(self.allocator),
             .template_ref = self.template_ref,
             .owns_template_ref = false, // Derived context borrows template_ref from parent
             .name = if (self.name) |n| try self.allocator.dupe(u8, n) else null,
@@ -293,7 +314,7 @@ pub const Context = struct {
             errdefer self.allocator.free(key_copy);
 
             // Copy block stack
-            var stack_copy = std.ArrayList(*nodes.Block).empty;
+            var stack_copy = std.ArrayList(*anyopaque).empty;
             for (entry.value_ptr.*.items) |block| {
                 try stack_copy.append(self.allocator, block);
             }
@@ -304,8 +325,26 @@ pub const Context = struct {
     }
 
     /// Set template reference (self)
-    pub fn setTemplateRef(self: *Self, template_ref: *runtime.TemplateReference) void {
-        self.template_ref = template_ref;
+    pub fn setTemplateRef(self: *Self, template_ref: anytype) void {
+        const Ref = @typeInfo(@TypeOf(template_ref)).pointer.child;
+        const Adapter = struct {
+            fn hasBlock(ptr: *anyopaque, name: []const u8) bool {
+                const ref = @as(*Ref, @ptrCast(@alignCast(ptr)));
+                return ref.getBlock(name) != null;
+            }
+
+            fn destroy(allocator: std.mem.Allocator, ptr: *anyopaque) void {
+                const ref = @as(*Ref, @ptrCast(@alignCast(ptr)));
+                ref.deinit();
+                allocator.destroy(ref);
+            }
+        };
+
+        self.template_ref = .{
+            .ptr = @ptrCast(template_ref),
+            .hasBlockFn = Adapter.hasBlock,
+            .destroyFn = Adapter.destroy,
+        };
         self.owns_template_ref = true; // This context now owns the template_ref
 
         // Also add 'self' as a variable (dict-like access to blocks)
@@ -336,8 +375,12 @@ pub const Context = struct {
             self.allocator.free(self_key);
             return;
         };
-        // Track this key as owned so it gets freed in deinit
-        self.owned_keys.put(self_key, {}) catch {};
+        // Track this key as owned so it gets freed in deinit. On allocation
+        // failure the key stays reachable via vars but untracked (a leak only on
+        // this OOM path) — record why instead of swallowing it.
+        self.owned_keys.put(self_key, {}) catch |err| {
+            std.log.debug("vibe-jinja: self key not tracked for cleanup: {s}", .{@errorName(err)});
+        };
     }
 
     /// Deinitialize the context and free allocated memory
@@ -380,8 +423,7 @@ pub const Context = struct {
         var module_iter = self.imported_modules.iterator();
         while (module_iter.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
-            entry.value_ptr.*.deinit();
-            self.allocator.destroy(entry.value_ptr.*);
+            entry.value_ptr.*.destroy(self.allocator);
         }
         self.imported_modules.deinit();
 
@@ -389,7 +431,7 @@ pub const Context = struct {
         // (Only the context that received it via setTemplateRef owns it)
         if (self.owns_template_ref) {
             if (self.template_ref) |ref| {
-                self.allocator.destroy(ref);
+                ref.destroy(self.allocator);
             }
         }
 
@@ -413,7 +455,7 @@ pub const Context = struct {
         // Check template reference (self) for block access
         if (self.template_ref) |ref| {
             // Check if accessing a block via self.block_name
-            if (ref.getBlock(name)) |_| {
+            if (ref.hasBlock(name)) {
                 // Return block reference as a dict-like value
                 // In a full implementation, this would be callable
                 const block_dict_ptr = self.allocator.create(value_mod.Dict) catch return Value{ .undefined = value_mod.Undefined{
@@ -498,7 +540,7 @@ pub const Context = struct {
 
     /// Get a block stack by name, checking parent contexts
     /// Returns the list of blocks (stack) for this name
-    pub fn getBlockStack(self: *Self, name: []const u8) ?std.ArrayList(*nodes.Block) {
+    pub fn getBlockStack(self: *Self, name: []const u8) ?std.ArrayList(*anyopaque) {
         if (self.blocks.get(name)) |*stack| {
             return stack.*;
         }
@@ -509,7 +551,7 @@ pub const Context = struct {
     }
 
     /// Get the first (current) block by name
-    pub fn getBlock(self: *Self, name: []const u8) ?*nodes.Block {
+    pub fn getBlock(self: *Self, name: []const u8) ?*anyopaque {
         if (self.getBlockStack(name)) |stack| {
             if (stack.items.len > 0) {
                 return stack.items[0];
@@ -520,7 +562,7 @@ pub const Context = struct {
 
     /// Add a block to the stack (for template inheritance)
     /// Creates a new stack if one doesn't exist, or appends to existing stack
-    pub fn addBlock(self: *Self, name: []const u8, block: *nodes.Block) !void {
+    pub fn addBlock(self: *Self, name: []const u8, block: *anyopaque) !void {
         // Check if key already exists using the original name (not a copy)
         if (self.blocks.getPtr(name)) |stack_ptr| {
             // Append to existing stack - no need to allocate a new key
@@ -530,14 +572,28 @@ pub const Context = struct {
             const name_copy = try self.allocator.dupe(u8, name);
             errdefer self.allocator.free(name_copy);
 
-            var stack = std.ArrayList(*nodes.Block).empty;
+            var stack = std.ArrayList(*anyopaque).empty;
+            try stack.append(self.allocator, block);
+            try self.blocks.put(name_copy, stack);
+        }
+    }
+
+    /// Prepend a block to the stack (child blocks override parent blocks).
+    pub fn prependBlock(self: *Self, name: []const u8, block: *anyopaque) !void {
+        if (self.blocks.getPtr(name)) |stack_ptr| {
+            try stack_ptr.insert(self.allocator, 0, block);
+        } else {
+            const name_copy = try self.allocator.dupe(u8, name);
+            errdefer self.allocator.free(name_copy);
+
+            var stack = std.ArrayList(*anyopaque).empty;
             try stack.append(self.allocator, block);
             try self.blocks.put(name_copy, stack);
         }
     }
 
     /// Set a block in this context (replaces existing stack)
-    pub fn setBlock(self: *Self, name: []const u8, block: *nodes.Block) !void {
+    pub fn setBlock(self: *Self, name: []const u8, block: *anyopaque) !void {
         // Remove old stack if exists, using the original name for lookup
         if (self.blocks.fetchRemove(name)) |old| {
             self.allocator.free(old.key);
@@ -548,14 +604,14 @@ pub const Context = struct {
         const name_copy = try self.allocator.dupe(u8, name);
         errdefer self.allocator.free(name_copy);
 
-        var stack = std.ArrayList(*nodes.Block).empty;
+        var stack = std.ArrayList(*anyopaque).empty;
         try stack.append(self.allocator, block);
         try self.blocks.put(name_copy, stack);
     }
 
     /// Get super block (parent block in the stack)
     /// Returns the next block in the stack for the given name, or null if none
-    pub fn getSuperBlock(self: *Self, name: []const u8, current_block: *nodes.Block) ?*nodes.Block {
+    pub fn getSuperBlock(self: *Self, name: []const u8, current_block: *anyopaque) ?*anyopaque {
         if (self.blocks.get(name)) |stack| {
             // Find current block index
             for (stack.items, 0..) |block, i| {
@@ -572,7 +628,7 @@ pub const Context = struct {
     }
 
     /// Get a macro by name, checking parent contexts
-    pub fn getMacro(self: *Self, name: []const u8) ?*nodes.Macro {
+    pub fn getMacro(self: *Self, name: []const u8) ?*anyopaque {
         if (self.macros.get(name)) |macro| {
             return macro;
         }
@@ -583,7 +639,7 @@ pub const Context = struct {
     }
 
     /// Set a macro in this context
-    pub fn setMacro(self: *Self, name: []const u8, macro: *nodes.Macro) !void {
+    pub fn setMacro(self: *Self, name: []const u8, macro: *anyopaque) !void {
         const name_copy = try self.allocator.dupe(u8, name);
         errdefer self.allocator.free(name_copy);
 
@@ -596,7 +652,16 @@ pub const Context = struct {
     }
 
     /// Set an imported module in this context
-    pub fn setImportedModule(self: *Self, name: []const u8, module: *runtime.TemplateModule) !void {
+    pub fn setImportedModule(self: *Self, name: []const u8, module: anytype) !void {
+        const Module = @typeInfo(@TypeOf(module)).pointer.child;
+        const Adapter = struct {
+            fn destroy(allocator: std.mem.Allocator, ptr: *anyopaque) void {
+                const typed = @as(*Module, @ptrCast(@alignCast(ptr)));
+                typed.deinit();
+                allocator.destroy(typed);
+            }
+        };
+
         // Create separate key copies for vars and imported_modules to avoid double-free
         const vars_key = try self.allocator.dupe(u8, name);
         errdefer self.allocator.free(vars_key);
@@ -607,8 +672,7 @@ pub const Context = struct {
         // Remove old module if exists
         if (self.imported_modules.fetchRemove(name)) |old| {
             self.allocator.free(old.key);
-            old.value.deinit();
-            self.allocator.destroy(old.value);
+            old.value.destroy(self.allocator);
         }
 
         // Remove old var if exists (to avoid key leak)
@@ -637,7 +701,10 @@ pub const Context = struct {
         const module_value = Value{ .dict = module_dict_ptr };
         try self.vars.put(vars_key, module_value);
 
-        try self.imported_modules.put(modules_key, module);
+        try self.imported_modules.put(modules_key, .{
+            .ptr = @ptrCast(module),
+            .destroyFn = Adapter.destroy,
+        });
     }
 
     /// Helper to copy a value for module storage (uses deepCopy)
@@ -646,9 +713,9 @@ pub const Context = struct {
     }
 
     /// Get an imported module by name
-    pub fn getImportedModule(self: *Self, name: []const u8) ?*runtime.TemplateModule {
+    pub fn getImportedModule(self: *Self, name: []const u8) ?*anyopaque {
         if (self.imported_modules.get(name)) |module| {
-            return module;
+            return module.ptr;
         }
         if (self.parent) |parent| {
             return parent.getImportedModule(name);

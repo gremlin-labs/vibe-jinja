@@ -675,6 +675,8 @@ pub const FileSystemBytecodeCache = struct {
         // Replace %s in pattern with bucket key
         var result = std.ArrayList(u8){};
         errdefer result.deinit(self.allocator);
+        // Final size is exactly pattern minus "%s" plus the key; reserve once.
+        try result.ensureTotalCapacity(self.allocator, self.pattern.len + bucket.key.len);
 
         var i: usize = 0;
         while (i < self.pattern.len) {
@@ -733,7 +735,9 @@ pub const FileSystemBytecodeCache = struct {
         const file = try std.fs.cwd().createFile(tmp_filename, .{});
         errdefer {
             file.close();
-            std.fs.cwd().deleteFile(tmp_filename) catch {};
+            std.fs.cwd().deleteFile(tmp_filename) catch |err| {
+                std.log.debug("vibe-jinja: tmp cache file cleanup failed: {s}", .{@errorName(err)});
+            };
         }
 
         try file.writeAll(data);
@@ -741,7 +745,9 @@ pub const FileSystemBytecodeCache = struct {
 
         // Rename to final filename
         std.fs.cwd().rename(tmp_filename, filename) catch |err| {
-            std.fs.cwd().deleteFile(tmp_filename) catch {};
+            std.fs.cwd().deleteFile(tmp_filename) catch |del_err| {
+                std.log.debug("vibe-jinja: tmp cache file cleanup failed: {s}", .{@errorName(del_err)});
+            };
             return err;
         };
     }
@@ -765,7 +771,9 @@ pub const FileSystemBytecodeCache = struct {
             if (std.mem.startsWith(u8, entry.name, prefix) and
                 std.mem.endsWith(u8, entry.name, suffix))
             {
-                dir.deleteFile(entry.name) catch {};
+                dir.deleteFile(entry.name) catch |err| {
+                    std.log.debug("vibe-jinja: cache clear could not delete {s}: {s}", .{ entry.name, @errorName(err) });
+                };
             }
         }
     }

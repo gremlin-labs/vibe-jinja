@@ -270,3 +270,36 @@ test "parse autoescape block" {
     // Check that body has one item (the "Hello" text)
     try testing.expect(autoescape_stmt.body.items.len == 1);
 }
+
+test "parse survives adversarially deep expression nesting via depth budget" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var env = environment.Environment.init(allocator);
+    defer env.deinit();
+
+    // 50k nested parens would exhaust the native stack without the parser's
+    // expression-depth budget (256). With it, parseOr fails the statement with
+    // SyntaxError and the parser's standard error recovery drops it — parsing
+    // completes with an empty body instead of crashing the process.
+    var source = std.ArrayList(u8){};
+    defer source.deinit(allocator);
+    try source.appendSlice(allocator, "{{ ");
+    try source.appendNTimes(allocator, '(', 50_000);
+    try source.append(allocator, '1');
+    try source.appendNTimes(allocator, ')', 50_000);
+    try source.appendSlice(allocator, " }}");
+
+    var lex = lexer.Lexer.init(&env, source.items, "test");
+    const stream = try lex.tokenize(allocator);
+    defer allocator.free(stream.tokens);
+
+    var p = parser.Parser.init(&env, stream, "test", allocator);
+    const template = try p.parse();
+    defer {
+        template.deinit(allocator);
+        allocator.destroy(template);
+    }
+    try testing.expectEqual(@as(usize, 0), template.body.items.len);
+}

@@ -141,8 +141,8 @@ test "extension add filter" {
             val: value.Value,
             args: []value.Value,
             kwargs: *const std.StringHashMap(value.Value),
-            ctx: ?*context.Context,
-            env: ?*environment.Environment,
+            ctx: ?*anyopaque,
+            env: ?*anyopaque,
         ) filters.FilterError!value.Value {
             _ = val;
             _ = args;
@@ -169,8 +169,8 @@ test "extension add test" {
         fn testImpl(
             val: value.Value,
             args: []const value.Value,
-            ctx: ?*context.Context,
-            env: ?*environment.Environment,
+            ctx: ?*anyopaque,
+            env: ?*anyopaque,
         ) bool {
             _ = val;
             _ = args;
@@ -216,7 +216,7 @@ test "extension bind to environment" {
     defer bound.deinit();
 
     try testing.expectEqualStrings("test_extension", bound.name);
-    try testing.expect(bound.environment == &env);
+    try testing.expect(bound.environment == @as(*anyopaque, @ptrCast(&env)));
     try testing.expect(bound.tags.items.len == 1);
     try testing.expectEqualStrings("mytag", bound.tags.items[0]);
 }

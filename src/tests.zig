@@ -60,8 +60,8 @@
 //! fn myTest(
 //!     val: jinja.Value,
 //!     args: []const jinja.Value,
-//!     ctx: ?*jinja.context.Context,
-//!     env: ?*jinja.Environment,
+//!     ctx: ?*anyopaque,
+//!     env: ?*anyopaque,
 //! ) bool {
 //!     // Test value and return bool
 //!     return true;
@@ -71,10 +71,8 @@
 //! ```
 
 const std = @import("std");
-const context = @import("context.zig");
 const value_mod = @import("value.zig");
-const utils = @import("utils.zig");
-const environment = @import("environment.zig");
+const PassArg = @import("pass_arg.zig").PassArg;
 
 /// Re-export Value type for convenience
 pub const Value = value_mod.Value;
@@ -87,7 +85,7 @@ pub const Value = value_mod.Value;
 /// - `.context` - Pass current template context
 /// - `.eval_context` - Pass evaluation context
 /// - `.environment` - Pass environment reference
-pub const TestFn = *const fn (value: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool;
+pub const TestFn = *const fn (value: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool;
 
 /// Async test function signature
 ///
@@ -120,7 +118,7 @@ pub const Test = struct {
     /// Optional async test function (used when enable_async is true)
     async_func: ?AsyncTestFn = null,
     /// What argument should be passed to this test (context, eval_context, environment)
-    pass_arg: utils.PassArg = .none,
+    pass_arg: PassArg = .none,
     /// Whether this test is marked as internal (shouldn't appear in tracebacks)
     is_internal: bool = false,
     /// Whether this test supports async execution
@@ -152,7 +150,7 @@ pub const Test = struct {
     }
 
     /// Create a test with pass argument decorator
-    pub fn withPassArg(name: []const u8, func: TestFn, pass_arg: utils.PassArg) Self {
+    pub fn withPassArg(name: []const u8, func: TestFn, pass_arg: PassArg) Self {
         return Self{
             .name = name,
             .func = func,
@@ -200,7 +198,6 @@ pub const BuiltinTestMap = std.StaticStringMap(TestFn).initComptime(.{
     .{ "mapping", BuiltinTests.mapping },
     .{ "sequence", BuiltinTests.sequence },
     .{ "iterable", BuiltinTests.iterable },
-    .{ "callable", BuiltinTests.callable },
     .{ "sameas", BuiltinTests.sameas },
     .{ "escaped", BuiltinTests.escaped },
     .{ "in", BuiltinTests.@"in" },
@@ -209,8 +206,6 @@ pub const BuiltinTestMap = std.StaticStringMap(TestFn).initComptime(.{
     .{ "le", BuiltinTests.le },
     .{ "gt", BuiltinTests.gt },
     .{ "ge", BuiltinTests.ge },
-    .{ "filter", BuiltinTests.filter },
-    .{ "test", BuiltinTests.@"test" },
 });
 
 /// Fast path for looking up builtin tests
@@ -224,8 +219,10 @@ pub const BuiltinTests = struct {
     /// Check if value is defined (not the undefined type)
     /// In Jinja2, `is defined` checks whether a variable exists, not whether it's truthy
     /// A value of `false`, `0`, `""`, or `null` is still "defined"
-    pub fn defined(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn defined(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
+        _ = ctx;
+        _ = env;
         _ = ctx;
         _ = env;
         // A value is defined if it's not the undefined type
@@ -237,7 +234,7 @@ pub const BuiltinTests = struct {
 
     /// Check if value is undefined
     /// Returns true only for undefined variables
-    pub fn @"undefined"(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn @"undefined"(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -248,7 +245,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value equals another value
-    pub fn equalto(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn equalto(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = ctx;
         _ = env;
         if (args.len == 0) {
@@ -259,7 +256,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is even (for numbers)
-    pub fn even(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn even(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -268,7 +265,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is odd (for numbers)
-    pub fn odd(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn odd(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -277,7 +274,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is divisible by a number
-    pub fn divisibleby(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn divisibleby(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = ctx;
         _ = env;
         if (args.len == 0) {
@@ -292,7 +289,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is lowercase
-    pub fn lower(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn lower(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -307,7 +304,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is uppercase
-    pub fn upper(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn upper(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -322,7 +319,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is a string
-    pub fn string(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn string(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -333,7 +330,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is a number
-    pub fn number(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn number(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -344,7 +341,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is empty
-    pub fn empty(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn empty(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -352,7 +349,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is none/null
-    pub fn none(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn none(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -364,7 +361,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is boolean
-    pub fn boolean(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn boolean(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -375,7 +372,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is false
-    pub fn @"false"(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn @"false"(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -386,7 +383,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is true
-    pub fn @"true"(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn @"true"(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -397,7 +394,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is integer
-    pub fn integer(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn integer(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -408,7 +405,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is float
-    pub fn float(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn float(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -419,7 +416,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is a mapping (dict)
-    pub fn mapping(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn mapping(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -430,7 +427,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is a sequence (list)
-    pub fn sequence(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn sequence(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -441,7 +438,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is iterable (list, dict, or string)
-    pub fn iterable(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn iterable(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -452,8 +449,10 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is callable (function, macro, or callable object)
-    pub fn callable(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn callable(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
+        _ = ctx;
+        _ = env;
 
         // Check if value is directly a callable type
         if (val.isCallable()) {
@@ -475,34 +474,7 @@ pub const BuiltinTests = struct {
                 return false;
             },
             .string => |s| {
-                // Check if value represents a macro (from context)
-                if (ctx) |c| {
-                    if (c.getMacro(s)) |_| {
-                        return true;
-                    }
-                }
-
-                // Check if value represents a callable global function
-                if (env) |e| {
-                    if (e.getGlobal(s)) |global_val| {
-                        // Check if the global is itself callable
-                        if (global_val.isCallable()) {
-                            return true;
-                        }
-                        // Check if global is a callable value
-                        if (global_val == .callable) {
-                            return true;
-                        }
-                    }
-                    // Check if it's a filter name (filters are callable)
-                    if (e.getFilter(s)) |_| {
-                        return true;
-                    }
-                    // Check if it's a test name (tests are callable)
-                    if (e.getTest(s)) |_| {
-                        return true;
-                    }
-                }
+                _ = s;
                 return false;
             },
             else => return false,
@@ -510,7 +482,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is same as another (object identity)
-    pub fn sameas(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn sameas(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = ctx;
         _ = env;
         if (args.len == 0) {
@@ -522,7 +494,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is escaped (marked as safe HTML/XML)
-    pub fn escaped(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn escaped(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
         _ = env;
@@ -534,7 +506,7 @@ pub const BuiltinTests = struct {
     }
 
     /// Check if value is in a sequence (test version of 'in' operator)
-    pub fn in(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn in(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = ctx;
         _ = env;
         if (args.len == 0) {
@@ -564,40 +536,24 @@ pub const BuiltinTests = struct {
         };
     }
 
-    /// Check if a filter exists by name
-    /// Requires environment access
-    pub fn filter(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    /// Check if a filter exists by name.
+    /// Environment-specific behavior is registered by Environment.
+    pub fn filter(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
+        _ = val;
         _ = args;
         _ = ctx;
-
-        if (env == null) {
-            return false;
-        }
-
-        // Convert value to string (filter name)
-        const filter_name = val.toString(std.heap.page_allocator) catch return false;
-        defer std.heap.page_allocator.free(filter_name);
-
-        // Check if filter exists in environment
-        return env.?.getFilter(filter_name) != null;
+        _ = env;
+        return false;
     }
 
-    /// Check if a test exists by name
-    /// Requires environment access
-    pub fn @"test"(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    /// Check if a test exists by name.
+    /// Environment-specific behavior is registered by Environment.
+    pub fn @"test"(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
+        _ = val;
         _ = args;
         _ = ctx;
-
-        if (env == null) {
-            return false;
-        }
-
-        // Convert value to string (test name)
-        const test_name = val.toString(std.heap.page_allocator) catch return false;
-        defer std.heap.page_allocator.free(test_name);
-
-        // Check if test exists in environment
-        return env.?.getTest(test_name) != null;
+        _ = env;
+        return false;
     }
 
     // ============================================================================
@@ -608,7 +564,7 @@ pub const BuiltinTests = struct {
     /// Usage: {{ 1 is lt 2 }} -> True
     /// Usage: {{ 1 is lt(2) }} -> True
     /// Usage: {{ 1 is lessthan 2 }} -> True
-    pub fn lt(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn lt(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = ctx;
         _ = env;
         if (args.len == 0) return false;
@@ -644,7 +600,7 @@ pub const BuiltinTests = struct {
     /// Less than or equal test (matches Jinja2 operator.le)
     /// Usage: {{ 2 is le 2 }} -> True
     /// Usage: {{ 2 is le(2) }} -> True
-    pub fn le(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn le(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = ctx;
         _ = env;
         if (args.len == 0) return false;
@@ -682,7 +638,7 @@ pub const BuiltinTests = struct {
     /// Usage: {{ 2 is gt 1 }} -> True
     /// Usage: {{ 2 is gt(1) }} -> True
     /// Usage: {{ 2 is greaterthan 1 }} -> True
-    pub fn gt(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn gt(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = ctx;
         _ = env;
         if (args.len == 0) return false;
@@ -718,7 +674,7 @@ pub const BuiltinTests = struct {
     /// Greater than or equal test (matches Jinja2 operator.ge)
     /// Usage: {{ 2 is ge 2 }} -> True
     /// Usage: {{ 2 is ge(2) }} -> True
-    pub fn ge(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn ge(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = ctx;
         _ = env;
         if (args.len == 0) return false;
@@ -755,7 +711,7 @@ pub const BuiltinTests = struct {
     /// Not equal test (matches Jinja2 operator.ne)
     /// Usage: {{ 1 is ne 2 }} -> True
     /// Usage: {{ 1 is ne(2) }} -> True
-    pub fn ne(val: Value, args: []const Value, ctx: ?*context.Context, env: ?*environment.Environment) bool {
+    pub fn ne(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = ctx;
         _ = env;
         if (args.len == 0) return false;
