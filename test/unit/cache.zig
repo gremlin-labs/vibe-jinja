@@ -5,6 +5,14 @@ const cache_mod = vibe_jinja.cache;
 const nodes = vibe_jinja.nodes;
 const bytecode_mod = vibe_jinja.bytecode;
 
+fn makeEntry(allocator: std.mem.Allocator, name: []const u8) !*cache_mod.TemplateCacheEntry {
+    const template = try allocator.create(nodes.Template);
+    template.* = nodes.Template.init(allocator, 1, name);
+    const entry = try allocator.create(cache_mod.TemplateCacheEntry);
+    entry.* = .{ .template = template, .last_modified = 0, .access_count = 0, .source_checksum = 0 };
+    return entry;
+}
+
 test "LRU cache basic operations" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -119,6 +127,35 @@ test "LRU cache statistics" {
     try testing.expectEqual(@as(usize, 1), stats.hits);
     try testing.expectEqual(@as(usize, 1), stats.misses);
     try testing.expect(stats.hit_rate > 0.0);
+}
+
+test "LRU cache compatibility aliases use the environment implementation" {
+    var env = vibe_jinja.Environment.init(testing.allocator);
+    defer env.deinit();
+    const canonical: *vibe_jinja.template_cache.LRUCache = env.template_cache.?;
+    const compatibility: *cache_mod.LRUCache = canonical;
+    try testing.expectEqual(canonical, compatibility);
+}
+
+test "LRU cache handles zero capacity, replacement, removal, and clear" {
+    const allocator = testing.allocator;
+
+    var disabled = cache_mod.LRUCache.init(allocator, 0);
+    defer disabled.deinit();
+    try disabled.put("discarded", try makeEntry(allocator, "discarded"));
+    try testing.expectEqual(@as(usize, 0), disabled.count());
+
+    var cache = cache_mod.LRUCache.init(allocator, 2);
+    defer cache.deinit();
+    try cache.put("one", try makeEntry(allocator, "one"));
+    try cache.put("one", try makeEntry(allocator, "replacement"));
+    try testing.expectEqual(@as(usize, 1), cache.count());
+    try testing.expect(cache.remove("one"));
+    try testing.expect(!cache.remove("missing"));
+    try cache.put("two", try makeEntry(allocator, "two"));
+    try cache.put("three", try makeEntry(allocator, "three"));
+    cache.clear();
+    try testing.expectEqual(@as(usize, 0), cache.count());
 }
 
 // ============================================================================

@@ -33,20 +33,11 @@ test "template inheritance basic" {
 
     // Use DictLoader for templates
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "parent.jinja"), try allocator.dupe(u8, parent_source));
     try mapping.put(try allocator.dupe(u8, "child.jinja"), try allocator.dupe(u8, child_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -83,20 +74,11 @@ test "template inheritance with super" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "parent.jinja"), try allocator.dupe(u8, parent_source));
     try mapping.put(try allocator.dupe(u8, "child.jinja"), try allocator.dupe(u8, child_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -137,21 +119,12 @@ test "template inheritance multiple levels" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "grandparent.jinja"), try allocator.dupe(u8, grandparent_source));
     try mapping.put(try allocator.dupe(u8, "parent.jinja"), try allocator.dupe(u8, parent_source));
     try mapping.put(try allocator.dupe(u8, "child.jinja"), try allocator.dupe(u8, child_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -188,20 +161,11 @@ test "template inheritance block scoping" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "parent.jinja"), try allocator.dupe(u8, parent_source));
     try mapping.put(try allocator.dupe(u8, "child.jinja"), try allocator.dupe(u8, child_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -241,20 +205,11 @@ test "template inheritance multiple blocks" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "parent.jinja"), try allocator.dupe(u8, parent_source));
     try mapping.put(try allocator.dupe(u8, "child.jinja"), try allocator.dupe(u8, child_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -294,20 +249,11 @@ test "template inheritance required block overridden" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "parent.jinja"), try allocator.dupe(u8, parent_source));
     try mapping.put(try allocator.dupe(u8, "child.jinja"), try allocator.dupe(u8, child_source));
 
     var loader = loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
     env.loader = loader.getLoader();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -344,28 +290,19 @@ test "template inheritance scoped block" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "parent.jinja"), try allocator.dupe(u8, parent_source));
     try mapping.put(try allocator.dupe(u8, "child.jinja"), try allocator.dupe(u8, child_source));
 
     var loader = loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
     env.loader = loader.getLoader();
 
     var rt = runtime.Runtime.init(&env, allocator);
     defer rt.deinit();
 
     // Create list value for items
-    const items_list = try allocator.create(context.List);
-    items_list.* = context.List.init(allocator);
+    const items_list = try allocator.create(vibe_jinja.value.List);
+    items_list.* = vibe_jinja.value.List.init(allocator);
     try items_list.append(context.Value{ .integer = 1 });
     try items_list.append(context.Value{ .integer = 2 });
     try items_list.append(context.Value{ .integer = 3 });

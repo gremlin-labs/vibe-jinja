@@ -1,4 +1,5 @@
 const std = @import("std");
+const html_escape = @import("html_escape.zig");
 
 /// Logging callback for undefined access
 /// Called when undefined value is accessed
@@ -19,7 +20,6 @@ pub const Undefined = struct {
     logger: ?*const UndefinedLogger = null,
 
     const Self = @This();
-
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         _ = self;
         _ = allocator;
@@ -456,6 +456,45 @@ pub const Value = union(enum) {
     custom: *CustomObject,
 
     const Self = @This();
+    const max_traversal_depth: usize = 64;
+    const EqualityError = error{ Overflow, UndefinedError };
+
+    const TraversalState = struct {
+        pointers: [max_traversal_depth]usize = undefined,
+        len: usize = 0,
+
+        fn enter(self: *TraversalState, pointer: usize) !void {
+            if (self.len >= max_traversal_depth) return error.Overflow;
+            for (self.pointers[0..self.len]) |active| {
+                if (active == pointer) return error.Overflow;
+            }
+            self.pointers[self.len] = pointer;
+            self.len += 1;
+        }
+
+        fn leave(self: *TraversalState) void {
+            self.len -= 1;
+        }
+    };
+
+    const EqualityState = struct {
+        pairs: [max_traversal_depth]struct { left: usize, right: usize } = undefined,
+        len: usize = 0,
+
+        fn enter(self: *EqualityState, left: usize, right: usize) !bool {
+            for (self.pairs[0..self.len]) |pair| {
+                if (pair.left == left and pair.right == right) return false;
+            }
+            if (self.len >= max_traversal_depth) return error.Overflow;
+            self.pairs[self.len] = .{ .left = left, .right = right };
+            self.len += 1;
+            return true;
+        }
+
+        fn leave(self: *EqualityState) void {
+            self.len -= 1;
+        }
+    };
 
     /// Deinitialize the value and free any allocated memory
     /// Takes a const pointer since deinit only reads the value to determine what to free
@@ -490,33 +529,65 @@ pub const Value = union(enum) {
     }
 
     /// Convert value to string representation
-    pub fn toString(self: Self, allocator: std.mem.Allocator) ![]const u8 {
+    pub inline fn toString(self: Self, allocator: std.mem.Allocator) ![]const u8 {
         return switch (self) {
-            .string => |s| try allocator.dupe(u8, s),
-            .markup => |m| try allocator.dupe(u8, m.content),
-            .integer => |i| try std.fmt.allocPrint(allocator, "{d}", .{i}),
-            .float => |f| try std.fmt.allocPrint(allocator, "{d}", .{f}),
-            .boolean => |b| try allocator.dupe(u8, if (b) "true" else "false"),
-            .undefined => |u| {
-                // Log access if logger is set
-                u.logAccess("toString");
+            .list, .dict, .async_result => {
+                var state = TraversalState{};
+                return self.toStringWithState(allocator, &state);
+            },
+            else => self.scalarToString(allocator),
+        };
+    }
 
-                return switch (u.behavior) {
+    inline fn scalarToString(self: Self, allocator: std.mem.Allocator) ![]const u8 {
+        return switch (self) {
+            .string => |string| allocator.dupe(u8, string),
+            .markup => |markup| allocator.dupe(u8, markup.content),
+            .integer => |integer| std.fmt.allocPrint(allocator, "{d}", .{integer}),
+            .float => |float| std.fmt.allocPrint(allocator, "{d}", .{float}),
+            .boolean => |boolean| allocator.dupe(u8, if (boolean) "true" else "false"),
+            .undefined => |undefined_value| {
+                undefined_value.logAccess("toString");
+                return switch (undefined_value.behavior) {
                     .strict => error.UndefinedError,
-                    .lenient => try allocator.dupe(u8, ""),
-                    .debug => try std.fmt.allocPrint(allocator, "{{ undefined variable '{s}' }}", .{u.name}),
-                    .chainable => try allocator.dupe(u8, ""),
+                    .lenient, .chainable => allocator.dupe(u8, ""),
+                    .debug => std.fmt.allocPrint(allocator, "{{ undefined variable '{s}' }}", .{undefined_value.name}),
                 };
             },
-            .null => try allocator.dupe(u8, ""),
+            .null => allocator.dupe(u8, ""),
+            .callable => |callable| std.fmt.allocPrint(allocator, "<{s} {s}>", .{
+                switch (callable.callable_type) {
+                    .filter => "filter",
+                    .test_fn => "test",
+                    .macro => "macro",
+                    .function => "function",
+                    .method => "method",
+                },
+                callable.name orelse "<anonymous>",
+            }),
+            .custom => |custom| {
+                if (custom.toString(allocator)) |maybe_string| {
+                    if (maybe_string) |string| return string;
+                } else |_| {}
+                return std.fmt.allocPrint(allocator, "<{s} object>", .{custom.typeName()});
+            },
+            .list, .dict, .async_result => unreachable,
+        };
+    }
+
+    fn toStringWithState(self: Self, allocator: std.mem.Allocator, state: *TraversalState) ![]const u8 {
+        return switch (self) {
+            .string, .markup, .integer, .float, .boolean, .undefined, .null, .callable, .custom => self.scalarToString(allocator),
             .list => |l| {
+                try state.enter(@intFromPtr(l));
+                defer state.leave();
                 // Convert list to string representation
                 var result = std.ArrayList(u8){};
                 defer result.deinit(allocator);
                 try result.append(allocator, '[');
                 for (l.items.items, 0..) |item, i| {
                     if (i > 0) try result.appendSlice(allocator, ", ");
-                    const item_str = try item.toString(allocator);
+                    const item_str = try item.toStringWithState(allocator, state);
                     defer allocator.free(item_str);
                     try result.appendSlice(allocator, item_str);
                 }
@@ -524,6 +595,8 @@ pub const Value = union(enum) {
                 return try result.toOwnedSlice(allocator);
             },
             .dict => |d| {
+                try state.enter(@intFromPtr(d));
+                defer state.leave();
                 // Convert dict to string representation
                 var result = std.ArrayList(u8){};
                 defer result.deinit(allocator);
@@ -536,7 +609,7 @@ pub const Value = union(enum) {
                     try result.append(allocator, '"');
                     try result.appendSlice(allocator, entry.key_ptr.*);
                     try result.appendSlice(allocator, "\": ");
-                    const val_str = try entry.value_ptr.*.toString(allocator);
+                    const val_str = try entry.value_ptr.*.toStringWithState(allocator, state);
                     defer allocator.free(val_str);
                     try result.appendSlice(allocator, val_str);
                 }
@@ -546,34 +619,14 @@ pub const Value = union(enum) {
             .async_result => |ar| {
                 if (ar.completed) {
                     if (ar.value) |v| {
-                        return try v.toString(allocator);
+                        try state.enter(@intFromPtr(ar));
+                        defer state.leave();
+                        return try v.toStringWithState(allocator, state);
                     } else if (ar.error_message) |msg| {
                         return try std.fmt.allocPrint(allocator, "<async error: {s}>", .{msg});
                     }
                 }
                 return try std.fmt.allocPrint(allocator, "<async pending:{d}>", .{ar.id});
-            },
-            .callable => |c| {
-                return try std.fmt.allocPrint(allocator, "<{s} {s}>", .{
-                    switch (c.callable_type) {
-                        .filter => "filter",
-                        .test_fn => "test",
-                        .macro => "macro",
-                        .function => "function",
-                        .method => "method",
-                    },
-                    c.name orelse "<anonymous>",
-                });
-            },
-            .custom => |custom| {
-                // Try custom toString first
-                if (custom.toString(allocator)) |maybe_str| {
-                    if (maybe_str) |str| {
-                        return str;
-                    }
-                } else |_| {}
-                // Default: return type name representation
-                return try std.fmt.allocPrint(allocator, "<{s} object>", .{custom.typeName()});
             },
         };
     }
@@ -659,44 +712,17 @@ pub const Value = union(enum) {
         const str = try self.toString(allocator);
         defer allocator.free(str);
 
-        // Count special characters to pre-allocate buffer
-        var special_count: usize = 0;
-        for (str) |ch| {
-            switch (ch) {
-                '&', '<', '>', '"', '\'', '/' => special_count += 1,
-                else => {},
-            }
-        }
-
         // If no special characters, return as markup without escaping
-        if (special_count == 0) {
+        if (!html_escape.needsEscaping(str, true)) {
             const content_copy = try allocator.dupe(u8, str);
+            errdefer allocator.free(content_copy);
             const markup = try allocator.create(Markup);
             markup.* = Markup{ .content = content_copy };
             return Self{ .markup = markup };
         }
 
-        // Pre-allocate result buffer (original size + expansion for special chars)
-        // Each special char expands: & -> &amp; (5 chars), < -> &lt; (4 chars), etc.
-        const estimated_size = str.len + special_count * 4;
-        var result = std.ArrayList(u8).empty;
-        errdefer result.deinit(allocator);
-        try result.ensureTotalCapacity(allocator, estimated_size);
-
-        // Escape HTML/XML special characters
-        for (str) |ch| {
-            switch (ch) {
-                '&' => try result.appendSlice(allocator, "&amp;"),
-                '<' => try result.appendSlice(allocator, "&lt;"),
-                '>' => try result.appendSlice(allocator, "&gt;"),
-                '"' => try result.appendSlice(allocator, "&quot;"),
-                '\'' => try result.appendSlice(allocator, "&#x27;"),
-                '/' => try result.appendSlice(allocator, "&#x2F;"),
-                else => try result.append(allocator, ch),
-            }
-        }
-
-        const escaped_content = try result.toOwnedSlice(allocator);
+        const escaped_content = try html_escape.escapeOwned(allocator, str, true);
+        errdefer allocator.free(escaped_content);
         const markup = try allocator.create(Markup);
         markup.* = Markup{ .content = escaped_content };
 
@@ -724,146 +750,129 @@ pub const Value = union(enum) {
     /// Returns true if values are equal, false otherwise
     /// May return error.UndefinedError in strict mode
     pub fn isEqual(self: Self, other: Self) !bool {
-        // Same type comparison
-        if (@intFromEnum(self) == @intFromEnum(other)) {
-            return switch (self) {
-                .string => |s| switch (other) {
-                    .string => |o| std.mem.eql(u8, s, o),
-                    else => false,
-                },
-                .markup => |m| switch (other) {
-                    .markup => |o| std.mem.eql(u8, m.content, o.content),
-                    else => false,
-                },
-                .integer => |i| switch (other) {
-                    .integer => |o| i == o,
-                    else => false,
-                },
-                .float => |f| switch (other) {
-                    .float => |o| f == o,
-                    else => false,
-                },
-                .boolean => |b| switch (other) {
-                    .boolean => |o| b == o,
-                    else => false,
-                },
-                .null => switch (other) {
-                    .null => true,
-                    else => false,
-                },
-                .undefined => |u| switch (other) {
-                    .undefined => |o| {
-                        // Log access if logger is set
-                        u.logAccess("isEqual");
+        var state = EqualityState{};
+        return self.isEqualWithState(other, &state);
+    }
 
-                        // Strict mode raises error on comparison
-                        if (u.behavior == .strict) {
-                            return error.UndefinedError;
-                        }
-                        return std.mem.eql(u8, u.name, o.name) and u.behavior == o.behavior;
-                    },
-                    else => {
-                        // Log access if logger is set
-                        u.logAccess("isEqual");
+    fn equalLists(left: *List, right: *List, state: *EqualityState) EqualityError!bool {
+        if (left.items.items.len != right.items.items.len) return false;
+        if (!(try state.enter(@intFromPtr(left), @intFromPtr(right)))) return true;
+        defer state.leave();
+        for (left.items.items, right.items.items) |left_item, right_item| {
+            if (!(try left_item.isEqualWithState(right_item, state))) return false;
+        }
+        return true;
+    }
 
-                        // Strict mode raises error on comparison
-                        if (u.behavior == .strict) {
-                            return error.UndefinedError;
-                        }
-                        return false;
-                    },
-                },
-                .list => |l| switch (other) {
-                    .list => |o| {
-                        if (l.items.items.len != o.items.items.len) return false;
-                        for (l.items.items, o.items.items) |left_item, right_item| {
-                            if (!(try left_item.isEqual(right_item))) return false;
-                        }
-                        return true;
-                    },
-                    else => false,
-                },
-                .dict => |d| switch (other) {
-                    .dict => |o| {
-                        if (d.map.count() != o.map.count()) return false;
-                        var iter = d.map.iterator();
-                        while (iter.next()) |entry| {
-                            const other_val = o.map.get(entry.key_ptr.*) orelse return false;
-                            if (!(try entry.value_ptr.*.isEqual(other_val))) return false;
-                        }
-                        return true;
-                    },
-                    else => false,
-                },
-                .async_result => |ar| switch (other) {
-                    .async_result => |o| {
-                        // Compare async results by ID and completion status
-                        if (ar.id != o.id) return false;
-                        if (ar.completed != o.completed) return false;
-                        if (ar.completed and ar.value != null and o.value != null) {
-                            return try ar.value.?.isEqual(o.value.?);
-                        }
-                        return ar.value == null and o.value == null;
-                    },
-                    else => false,
-                },
-                .callable => |c| switch (other) {
-                    .callable => |o| {
-                        // Compare optional names
-                        const names_equal = if (c.name != null and o.name != null)
-                            std.mem.eql(u8, c.name.?, o.name.?)
-                        else
-                            c.name == null and o.name == null;
-                        return names_equal and
-                            c.is_async == o.is_async and
-                            c.callable_type == o.callable_type;
-                    },
-                    else => false,
-                },
-                .custom => |c| switch (other) {
-                    .custom => |o| {
-                        // Custom objects are equal if they point to the same object
-                        // and have the same vtable (same type)
-                        return c.ptr == o.ptr and c.vtable == o.vtable;
-                    },
-                    else => false,
-                },
-            };
+    fn equalDicts(left: *Dict, right: *Dict, state: *EqualityState) EqualityError!bool {
+        if (left.map.count() != right.map.count()) return false;
+        if (!(try state.enter(@intFromPtr(left), @intFromPtr(right)))) return true;
+        defer state.leave();
+        var iterator = left.map.iterator();
+        while (iterator.next()) |entry| {
+            const right_value = right.map.get(entry.key_ptr.*) orelse return false;
+            if (!(try entry.value_ptr.*.isEqualWithState(right_value, state))) return false;
+        }
+        return true;
+    }
+
+    fn equalAsync(left: *AsyncResult, right: *AsyncResult, state: *EqualityState) EqualityError!bool {
+        if (left.id != right.id or left.completed != right.completed) return false;
+        if (left.value == null or right.value == null) return left.value == null and right.value == null;
+        if (!(try state.enter(@intFromPtr(left), @intFromPtr(right)))) return true;
+        defer state.leave();
+        return left.value.?.isEqualWithState(right.value.?, state);
+    }
+
+    fn equalUndefined(left: Undefined, right: Undefined) EqualityError!bool {
+        left.logAccess("isEqual");
+        if (left.behavior == .strict) return error.UndefinedError;
+        return std.mem.eql(u8, left.name, right.name) and left.behavior == right.behavior;
+    }
+
+    fn equalCallable(left: *Callable, right: *Callable) bool {
+        const names_equal = if (left.name != null and right.name != null)
+            std.mem.eql(u8, left.name.?, right.name.?)
+        else
+            left.name == null and right.name == null;
+        return names_equal and left.is_async == right.is_async and left.callable_type == right.callable_type;
+    }
+
+    fn equalSameScalar(self: Self, other: Self) EqualityError!bool {
+        return switch (self) {
+            .string => |value| std.mem.eql(u8, value, other.string),
+            .markup => |value| std.mem.eql(u8, value.content, other.markup.content),
+            .integer => |value| value == other.integer,
+            .float => |value| value == other.float,
+            .boolean => |value| value == other.boolean,
+            .null => true,
+            .undefined => |value| equalUndefined(value, other.undefined),
+            .callable => |value| equalCallable(value, other.callable),
+            .custom => |value| value.ptr == other.custom.ptr and value.vtable == other.custom.vtable,
+            .list, .dict, .async_result => unreachable,
+        };
+    }
+
+    fn equalMixedNumeric(self: Self, other: Self) EqualityError!bool {
+        if (self == .integer and other == .float) return @as(f64, @floatFromInt(self.integer)) == other.float;
+        if (self == .float and other == .integer) return self.float == @as(f64, @floatFromInt(other.integer));
+
+        if (self == .float or other == .float) {
+            const left = self.toFloat() orelse return false;
+            const right = other.toFloat() orelse return false;
+            if (left == right) return true;
+            if (!std.math.isFinite(left) or !std.math.isFinite(right)) return false;
+            return @abs(left - right) < 1e-10;
         }
 
-        // Cross-type comparison (numeric types)
-        const self_int = self.toInteger();
-        const other_int = other.toInteger();
-        if (self_int != null and other_int != null) {
-            return self_int.? == other_int.?;
-        }
+        const left = self.toInteger() orelse return false;
+        const right = other.toInteger() orelse return false;
+        return left == right;
+    }
 
-        const self_float = self.toFloat();
-        const other_float = other.toFloat();
-        if (self_float != null and other_float != null) {
-            // Use epsilon comparison for floats
-            const epsilon = 1e-10;
-            const diff = if (self_float.? > other_float.?) self_float.? - other_float.? else other_float.? - self_float.?;
-            return diff < epsilon;
-        }
+    fn isEqualWithState(self: Self, other: Self, state: *EqualityState) EqualityError!bool {
+        if (@intFromEnum(self) != @intFromEnum(other)) return self.equalMixedNumeric(other);
+        return switch (self) {
+            .list => |value| equalLists(value, other.list, state),
+            .dict => |value| equalDicts(value, other.dict, state),
+            .async_result => |value| equalAsync(value, other.async_result, state),
+            else => self.equalSameScalar(other),
+        };
+    }
 
-        // Mixed int/float comparison
-        if (self_int != null and other_float != null) {
-            const diff = if (@as(f64, @floatFromInt(self_int.?)) > other_float.?)
-                @as(f64, @floatFromInt(self_int.?)) - other_float.?
-            else
-                other_float.? - @as(f64, @floatFromInt(self_int.?));
-            return diff < 1e-10;
-        }
-        if (self_float != null and other_int != null) {
-            const diff = if (self_float.? > @as(f64, @floatFromInt(other_int.?)))
-                self_float.? - @as(f64, @floatFromInt(other_int.?))
-            else
-                @as(f64, @floatFromInt(other_int.?)) - self_float.?;
-            return diff < 1e-10;
-        }
+    /// Stable bounded hash shared by AST and bytecode loop.changed paths.
+    pub fn hash(self: Self) u64 {
+        return self.hashAtDepth(0);
+    }
 
-        return false;
+    fn hashAtDepth(self: Self, depth: usize) u64 {
+        if (depth >= max_traversal_depth) return 0x9E37_79B9_7F4A_7C15;
+        return switch (self) {
+            .integer => |integer| @bitCast(integer),
+            .float => |float| @bitCast(float),
+            .boolean => |boolean| @intFromBool(boolean),
+            .null => 0,
+            .string => |string| std.hash.Wyhash.hash(0, string),
+            .markup => |markup| std.hash.Wyhash.hash(0, markup.content),
+            .list => |list| blk: {
+                var result: u64 = 0;
+                for (list.items.items) |item| result = result *% 31 +% item.hashAtDepth(depth + 1);
+                break :blk result;
+            },
+            .dict => |dict| blk: {
+                var result: u64 = 0;
+                var iter = dict.map.iterator();
+                while (iter.next()) |entry| {
+                    result = result *% 31 +% std.hash.Wyhash.hash(0, entry.key_ptr.*);
+                    result = result *% 31 +% entry.value_ptr.*.hashAtDepth(depth + 1);
+                }
+                break :blk result;
+            },
+            .undefined => 0xDEAD_BEEF,
+            .async_result => 0xCAFE_BABE,
+            .callable => 0xFEED_FACE,
+            .custom => 0x00C0_FFEE,
+        };
     }
 
     /// Create a deep copy of the value

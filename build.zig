@@ -350,6 +350,19 @@ pub fn build(b: *std.Build) void {
         .root_module = environment_test_module,
     });
     const run_environment_tests = b.addRunArtifact(environment_tests);
+
+    // These roots contain established tests but were previously absent from the
+    // build graph, so neither `test` nor the grouped test steps executed them.
+    const run_nodes_tests = addTestRoot(b, root_module, target, optimize, "nodes_test", "test/unit/nodes.zig");
+    const run_optimizer_tests = addTestRoot(b, root_module, target, optimize, "optimizer_test", "test/unit/optimizer.zig");
+    const run_runtime_tests = addTestRoot(b, root_module, target, optimize, "runtime_test", "test/unit/runtime.zig");
+    const run_sandbox_tests = addTestRoot(b, root_module, target, optimize, "sandbox_test", "test/unit/sandbox.zig");
+    const run_filter_chains_tests = addTestRoot(b, root_module, target, optimize, "filter_chains_test", "test/integration/filter_chains.zig");
+    const run_imports_tests = addTestRoot(b, root_module, target, optimize, "imports_test", "test/integration/imports.zig");
+    const run_includes_tests = addTestRoot(b, root_module, target, optimize, "includes_test", "test/integration/includes.zig");
+    const run_inheritance_tests = addTestRoot(b, root_module, target, optimize, "inheritance_test", "test/integration/inheritance.zig");
+    const run_test_expressions_integration_tests = addTestRoot(b, root_module, target, optimize, "test_expressions_integration_test", "test/integration/test_expressions.zig");
+    const run_public_api_tests = addTestRoot(b, root_module, target, optimize, "public_api_test", "test/public_api.zig");
     
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_lib_unit_tests.step);
@@ -379,6 +392,18 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_extensions_tests.step);
     test_step.dependOn(&run_environment_tests.step);
     test_step.dependOn(&run_async_tests.step);
+    test_step.dependOn(&run_regression_tests.step);
+    test_step.dependOn(&run_filters_integration_tests.step);
+    test_step.dependOn(&run_nodes_tests.step);
+    test_step.dependOn(&run_optimizer_tests.step);
+    test_step.dependOn(&run_runtime_tests.step);
+    test_step.dependOn(&run_sandbox_tests.step);
+    test_step.dependOn(&run_filter_chains_tests.step);
+    test_step.dependOn(&run_imports_tests.step);
+    test_step.dependOn(&run_includes_tests.step);
+    test_step.dependOn(&run_inheritance_tests.step);
+    test_step.dependOn(&run_test_expressions_integration_tests.step);
+    test_step.dependOn(&run_public_api_tests.step);
     
     const unit_test_step = b.step("test:unit", "Run unit tests only");
     unit_test_step.dependOn(&run_parser_tests.step);
@@ -400,6 +425,11 @@ pub fn build(b: *std.Build) void {
     unit_test_step.dependOn(&run_loaders_tests.step);
     unit_test_step.dependOn(&run_extensions_tests.step);
     unit_test_step.dependOn(&run_environment_tests.step);
+    unit_test_step.dependOn(&run_nodes_tests.step);
+    unit_test_step.dependOn(&run_optimizer_tests.step);
+    unit_test_step.dependOn(&run_runtime_tests.step);
+    unit_test_step.dependOn(&run_sandbox_tests.step);
+    unit_test_step.dependOn(&run_public_api_tests.step);
     
     const integration_test_step = b.step("test:integration", "Run integration tests only");
     integration_test_step.dependOn(&run_control_flow_tests.step);
@@ -411,6 +441,11 @@ pub fn build(b: *std.Build) void {
     integration_test_step.dependOn(&run_regression_tests.step);
     integration_test_step.dependOn(&run_async_tests.step);
     integration_test_step.dependOn(&run_filters_integration_tests.step);
+    integration_test_step.dependOn(&run_filter_chains_tests.step);
+    integration_test_step.dependOn(&run_imports_tests.step);
+    integration_test_step.dependOn(&run_includes_tests.step);
+    integration_test_step.dependOn(&run_inheritance_tests.step);
+    integration_test_step.dependOn(&run_test_expressions_integration_tests.step);
     
     // Individual integration test steps (for debugging)
     const control_flow_step = b.step("test:control_flow", "Run control flow integration tests");
@@ -444,6 +479,7 @@ pub fn build(b: *std.Build) void {
     const huggingface_step = b.step("test:huggingface", "Run HuggingFace compatibility tests");
     huggingface_step.dependOn(&run_huggingface_tests.step);
     integration_test_step.dependOn(&run_huggingface_tests.step);
+    test_step.dependOn(&run_huggingface_tests.step);
 
     // Production template tests (real HuggingFace templates)
     const production_test_module = b.addModule("production_test", .{
@@ -459,6 +495,7 @@ pub fn build(b: *std.Build) void {
     const production_step = b.step("test:production", "Run production HuggingFace template tests");
     production_step.dependOn(&run_production_tests.step);
     integration_test_step.dependOn(&run_production_tests.step);
+    test_step.dependOn(&run_production_tests.step);
     
     // Slice and globals tests (new feature tests)
     const slice_globals_test_module = b.addModule("slice_globals_test", .{
@@ -473,6 +510,8 @@ pub fn build(b: *std.Build) void {
     const run_slice_globals_tests = b.addRunArtifact(slice_globals_tests);
     const slice_globals_step = b.step("test:slice", "Run slice and globals tests (new features)");
     slice_globals_step.dependOn(&run_slice_globals_tests.step);
+    test_step.dependOn(&run_slice_globals_tests.step);
+    integration_test_step.dependOn(&run_slice_globals_tests.step);
     
     // Add async-only test step
     const async_test_step = b.step("test:async", "Run async tests only");
@@ -552,4 +591,21 @@ pub fn build(b: *std.Build) void {
     const run_aot_bench = b.addRunArtifact(aot_bench);
     const aot_bench_step = b.step("bench-aot", "Run AOT vs JIT benchmark (Phase 7)");
     aot_bench_step.dependOn(&run_aot_bench.step);
+}
+
+fn addTestRoot(
+    b: *std.Build,
+    root_module: *std.Build.Module,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    name: []const u8,
+    path: []const u8,
+) *std.Build.Step.Run {
+    const test_module = b.addModule(name, .{
+        .root_source_file = b.path(path),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_module.addImport("vibe_jinja", root_module);
+    return b.addRunArtifact(b.addTest(.{ .root_module = test_module }));
 }

@@ -300,7 +300,7 @@ pub const Parser = struct {
         // Create output node with raw content
         const owned_content = try content.toOwnedSlice(self.allocator);
         defer self.allocator.free(owned_content);
-        
+
         const output = try self.allocator.create(nodes.Output);
         output.* = try nodes.Output.initPlainText(self.allocator, owned_content, raw_token.lineno, raw_token.filename);
         // Output extends Stmt, so we can cast it
@@ -576,215 +576,160 @@ pub const Parser = struct {
         return try self.parseCompare();
     }
 
+    const ComparisonOperator = struct {
+        token: Token,
+        kind: TokenKind,
+        negate: bool = false,
+    };
+
+    fn consumeComparisonOperator(self: *Self) ?ComparisonOperator {
+        const token = self.stream.current() orelse return null;
+        const simple = switch (token.kind) {
+            .IN, .EQ, .NE, .LT, .LTEQ, .GT, .GTEQ => true,
+            else => false,
+        };
+        if (simple) {
+            _ = self.stream.next();
+            return .{ .token = token, .kind = token.kind };
+        }
+        if (token.kind != .NOT) return null;
+
+        var offset: usize = 1;
+        while (self.stream.peek(offset)) |next| : (offset += 1) {
+            if (next.kind == .WHITESPACE) continue;
+            if (next.kind != .IN) return null;
+            _ = self.stream.next();
+            self.skipWhitespace();
+            _ = self.stream.next();
+            return .{ .token = token, .kind = .IN, .negate = true };
+        }
+        return null;
+    }
+
+    fn createBinary(self: *Self, left: nodes.Expression, right: nodes.Expression, op: TokenKind, token: Token) ParseError!nodes.Expression {
+        const binary = self.allocator.create(nodes.BinExpr) catch |err| {
+            var owned_left = left;
+            var owned_right = right;
+            owned_left.deinit(self.allocator);
+            owned_right.deinit(self.allocator);
+            return err;
+        };
+        binary.* = .{
+            .base = .{ .lineno = token.lineno, .filename = token.filename, .environment = self.environment },
+            .left = left,
+            .right = right,
+            .op = op,
+        };
+        return .{ .bin_expr = binary };
+    }
+
+    fn negateExpression(self: *Self, expression: nodes.Expression, token: Token) ParseError!nodes.Expression {
+        const unary = self.allocator.create(nodes.UnaryExpr) catch |err| {
+            var owned = expression;
+            owned.deinit(self.allocator);
+            return err;
+        };
+        unary.* = .{
+            .base = .{ .lineno = token.lineno, .filename = token.filename, .environment = self.environment },
+            .node = expression,
+            .op = .NOT,
+        };
+        return .{ .unary_expr = unary };
+    }
+
+    fn parseParenthesizedArguments(self: *Self) ParseError!std.ArrayList(nodes.Expression) {
+        var args = std.ArrayList(nodes.Expression){};
+        errdefer {
+            for (args.items) |*arg| arg.deinit(self.allocator);
+            args.deinit(self.allocator);
+        }
+
+        const opening = self.stream.current() orelse return args;
+        if (opening.kind != .LPAREN) return args;
+        _ = self.stream.next();
+        self.skipWhitespace();
+
+        while (self.stream.hasNext()) {
+            const token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+            if (token.kind == .RPAREN) {
+                _ = self.stream.next();
+                return args;
+            }
+
+            const argument = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
+            try args.append(self.allocator, argument);
+            self.skipWhitespace();
+
+            const separator = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+            switch (separator.kind) {
+                .COMMA => {
+                    _ = self.stream.next();
+                    self.skipWhitespace();
+                },
+                .RPAREN => {
+                    _ = self.stream.next();
+                    return args;
+                },
+                else => return exceptions.TemplateError.SyntaxError,
+            }
+        }
+        return exceptions.TemplateError.SyntaxError;
+    }
+
+    fn parseTest(self: *Self, left: nodes.Expression) ParseError!nodes.Expression {
+        const is_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        _ = self.stream.next();
+        self.skipWhitespace();
+
+        const name = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        if (name.kind != .NAME and name.kind != .IN) return exceptions.TemplateError.SyntaxError;
+        _ = self.stream.next();
+        self.skipWhitespace();
+
+        var args = try self.parseParenthesizedArguments();
+        errdefer {
+            for (args.items) |*arg| arg.deinit(self.allocator);
+            args.deinit(self.allocator);
+        }
+        const test_expression = self.allocator.create(nodes.TestExpr) catch |err| {
+            var owned_left = left;
+            owned_left.deinit(self.allocator);
+            return err;
+        };
+        test_expression.* = nodes.TestExpr.init(self.allocator, left, name.value, is_token.lineno, is_token.filename) catch |err| {
+            self.allocator.destroy(test_expression);
+            var owned_left = left;
+            owned_left.deinit(self.allocator);
+            return err;
+        };
+        test_expression.args = args;
+        args = std.ArrayList(nodes.Expression){};
+        return .{ .test_expr = test_expression };
+    }
+
     /// Parse comparison expression
-    fn parseCompare(self: *Self) (exceptions.TemplateError || std.mem.Allocator.Error)!?nodes.Expression {
+    fn parseCompare(self: *Self) ParseError!?nodes.Expression {
         var left = try self.parseAdd() orelse return null;
 
-        // Parse comparison operators (==, !=, <, <=, >, >=, in, not in)
         while (self.stream.hasNext()) {
             self.skipWhitespace();
-            const token = self.stream.current();
-            if (token) |t| {
-                // Handle 'not in' operator (two tokens)
-                if (t.kind == .NOT) {
-                    const not_token = t;
-                    _ = self.stream.next();
-                    self.skipWhitespace();
-                    const next_token = self.stream.current();
-                    if (next_token) |next| {
-                        if (next.kind == .IN) {
-                            // This is 'not in' - create IN expression and wrap in NOT
-                            _ = self.stream.next();
-                            self.skipWhitespace();
-                            const right = try self.parseAdd() orelse {
-                                // Clean up left before returning error
-                                left.deinit(self.allocator);
-                                return exceptions.TemplateError.SyntaxError;
-                            };
-
-                            // Create BinExpr node for 'in'
-                            const bin_expr = try self.allocator.create(nodes.BinExpr);
-                            bin_expr.* = nodes.BinExpr{
-                                .base = nodes.Node{
-                                    .lineno = not_token.lineno,
-                                    .filename = not_token.filename,
-                                    .environment = self.environment,
-                                },
-                                .left = left,
-                                .right = right,
-                                .op = .IN,
-                            };
-
-                            // Wrap in UnaryExpr(NOT) for 'not in'
-                            const unary_expr = try self.allocator.create(nodes.UnaryExpr);
-                            unary_expr.* = nodes.UnaryExpr{
-                                .base = nodes.Node{
-                                    .lineno = not_token.lineno,
-                                    .filename = not_token.filename,
-                                    .environment = self.environment,
-                                },
-                                .node = nodes.Expression{ .bin_expr = bin_expr },
-                                .op = .NOT,
-                            };
-
-                            left = nodes.Expression{ .unary_expr = unary_expr };
-                            continue;
-                        } else {
-                            // Not followed by 'in', so this is just a NOT operator
-                            // Break and let parseNot handle it
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-
-                // Handle 'in' operator
-                if (t.kind == .IN) {
-                    const op = t.kind;
-                    _ = self.stream.next();
-                    self.skipWhitespace();
-                    const right = try self.parseAdd() orelse {
-                        // Clean up left before returning error
-                        left.deinit(self.allocator);
-                        return exceptions.TemplateError.SyntaxError;
-                    };
-
-                    // Create BinExpr node for 'in'
-                    const bin_expr = try self.allocator.create(nodes.BinExpr);
-                    bin_expr.* = nodes.BinExpr{
-                        .base = nodes.Node{
-                            .lineno = t.lineno,
-                            .filename = t.filename,
-                            .environment = self.environment,
-                        },
-                        .left = left,
-                        .right = right,
-                        .op = op,
-                    };
-
-                    left = nodes.Expression{ .bin_expr = bin_expr };
-                    continue;
-                }
-
-                // Handle other comparison operators (==, !=, <, <=, >, >=)
-                if (t.kind == .EQ or t.kind == .NE or t.kind == .LT or
-                    t.kind == .LTEQ or t.kind == .GT or t.kind == .GTEQ)
-                {
-                    const op = t.kind;
-                    _ = self.stream.next();
-                    self.skipWhitespace();
-                    const right = try self.parseAdd() orelse {
-                        // Clean up left before returning error
-                        left.deinit(self.allocator);
-                        return exceptions.TemplateError.SyntaxError;
-                    };
-
-                    // Create BinExpr node for comparison
-                    const bin_expr = try self.allocator.create(nodes.BinExpr);
-                    bin_expr.* = nodes.BinExpr{
-                        .base = nodes.Node{
-                            .lineno = t.lineno,
-                            .filename = t.filename,
-                            .environment = self.environment,
-                        },
-                        .left = left,
-                        .right = right,
-                        .op = op,
-                    };
-
-                    left = nodes.Expression{ .bin_expr = bin_expr };
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
+            const comparison = self.consumeComparisonOperator() orelse break;
+            self.skipWhitespace();
+            const right = self.parseAdd() catch |err| {
+                left.deinit(self.allocator);
+                return err;
+            } orelse {
+                left.deinit(self.allocator);
+                return exceptions.TemplateError.SyntaxError;
+            };
+            left = try self.createBinary(left, right, comparison.kind, comparison.token);
+            if (comparison.negate) left = try self.negateExpression(left, comparison.token);
         }
 
-        // Parse test expressions (value is test)
-        // Check if next token is 'is'
-        if (self.stream.hasNext()) {
-            const token = self.stream.current();
-            if (token) |t| {
-                if (t.kind == .IS) {
-                    _ = self.stream.next();
-                    self.skipWhitespace();
-
-                    // Parse test name
-                    const test_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
-                    if (test_token.kind != .NAME) {
-                        return exceptions.TemplateError.SyntaxError;
-                    }
-                    const test_name = test_token.value;
-                    _ = self.stream.next();
-                    self.skipWhitespace();
-
-                    // Parse test arguments if present
-                    var test_args = std.ArrayList(nodes.Expression).empty;
-                    errdefer test_args.deinit(self.allocator);
-                    errdefer {
-                        for (test_args.items) |*arg| {
-                            arg.deinit(self.allocator);
-                        }
-                        test_args.deinit(self.allocator);
-                    }
-
-                    // Check for arguments in parentheses
-                    if (self.stream.hasNext()) {
-                        const next_token = self.stream.current();
-                        if (next_token) |next| {
-                            if (next.kind == .LPAREN) {
-                                _ = self.stream.next();
-                                self.skipWhitespace();
-
-                                // Parse argument list
-                                while (self.stream.hasNext()) {
-                                    const arg_token = self.stream.current();
-                                    if (arg_token) |arg_t| {
-                                        if (arg_t.kind == .RPAREN) {
-                                            _ = self.stream.next();
-                                            break;
-                                        }
-                                        if (arg_t.kind == .COMMA) {
-                                            _ = self.stream.next();
-                                            self.skipWhitespace();
-                                            continue;
-                                        }
-
-                                        const arg_expr = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
-                                        try test_args.append(self.allocator, arg_expr);
-
-                                        self.skipWhitespace();
-                                        const after_arg = self.stream.current();
-                                        if (after_arg) |after| {
-                                            if (after.kind == .RPAREN) {
-                                                _ = self.stream.next();
-                                                break;
-                                            }
-                                            if (after.kind != .COMMA) {
-                                                return exceptions.TemplateError.SyntaxError;
-                                            }
-                                        }
-                                    } else {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Create TestExpr node
-                    const test_expr = try self.allocator.create(nodes.TestExpr);
-                    test_expr.* = try nodes.TestExpr.init(self.allocator, left, test_name, t.lineno, t.filename);
-                    test_expr.args = test_args;
-
-                    return nodes.Expression{ .test_expr = test_expr };
-                }
-            }
+        self.skipWhitespace();
+        if (self.stream.current()) |token| {
+            if (token.kind == .IS) return try self.parseTest(left);
         }
-
-        // Parse filters on the result
         return try self.parseFilter(left);
     }
 
@@ -1533,11 +1478,11 @@ pub const Parser = struct {
 
                 // Check if this is slice syntax (starts with : or has : after expression)
                 const first_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
-                
+
                 if (first_token.kind == .COLON) {
                     // Slice starting with : like [:stop] or [:]
                     const slice_expr = try self.parseSlice(null, next_token.lineno, next_token.filename);
-                    
+
                     const getitem_node = try self.allocator.create(nodes.Getitem);
                     getitem_node.* = nodes.Getitem.init(current_expr, slice_expr, next_token.lineno, next_token.filename);
                     current_expr = nodes.Expression{ .getitem = getitem_node };
@@ -1547,18 +1492,18 @@ pub const Parser = struct {
                     self.skipWhitespace();
 
                     const after_first = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
-                    
+
                     if (after_first.kind == .COLON) {
                         // This is slice syntax [start:...]
                         const slice_expr = try self.parseSlice(first_expr, next_token.lineno, next_token.filename);
-                        
+
                         const getitem_node = try self.allocator.create(nodes.Getitem);
                         getitem_node.* = nodes.Getitem.init(current_expr, slice_expr, next_token.lineno, next_token.filename);
                         current_expr = nodes.Expression{ .getitem = getitem_node };
                     } else if (after_first.kind == .RBRACKET) {
                         // Regular index access [index]
                         _ = self.stream.next();
-                        
+
                         const getitem_node = try self.allocator.create(nodes.Getitem);
                         getitem_node.* = nodes.Getitem.init(current_expr, first_expr, next_token.lineno, next_token.filename);
                         current_expr = nodes.Expression{ .getitem = getitem_node };
@@ -1590,7 +1535,7 @@ pub const Parser = struct {
         // Parse stop expression (optional)
         var stop: ?nodes.Expression = null;
         const after_colon = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
-        
+
         if (after_colon.kind != .COLON and after_colon.kind != .RBRACKET) {
             // There's a stop expression
             stop = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
@@ -1600,11 +1545,11 @@ pub const Parser = struct {
         // Check for second colon (step)
         var step: ?nodes.Expression = null;
         const after_stop = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
-        
+
         if (after_stop.kind == .COLON) {
             _ = self.stream.next(); // consume second colon
             self.skipWhitespace();
-            
+
             const after_second_colon = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
             if (after_second_colon.kind != .RBRACKET) {
                 // There's a step expression
@@ -1623,190 +1568,132 @@ pub const Parser = struct {
         // Create Slice node
         const slice_node = try self.allocator.create(nodes.Slice);
         slice_node.* = nodes.Slice.init(start, stop, step, lineno, filename);
-        
+
         return nodes.Expression{ .slice = slice_node };
     }
 
-    /// Parse for loop statement
-    fn parseFor(self: *Self) (exceptions.TemplateError || std.mem.Allocator.Error)!*nodes.For {
-        const for_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
-        _ = self.stream.next();
-        self.skipWhitespace();
+    const ParsedBody = struct {
+        statements: std.ArrayList(*nodes.Stmt),
+        terminator: TokenKind,
 
-        // Parse target (variable name)
-        const target_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
-        if (target_token.kind != .NAME) {
-            return exceptions.TemplateError.SyntaxError;
+        fn deinit(self: *ParsedBody, allocator: std.mem.Allocator) void {
+            for (self.statements.items) |stmt| stmt.deinit(allocator);
+            self.statements.deinit(allocator);
         }
-        const target_name = try self.allocator.dupe(u8, target_token.value);
-        _ = self.stream.next();
-        self.skipWhitespace();
+    };
 
-        // Expect 'in'
-        const in_token = self.stream.current();
-        if (in_token == null or in_token.?.kind != .IN) {
-            self.allocator.free(target_name);
-            return exceptions.TemplateError.SyntaxError;
+    fn peekStatementTag(self: *Self) ?TokenKind {
+        const current = self.stream.current() orelse return null;
+        if (current.kind != .BLOCK_BEGIN) return null;
+        var offset: usize = 1;
+        while (self.stream.peek(offset)) |token| : (offset += 1) {
+            if (token.kind != .WHITESPACE) return token.kind;
         }
+        return null;
+    }
+
+    fn consumeStatementTag(self: *Self, expected: TokenKind) ParseError!void {
+        const begin = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        if (begin.kind != .BLOCK_BEGIN) return exceptions.TemplateError.SyntaxError;
         _ = self.stream.next();
         self.skipWhitespace();
-
-        // Parse iterable expression
-        const iter_expr = try self.parseExpression() orelse {
-            self.allocator.free(target_name);
-            return exceptions.TemplateError.SyntaxError;
-        };
-
+        const tag = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        if (tag.kind != expected) return exceptions.TemplateError.SyntaxError;
+        _ = self.stream.next();
         self.skipWhitespace();
+        const end = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        if (end.kind != .BLOCK_END) return exceptions.TemplateError.SyntaxError;
+        _ = self.stream.next();
+    }
 
-        // Expect BLOCK_END
-        const end_token = self.stream.current();
-        if (end_token == null or end_token.?.kind != .BLOCK_END) {
-            // Clean up on error
-            iter_expr.deinit(self.allocator);
-            self.allocator.free(target_name);
-            return exceptions.TemplateError.SyntaxError;
+    fn isTerminator(kind: TokenKind, terminators: []const TokenKind) bool {
+        for (terminators) |terminator| {
+            if (kind == terminator) return true;
         }
-        _ = self.stream.next();
+        return false;
+    }
 
-        // Parse body (statements until {% endfor %})
-        var body = std.ArrayList(*nodes.Stmt){};
+    fn parseBodyUntil(self: *Self, terminators: []const TokenKind) ParseError!ParsedBody {
+        var statements = std.ArrayList(*nodes.Stmt){};
         errdefer {
-            for (body.items) |stmt| {
-                stmt.deinit(self.allocator);
-            }
-            body.deinit(self.allocator);
-        }
-
-        var else_body = std.ArrayList(*nodes.Stmt){};
-        errdefer {
-            for (else_body.items) |stmt| {
-                stmt.deinit(self.allocator);
-            }
-            else_body.deinit(self.allocator);
+            for (statements.items) |stmt| stmt.deinit(self.allocator);
+            statements.deinit(self.allocator);
         }
 
         while (self.stream.hasNext()) {
             self.skipWhitespace();
-            const token = self.stream.current();
-            if (token) |t| {
-                // Check for {% endfor %} or {% else %}
-                if (t.kind == .BLOCK_BEGIN) {
-                    // Peek past BLOCK_BEGIN and any whitespace to find the keyword
-                    var peek_offset: usize = 1;
-                    while (self.stream.peek(peek_offset)) |pt| {
-                        if (pt.kind != .WHITESPACE) break;
-                        peek_offset += 1;
-                    }
-                    const next_token = self.stream.peek(peek_offset);
-                    if (next_token) |nt| {
-                        if (nt.kind == .ENDFOR) {
-                            // Consume BLOCK_BEGIN, whitespace, ENDFOR, and BLOCK_END
-                            _ = self.stream.next(); // consume BLOCK_BEGIN
-                            self.skipWhitespace();
-                            _ = self.stream.next(); // consume ENDFOR
-                            self.skipWhitespace();
-                            const block_end = self.stream.current();
-                            if (block_end) |be| {
-                                if (be.kind == .BLOCK_END) {
-                                    _ = self.stream.next();
-                                    break;
-                                }
-                            }
-                        } else if (nt.kind == .ELSE) {
-                            // Consume BLOCK_BEGIN, whitespace, and ELSE
-                            _ = self.stream.next(); // consume BLOCK_BEGIN
-                            self.skipWhitespace();
-                            _ = self.stream.next(); // consume ELSE
-                            self.skipWhitespace();
-                            const block_end = self.stream.current();
-                            if (block_end) |be| {
-                                if (be.kind == .BLOCK_END) {
-                                    _ = self.stream.next();
-
-                                    // Parse else body until {% endfor %}
-                                    while (self.stream.hasNext()) {
-                                        self.skipWhitespace();
-                                        const else_token = self.stream.current();
-                                        if (else_token) |et| {
-                                            if (et.kind == .BLOCK_BEGIN) {
-                                                // Peek past BLOCK_BEGIN and whitespace
-                                                var else_peek_offset: usize = 1;
-                                                while (self.stream.peek(else_peek_offset)) |ept| {
-                                                    if (ept.kind != .WHITESPACE) break;
-                                                    else_peek_offset += 1;
-                                                }
-                                                const else_next_token = self.stream.peek(else_peek_offset);
-                                                if (else_next_token) |ent| {
-                                                    if (ent.kind == .ENDFOR) {
-                                                        _ = self.stream.next(); // consume BLOCK_BEGIN
-                                                        self.skipWhitespace();
-                                                        _ = self.stream.next(); // consume ENDFOR
-                                                        self.skipWhitespace();
-                                                        const else_block_end = self.stream.current();
-                                                        if (else_block_end) |ebe| {
-                                                            if (ebe.kind == .BLOCK_END) {
-                                                                _ = self.stream.next();
-                                                                break;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Parse statement
-                                        if (try self.parseStatement()) |stmt| {
-                                            try else_body.append(self.allocator, stmt);
-                                        } else {
-                                            // Check if we're at EOF
-                                            const eof_token = self.stream.current();
-                                            if (eof_token == null or eof_token.?.kind == .EOF) {
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                        // If it's neither ENDFOR nor ELSE, fall through to parse the statement
-                    }
+            if (self.peekStatementTag()) |tag| {
+                if (isTerminator(tag, terminators)) {
+                    try self.consumeStatementTag(tag);
+                    return .{ .statements = statements, .terminator = tag };
                 }
             }
 
-            // Parse statement
             if (try self.parseStatement()) |stmt| {
-                try body.append(self.allocator, stmt);
-            } else {
-                // Check if we're at EOF
-                const eof_token = self.stream.current();
-                if (eof_token == null or eof_token.?.kind == .EOF) {
-                    break;
-                }
+                try statements.append(self.allocator, stmt);
+                continue;
             }
+
+            const token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+            if (token.kind == .EOF) return exceptions.TemplateError.SyntaxError;
+            _ = self.stream.next();
+        }
+        return exceptions.TemplateError.SyntaxError;
+    }
+
+    /// Parse for loop statement
+    fn parseFor(self: *Self) ParseError!*nodes.For {
+        const for_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        _ = self.stream.next();
+        self.skipWhitespace();
+
+        const target_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        if (target_token.kind != .NAME) return exceptions.TemplateError.SyntaxError;
+        const target_name = try self.allocator.dupe(u8, target_token.value);
+        defer self.allocator.free(target_name);
+        _ = self.stream.next();
+        self.skipWhitespace();
+
+        const in_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        if (in_token.kind != .IN) return exceptions.TemplateError.SyntaxError;
+        _ = self.stream.next();
+        self.skipWhitespace();
+
+        var iter_expr = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
+        var iter_moved = false;
+        errdefer if (!iter_moved) iter_expr.deinit(self.allocator);
+        self.skipWhitespace();
+
+        const header_end = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        if (header_end.kind != .BLOCK_END) return exceptions.TemplateError.SyntaxError;
+        _ = self.stream.next();
+
+        var body = try self.parseBodyUntil(&.{ .ELSE, .ENDFOR });
+        errdefer body.deinit(self.allocator);
+        var else_body = ParsedBody{ .statements = std.ArrayList(*nodes.Stmt){}, .terminator = .ENDFOR };
+        errdefer else_body.deinit(self.allocator);
+        if (body.terminator == .ELSE) {
+            else_body = try self.parseBodyUntil(&.{.ENDFOR});
         }
 
-        // Create For node
-        const target_name_node = try self.allocator.create(nodes.Name);
-        target_name_node.* = try nodes.Name.init(self.allocator, target_name, .store, for_token.lineno, for_token.filename);
-        self.allocator.free(target_name);
+        const target = try self.allocator.create(nodes.Name);
+        target.* = try nodes.Name.init(self.allocator, target_name, .store, for_token.lineno, for_token.filename);
+        var target_moved = false;
+        errdefer if (!target_moved) {
+            var expression = nodes.Expression{ .name = target };
+            expression.deinit(self.allocator);
+        };
 
         const for_node = try self.allocator.create(nodes.For);
-        for_node.* = nodes.For.init(self.allocator, nodes.Expression{ .name = target_name_node }, iter_expr, for_token.lineno, for_token.filename);
-
-        // Move body items to for_node
-        for (body.items) |stmt| {
-            try for_node.body.append(self.allocator, stmt);
-        }
-        body.deinit(self.allocator);
-
-        // Move else body items to for_node
-        for (else_body.items) |stmt| {
-            try for_node.else_body.append(self.allocator, stmt);
-        }
-        else_body.deinit(self.allocator);
-
+        for_node.* = nodes.For.init(self.allocator, .{ .name = target }, iter_expr, for_token.lineno, for_token.filename);
+        target_moved = true;
+        iter_moved = true;
+        for_node.body.deinit(self.allocator);
+        for_node.body = body.statements;
+        body.statements = std.ArrayList(*nodes.Stmt){};
+        for_node.else_body.deinit(self.allocator);
+        for_node.else_body = else_body.statements;
+        else_body.statements = std.ArrayList(*nodes.Stmt){};
         return for_node;
     }
 
@@ -1928,8 +1815,7 @@ pub const Parser = struct {
         if (name_token.kind != .NAME) {
             return exceptions.TemplateError.SyntaxError;
         }
-        const block_name = try self.allocator.dupe(u8, name_token.value);
-        errdefer self.allocator.free(block_name);
+        const block_name = name_token.value;
         _ = self.stream.next();
         self.skipWhitespace();
 
@@ -1963,7 +1849,6 @@ pub const Parser = struct {
         // Expect BLOCK_END
         const end_token = self.stream.current();
         if (end_token == null or end_token.?.kind != .BLOCK_END) {
-            self.allocator.free(block_name);
             return exceptions.TemplateError.SyntaxError;
         }
         _ = self.stream.next();
@@ -1981,15 +1866,27 @@ pub const Parser = struct {
             self.skipWhitespace();
             const token = self.stream.current();
             if (token) |t| {
-                // Check for {% endblock %}
+                // Check for {% endblock %} without consuming a nested block's
+                // BLOCK_BEGIN token.
                 if (t.kind == .BLOCK_BEGIN) {
-                    _ = self.stream.next();
-                    self.skipWhitespace();
-                    const name_token_inner = self.stream.current();
-                    if (name_token_inner) |nt| {
-                        if (nt.kind == .ENDBLOCK) {
-                            _ = self.stream.next();
+                    var peek_offset: usize = 1;
+                    while (self.stream.peek(peek_offset)) |peeked| {
+                        if (peeked.kind != .WHITESPACE) break;
+                        peek_offset += 1;
+                    }
+                    if (self.stream.peek(peek_offset)) |next_token| {
+                        if (next_token.kind == .ENDBLOCK) {
+                            _ = self.stream.next(); // BLOCK_BEGIN
                             self.skipWhitespace();
+                            _ = self.stream.next(); // ENDBLOCK
+                            self.skipWhitespace();
+                            // An optional repeated block name is accepted.
+                            if (self.stream.current()) |maybe_name| {
+                                if (maybe_name.kind == .NAME) {
+                                    _ = self.stream.next();
+                                    self.skipWhitespace();
+                                }
+                            }
                             const block_end = self.stream.current();
                             if (block_end) |be| {
                                 if (be.kind == .BLOCK_END) {
@@ -2011,6 +1908,7 @@ pub const Parser = struct {
                 if (eof_token == null or eof_token.?.kind == .EOF) {
                     break;
                 }
+                _ = self.stream.next();
             }
         }
 
@@ -2046,8 +1944,8 @@ pub const Parser = struct {
         while (self.stream.hasNext()) {
             const token = self.stream.current();
             if (token) |t| {
-                if (t.kind == .NAME) {
-                    if (std.mem.eql(u8, t.value, "with")) {
+                if (t.kind == .WITH or t.kind == .NAME) {
+                    if (t.kind == .WITH or std.mem.eql(u8, t.value, "with")) {
                         _ = self.stream.next();
                         self.skipWhitespace();
                         const context_token = self.stream.current();
@@ -2122,8 +2020,7 @@ pub const Parser = struct {
             template_expr.deinit(self.allocator);
             return exceptions.TemplateError.SyntaxError;
         }
-        const target_name = try self.allocator.dupe(u8, target_token.?.value);
-        errdefer self.allocator.free(target_name);
+        const target_name = target_token.?.value;
         _ = self.stream.next();
         self.skipWhitespace();
 
@@ -2132,7 +2029,7 @@ pub const Parser = struct {
         if (self.stream.hasNext()) {
             const token = self.stream.current();
             if (token) |t| {
-                if (t.kind == .NAME and std.mem.eql(u8, t.value, "with")) {
+                if (t.kind == .WITH or (t.kind == .NAME and std.mem.eql(u8, t.value, "with"))) {
                     _ = self.stream.next();
                     self.skipWhitespace();
                     const context_token = self.stream.current();
@@ -2151,7 +2048,6 @@ pub const Parser = struct {
         const end_token = self.stream.current();
         if (end_token == null or end_token.?.kind != .BLOCK_END) {
             template_expr.deinit(self.allocator);
-            self.allocator.free(target_name);
             return exceptions.TemplateError.SyntaxError;
         }
         _ = self.stream.next();
@@ -2227,7 +2123,7 @@ pub const Parser = struct {
         if (self.stream.hasNext()) {
             const token = self.stream.current();
             if (token) |t| {
-                if (t.kind == .NAME and std.mem.eql(u8, t.value, "with")) {
+                if (t.kind == .WITH or (t.kind == .NAME and std.mem.eql(u8, t.value, "with"))) {
                     _ = self.stream.next();
                     self.skipWhitespace();
                     const context_token = self.stream.current();
@@ -2267,185 +2163,97 @@ pub const Parser = struct {
         return from_import_stmt;
     }
 
+    fn deinitMacroArgs(allocator: std.mem.Allocator, args: *std.ArrayList(nodes.MacroArg)) void {
+        for (args.items) |*arg| arg.deinit(allocator);
+        args.deinit(allocator);
+    }
+
+    fn parseMacroArguments(self: *Self) ParseError!std.ArrayList(nodes.MacroArg) {
+        var args = std.ArrayList(nodes.MacroArg){};
+        errdefer deinitMacroArgs(self.allocator, &args);
+        const opening = self.stream.current() orelse return args;
+        if (opening.kind != .LPAREN) return args;
+        _ = self.stream.next();
+        self.skipWhitespace();
+
+        while (self.stream.hasNext()) {
+            const token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+            if (token.kind == .RPAREN) {
+                _ = self.stream.next();
+                return args;
+            }
+            if (token.kind != .NAME) return exceptions.TemplateError.SyntaxError;
+            const name = token.value;
+            _ = self.stream.next();
+            self.skipWhitespace();
+
+            var default_value: ?nodes.Expression = null;
+            if (self.stream.current()) |next| {
+                if (next.kind == .ASSIGN) {
+                    _ = self.stream.next();
+                    self.skipWhitespace();
+                    default_value = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
+                }
+            }
+
+            var arg = try nodes.MacroArg.init(self.allocator, name, default_value);
+            args.append(self.allocator, arg) catch |err| {
+                arg.deinit(self.allocator);
+                return err;
+            };
+            self.skipWhitespace();
+
+            const separator = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+            switch (separator.kind) {
+                .COMMA => {
+                    _ = self.stream.next();
+                    self.skipWhitespace();
+                },
+                .RPAREN => {
+                    _ = self.stream.next();
+                    return args;
+                },
+                else => return exceptions.TemplateError.SyntaxError,
+            }
+        }
+        return exceptions.TemplateError.SyntaxError;
+    }
+
     /// Parse macro statement
-    fn parseMacro(self: *Self) (exceptions.TemplateError || std.mem.Allocator.Error)!*nodes.Macro {
+    fn parseMacro(self: *Self) ParseError!*nodes.Macro {
         const macro_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
         _ = self.stream.next();
         self.skipWhitespace();
 
-        // Parse macro name
         const name_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
-        if (name_token.kind != .NAME) {
-            return exceptions.TemplateError.SyntaxError;
-        }
-        // Note: Don't dupe here - Macro.init will dupe the name
+        if (name_token.kind != .NAME) return exceptions.TemplateError.SyntaxError;
         const macro_name = name_token.value;
         _ = self.stream.next();
         self.skipWhitespace();
 
-        // Parse macro arguments (optional)
-        var args = std.ArrayList(nodes.MacroArg){};
-        errdefer {
-            for (args.items) |*arg| {
-                arg.deinit(self.allocator);
-            }
-            args.deinit(self.allocator);
-        }
-
-        if (self.stream.hasNext()) {
-            const token = self.stream.current();
-            if (token) |t| {
-                if (t.kind == .LPAREN) {
-                    _ = self.stream.next();
-                    self.skipWhitespace();
-
-                    // Parse argument list
-                    while (self.stream.hasNext()) {
-                        const arg_token = self.stream.current();
-                        if (arg_token) |at| {
-                            if (at.kind == .RPAREN) {
-                                _ = self.stream.next();
-                                break;
-                            }
-
-                            if (at.kind == .NAME) {
-                                // Note: Don't dupe here - MacroArg.init will dupe the name
-                                const arg_name = at.value;
-                                _ = self.stream.next();
-                                self.skipWhitespace();
-
-                                // Check for default value
-                                var default_value: ?nodes.Expression = null;
-                                if (self.stream.hasNext()) {
-                                    const default_token = self.stream.current();
-                                    if (default_token) |dt| {
-                                        if (dt.kind == .ASSIGN) {
-                                            _ = self.stream.next();
-                                            self.skipWhitespace();
-                                            default_value = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
-                                        }
-                                    }
-                                }
-
-                                const macro_arg = try nodes.MacroArg.init(self.allocator, arg_name, default_value);
-                                try args.append(self.allocator, macro_arg);
-
-                                self.skipWhitespace();
-
-                                // Check for comma or closing paren
-                                const next_token = self.stream.current();
-                                if (next_token) |nt| {
-                                    if (nt.kind == .COMMA) {
-                                        _ = self.stream.next();
-                                        self.skipWhitespace();
-                                        continue;
-                                    } else if (nt.kind == .RPAREN) {
-                                        _ = self.stream.next();
-                                        break;
-                                    }
-                                }
-                            } else {
-                                return exceptions.TemplateError.SyntaxError;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
+        var args = try self.parseMacroArguments();
+        errdefer deinitMacroArgs(self.allocator, &args);
         self.skipWhitespace();
-
-        // Expect BLOCK_END
-        const end_token = self.stream.current();
-        if (end_token == null or end_token.?.kind != .BLOCK_END) {
-            // macro_name is not allocated (it's a slice to token value)
-            // but args are allocated and need cleanup
-            for (args.items) |*arg| {
-                arg.deinit(self.allocator);
-            }
-            args.deinit(self.allocator);
-            return exceptions.TemplateError.SyntaxError;
-        }
+        const header_end = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+        if (header_end.kind != .BLOCK_END) return exceptions.TemplateError.SyntaxError;
         _ = self.stream.next();
 
-        // Parse macro body (statements until {% endmacro %})
-        var body = std.ArrayList(*nodes.Stmt){};
-        errdefer {
-            for (body.items) |stmt| {
-                stmt.deinit(self.allocator);
-            }
-            body.deinit(self.allocator);
-        }
+        var body = try self.parseBodyUntil(&.{.ENDMACRO});
+        errdefer body.deinit(self.allocator);
 
-        while (self.stream.hasNext()) {
-            self.skipWhitespace();
-            const token = self.stream.current();
-            if (token) |t| {
-                // Check for {% endmacro %} using peek (don't consume BLOCK_BEGIN yet)
-                if (t.kind == .BLOCK_BEGIN) {
-                    // Peek past BLOCK_BEGIN and any whitespace to find the keyword
-                    var peek_offset: usize = 1;
-                    while (self.stream.peek(peek_offset)) |pt| {
-                        if (pt.kind != .WHITESPACE) break;
-                        peek_offset += 1;
-                    }
-                    const next_token = self.stream.peek(peek_offset);
-                    if (next_token) |nt| {
-                        if (nt.kind == .ENDMACRO) {
-                            // Now consume: BLOCK_BEGIN, whitespace, ENDMACRO
-                            _ = self.stream.next(); // consume BLOCK_BEGIN
-                            self.skipWhitespace();
-                            _ = self.stream.next(); // consume ENDMACRO
-                            self.skipWhitespace();
-                            const block_end = self.stream.current();
-                            if (block_end) |be| {
-                                if (be.kind == .BLOCK_END) {
-                                    _ = self.stream.next();
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        const macro = try self.allocator.create(nodes.Macro);
+        macro.* = try nodes.Macro.init(self.allocator, macro_name, macro_token.lineno, macro_token.filename);
+        errdefer macro.deinit(self.allocator);
+        macro.args.deinit(self.allocator);
+        macro.args = args;
+        args = std.ArrayList(nodes.MacroArg){};
+        macro.body.deinit(self.allocator);
+        macro.body = body.statements;
+        body.statements = std.ArrayList(*nodes.Stmt){};
 
-            // Parse statement
-            if (try self.parseStatement()) |stmt| {
-                try body.append(self.allocator, stmt);
-            } else {
-                // Check if we're at EOF
-                const eof_token = self.stream.current();
-                if (eof_token == null or eof_token.?.kind == .EOF) {
-                    break;
-                }
-                // Advance stream to avoid infinite loop if parseStatement returns null
-                _ = self.stream.next();
-            }
-        }
-
-        const macro_stmt = try self.allocator.create(nodes.Macro);
-        macro_stmt.* = try nodes.Macro.init(self.allocator, macro_name, macro_token.lineno, macro_token.filename);
-
-        // Move args to macro_stmt
-        for (args.items) |arg| {
-            try macro_stmt.args.append(self.allocator, arg);
-        }
-        args.deinit(self.allocator);
-
-        // Move body items to macro_stmt
-        for (body.items) |stmt| {
-            try macro_stmt.body.append(self.allocator, stmt);
-        }
-        body.deinit(self.allocator);
-
-        // Detect if varargs or kwargs are used in the macro body
-        // This is done by scanning for references to 'varargs' or 'kwargs' names
-        macro_stmt.catch_varargs = self.containsNameReference(macro_stmt.body.items, "varargs");
-        macro_stmt.catch_kwargs = self.containsNameReference(macro_stmt.body.items, "kwargs");
-
-        return macro_stmt;
+        macro.catch_varargs = self.containsNameReference(macro.body.items, "varargs");
+        macro.catch_kwargs = self.containsNameReference(macro.body.items, "kwargs");
+        return macro;
     }
 
     /// Check if any statement in the list references a given variable name

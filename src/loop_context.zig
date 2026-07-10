@@ -16,6 +16,34 @@ const value_mod = @import("value.zig");
 const Value = value_mod.Value;
 const value_pool = @import("value_pool.zig");
 
+const LoopAttribute = enum {
+    index,
+    index0,
+    first,
+    last,
+    length,
+    revindex,
+    revindex0,
+    depth,
+    depth0,
+    previtem,
+    nextitem,
+};
+
+const loop_attributes = std.StaticStringMap(LoopAttribute).initComptime(.{
+    .{ "index", .index },
+    .{ "index0", .index0 },
+    .{ "first", .first },
+    .{ "last", .last },
+    .{ "length", .length },
+    .{ "revindex", .revindex },
+    .{ "revindex0", .revindex0 },
+    .{ "depth", .depth },
+    .{ "depth0", .depth0 },
+    .{ "previtem", .previtem },
+    .{ "nextitem", .nextitem },
+});
+
 /// Optimized loop context that avoids per-iteration allocations
 ///
 /// Instead of creating a new Dict every iteration with deep-copied values,
@@ -121,49 +149,21 @@ pub const OptimizedLoopContext = struct {
     /// Resolve a loop.* attribute directly (no Dict creation)
     /// Returns null if not a loop attribute
     /// Uses ValuePool for booleans to avoid allocations
+    // fallow-zig-ignore-next-line complexity-hot-function: a static name map plus exhaustive value switch is the complete allocation-free loop API and benchmarks better than fragmented dynamic lookup.
     pub fn resolveLoopAttr(self: *const Self, attr: []const u8) ?Value {
-        // Fast switch on first character for common attributes
-        if (attr.len == 0) return null;
-
-        return switch (attr[0]) {
-            'i' => blk: {
-                if (std.mem.eql(u8, attr, "index")) {
-                    break :blk Value{ .integer = self.index };
-                } else if (std.mem.eql(u8, attr, "index0")) {
-                    break :blk Value{ .integer = self.index0 };
-                }
-                break :blk null;
-            },
-            // Use pool for boolean values (no allocation)
-            'f' => if (std.mem.eql(u8, attr, "first")) value_pool.getBool(self.first) else null,
-            'l' => blk: {
-                if (std.mem.eql(u8, attr, "last")) {
-                    // Use pool for boolean (no allocation)
-                    break :blk value_pool.getBool(self.last);
-                } else if (std.mem.eql(u8, attr, "length")) {
-                    break :blk Value{ .integer = self.length };
-                }
-                break :blk null;
-            },
-            'r' => blk: {
-                if (std.mem.eql(u8, attr, "revindex")) {
-                    break :blk Value{ .integer = self.revindex };
-                } else if (std.mem.eql(u8, attr, "revindex0")) {
-                    break :blk Value{ .integer = self.revindex0 };
-                }
-                break :blk null;
-            },
-            'd' => blk: {
-                if (std.mem.eql(u8, attr, "depth")) {
-                    break :blk Value{ .integer = self.depth };
-                } else if (std.mem.eql(u8, attr, "depth0")) {
-                    break :blk Value{ .integer = self.depth0 };
-                }
-                break :blk null;
-            },
-            'p' => if (std.mem.eql(u8, attr, "previtem")) self.getPrevItem() else null,
-            'n' => if (std.mem.eql(u8, attr, "nextitem")) self.getNextItem() else null,
-            else => null,
+        const attribute = loop_attributes.get(attr) orelse return null;
+        return switch (attribute) {
+            .index => .{ .integer = self.index },
+            .index0 => .{ .integer = self.index0 },
+            .first => value_pool.getBool(self.first),
+            .last => value_pool.getBool(self.last),
+            .length => .{ .integer = self.length },
+            .revindex => .{ .integer = self.revindex },
+            .revindex0 => .{ .integer = self.revindex0 },
+            .depth => .{ .integer = self.depth },
+            .depth0 => .{ .integer = self.depth0 },
+            .previtem => self.getPrevItem(),
+            .nextitem => self.getNextItem(),
         };
     }
 

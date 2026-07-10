@@ -445,65 +445,47 @@ pub const Context = struct {
 
     /// Resolve a variable name, checking parent contexts and globals
     /// Returns undefined value if variable is not found, based on environment policy
-    /// Note: Not inline due to recursion
     pub fn resolve(self: *Self, name: []const u8) Value {
-        // Check local variables first
-        if (self.vars.get(name)) |val| {
-            return val;
-        }
+        var current: ?*Context = self;
+        var terminal = self;
+        while (current) |ctx| : (current = ctx.parent) {
+            terminal = ctx;
+            if (ctx.vars.get(name)) |val| return val;
 
-        // Check template reference (self) for block access
-        if (self.template_ref) |ref| {
-            // Check if accessing a block via self.block_name
-            if (ref.hasBlock(name)) {
-                // Return block reference as a dict-like value
-                // In a full implementation, this would be callable
-                const block_dict_ptr = self.allocator.create(value_mod.Dict) catch return Value{ .undefined = value_mod.Undefined{
-                    .name = name,
-                    .behavior = self.environment.undefined_behavior,
-                } };
-                block_dict_ptr.* = value_mod.Dict.init(self.allocator);
-                const block_name_copy = self.allocator.dupe(u8, name) catch {
-                    self.allocator.destroy(block_dict_ptr);
-                    return Value{ .undefined = value_mod.Undefined{
+            if (ctx.template_ref) |ref| {
+                if (ref.hasBlock(name)) {
+                    const block_dict_ptr = ctx.allocator.create(value_mod.Dict) catch return Value{ .undefined = .{
                         .name = name,
-                        .behavior = self.environment.undefined_behavior,
+                        .behavior = ctx.environment.undefined_behavior,
                     } };
-                };
-                const block_val = Value{ .string = block_name_copy };
-                block_dict_ptr.set(block_name_copy, block_val) catch {
-                    self.allocator.free(block_name_copy);
-                    self.allocator.destroy(block_dict_ptr);
-                    return Value{ .undefined = value_mod.Undefined{
-                        .name = name,
-                        .behavior = self.environment.undefined_behavior,
-                    } };
-                };
-                return Value{ .dict = block_dict_ptr };
+                    block_dict_ptr.* = value_mod.Dict.init(ctx.allocator);
+                    const block_name_copy = ctx.allocator.dupe(u8, name) catch {
+                        ctx.allocator.destroy(block_dict_ptr);
+                        return Value{ .undefined = .{ .name = name, .behavior = ctx.environment.undefined_behavior } };
+                    };
+                    const block_val = Value{ .string = block_name_copy };
+                    block_dict_ptr.set(block_name_copy, block_val) catch {
+                        ctx.allocator.free(block_name_copy);
+                        ctx.allocator.destroy(block_dict_ptr);
+                        return Value{ .undefined = .{ .name = name, .behavior = ctx.environment.undefined_behavior } };
+                    };
+                    return Value{ .dict = block_dict_ptr };
+                }
             }
+
+            if (ctx.environment.getGlobal(name)) |val| return val;
         }
 
-        // Check environment globals
-        if (self.environment.getGlobal(name)) |val| {
-            return val;
-        }
-
-        // Check parent context
-        if (self.parent) |parent| {
-            return parent.resolve(name);
-        }
-
-        // Return undefined based on environment policy
-        const undefined_policy = self.environment.undefined_behavior;
         return Value{ .undefined = value_mod.Undefined{
             .name = name,
-            .behavior = undefined_policy,
+            .behavior = terminal.environment.undefined_behavior,
         } };
     }
 
     /// Get a variable with a default value
     pub fn get(self: *Self, name: []const u8, default_value: ?Value) Value {
-        if (self.resolve(name)) |val| {
+        const val = self.resolve(name);
+        if (val != .undefined) {
             return val;
         }
         return default_value orelse Value{ .string = "" };
@@ -541,11 +523,9 @@ pub const Context = struct {
     /// Get a block stack by name, checking parent contexts
     /// Returns the list of blocks (stack) for this name
     pub fn getBlockStack(self: *Self, name: []const u8) ?std.ArrayList(*anyopaque) {
-        if (self.blocks.get(name)) |*stack| {
-            return stack.*;
-        }
-        if (self.parent) |parent| {
-            return parent.getBlockStack(name);
+        var current: ?*Context = self;
+        while (current) |ctx| : (current = ctx.parent) {
+            if (ctx.blocks.get(name)) |stack| return stack;
         }
         return null;
     }
@@ -629,11 +609,9 @@ pub const Context = struct {
 
     /// Get a macro by name, checking parent contexts
     pub fn getMacro(self: *Self, name: []const u8) ?*anyopaque {
-        if (self.macros.get(name)) |macro| {
-            return macro;
-        }
-        if (self.parent) |parent| {
-            return parent.getMacro(name);
+        var current: ?*Context = self;
+        while (current) |ctx| : (current = ctx.parent) {
+            if (ctx.macros.get(name)) |macro| return macro;
         }
         return null;
     }
@@ -714,11 +692,9 @@ pub const Context = struct {
 
     /// Get an imported module by name
     pub fn getImportedModule(self: *Self, name: []const u8) ?*anyopaque {
-        if (self.imported_modules.get(name)) |module| {
-            return module.ptr;
-        }
-        if (self.parent) |parent| {
-            return parent.getImportedModule(name);
+        var current: ?*Context = self;
+        while (current) |ctx| : (current = ctx.parent) {
+            if (ctx.imported_modules.get(name)) |module| return module.ptr;
         }
         return null;
     }
@@ -727,10 +703,13 @@ pub const Context = struct {
     pub fn getAll(self: *Self) std.StringHashMap(Value) {
         var all = std.StringHashMap(Value).init(self.allocator);
 
-        // Add parent variables first
-        if (self.parent) |parent| {
+        // Add nearest parent values first, then fill gaps from more distant
+        // ancestors. This preserves normal shadowing without recursive walks.
+        var ancestor = self.parent;
+        while (ancestor) |parent| : (ancestor = parent.parent) {
             var parent_iter = parent.vars.iterator();
             while (parent_iter.next()) |entry| {
+                if (all.contains(entry.key_ptr.*)) continue;
                 const key_copy = self.allocator.dupe(u8, entry.key_ptr.*) catch continue;
                 all.put(key_copy, entry.value_ptr.*) catch {
                     self.allocator.free(key_copy);

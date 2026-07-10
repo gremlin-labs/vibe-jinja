@@ -766,13 +766,16 @@ pub fn generateLoremIpsum(allocator: std.mem.Allocator, words: usize) ![]const u
 
     var result = std.ArrayList(u8){};
     defer result.deinit(allocator);
+    var output_size: usize = if (words > 0) words - 1 else 0;
+    for (0..words) |index| output_size += lorem_words[index % lorem_words.len].len;
+    try result.ensureTotalCapacity(allocator, output_size);
 
     for (0..words) |i| {
         if (i > 0) {
-            try result.append(allocator, ' ');
+            result.appendAssumeCapacity(' ');
         }
         const word = lorem_words[i % lorem_words.len];
-        try result.appendSlice(allocator, word);
+        result.appendSliceAssumeCapacity(word);
     }
 
     return try result.toOwnedSlice(allocator);
@@ -998,6 +1001,8 @@ pub fn strftimeNowGlobal(
     // Format according to strftime spec
     var buffer = std.ArrayList(u8){};
     errdefer buffer.deinit(allocator);
+    const output_capacity = std.math.mul(usize, format.len, 10) catch return error.OutOfMemory;
+    try buffer.ensureTotalCapacity(allocator, output_capacity);
 
     var i: usize = 0;
     while (i < format.len) {
@@ -1007,55 +1012,39 @@ pub fn strftimeNowGlobal(
                 'd' => {
                     // Day of month (01-31)
                     const md = year_day.calculateMonthDay();
-                    const day_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{md.day_index + 1});
-                    defer allocator.free(day_str);
-                    try buffer.appendSlice(allocator, day_str);
+                    try buffer.writer(allocator).print("{d:0>2}", .{md.day_index + 1});
                 },
                 'm' => {
                     // Month (01-12)
                     const md = year_day.calculateMonthDay();
-                    const month_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{md.month.numeric()});
-                    defer allocator.free(month_str);
-                    try buffer.appendSlice(allocator, month_str);
+                    try buffer.writer(allocator).print("{d:0>2}", .{md.month.numeric()});
                 },
                 'Y' => {
                     // Year with century
-                    const year_str = try std.fmt.allocPrint(allocator, "{d}", .{year_day.year});
-                    defer allocator.free(year_str);
-                    try buffer.appendSlice(allocator, year_str);
+                    try buffer.writer(allocator).print("{d}", .{year_day.year});
                 },
                 'y' => {
                     // Year without century (00-99)
                     const year_short = @mod(year_day.year, 100);
-                    const year_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{year_short});
-                    defer allocator.free(year_str);
-                    try buffer.appendSlice(allocator, year_str);
+                    try buffer.writer(allocator).print("{d:0>2}", .{year_short});
                 },
                 'H' => {
                     // Hour (00-23)
-                    const hour_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{day_seconds.getHoursIntoDay()});
-                    defer allocator.free(hour_str);
-                    try buffer.appendSlice(allocator, hour_str);
+                    try buffer.writer(allocator).print("{d:0>2}", .{day_seconds.getHoursIntoDay()});
                 },
                 'I' => {
                     // Hour (01-12)
                     const hours = day_seconds.getHoursIntoDay();
                     const hour12 = if (hours == 0) 12 else if (hours > 12) hours - 12 else hours;
-                    const hour_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{hour12});
-                    defer allocator.free(hour_str);
-                    try buffer.appendSlice(allocator, hour_str);
+                    try buffer.writer(allocator).print("{d:0>2}", .{hour12});
                 },
                 'M' => {
                     // Minute (00-59)
-                    const min_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{day_seconds.getMinutesIntoHour()});
-                    defer allocator.free(min_str);
-                    try buffer.appendSlice(allocator, min_str);
+                    try buffer.writer(allocator).print("{d:0>2}", .{day_seconds.getMinutesIntoHour()});
                 },
                 'S' => {
                     // Second (00-59)
-                    const sec_str = try std.fmt.allocPrint(allocator, "{d:0>2}", .{day_seconds.getSecondsIntoMinute()});
-                    defer allocator.free(sec_str);
-                    try buffer.appendSlice(allocator, sec_str);
+                    try buffer.writer(allocator).print("{d:0>2}", .{day_seconds.getSecondsIntoMinute()});
                 },
                 'p' => {
                     // AM/PM
@@ -1090,15 +1079,11 @@ pub fn strftimeNowGlobal(
                     // Weekday as decimal (0=Sunday, 6=Saturday)
                     const days: i32 = @intCast(epoch_day.day);
                     const dow = @mod(days + 4, 7);
-                    const weekday_str = try std.fmt.allocPrint(allocator, "{d}", .{dow});
-                    defer allocator.free(weekday_str);
-                    try buffer.appendSlice(allocator, weekday_str);
+                    try buffer.writer(allocator).print("{d}", .{dow});
                 },
                 'j' => {
                     // Day of year (001-366)
-                    const doy_str = try std.fmt.allocPrint(allocator, "{d:0>3}", .{year_day.day + 1});
-                    defer allocator.free(doy_str);
-                    try buffer.appendSlice(allocator, doy_str);
+                    try buffer.writer(allocator).print("{d:0>3}", .{year_day.day + 1});
                 },
                 '%' => {
                     // Literal %
@@ -1133,8 +1118,8 @@ const month_abbrevs = [_][]const u8{
 };
 
 const month_full_names = [_][]const u8{
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
+    "January", "February", "March",     "April",   "May",      "June",
+    "July",    "August",   "September", "October", "November", "December",
 };
 
 // Sunday-indexed weekday arrays (0=Sunday, 6=Saturday) for strftime compatibility

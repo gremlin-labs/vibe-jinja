@@ -3,7 +3,6 @@ const testing = std.testing;
 const vibe_jinja = @import("vibe_jinja");
 const extensions = vibe_jinja.extensions;
 const filters = vibe_jinja.filters;
-const tests_module = vibe_jinja.tests;
 const value = vibe_jinja.value;
 const context = vibe_jinja.context;
 const environment = vibe_jinja.environment;

@@ -86,6 +86,8 @@ pub const TemplateModule = struct {
     body_stream: []const u8,
     /// Exported variables (macros and variables marked for export)
     exports: std.StringHashMap(context.Value),
+    /// Borrowed macro AST handles keyed by module export name.
+    macros: std.StringHashMap(*anyopaque),
 
     const Self = @This();
 
@@ -99,6 +101,13 @@ pub const TemplateModule = struct {
                 entry.value_ptr.*.deinit(allocator);
             }
             exports.deinit();
+        }
+
+        var macros = std.StringHashMap(*anyopaque).init(allocator);
+        errdefer {
+            var iter = macros.keyIterator();
+            while (iter.next()) |key| allocator.free(key.*);
+            macros.deinit();
         }
 
         var exported_iter = ctx.exported_vars.iterator();
@@ -118,10 +127,22 @@ pub const TemplateModule = struct {
         var macro_iter = ctx.macros.iterator();
         while (macro_iter.next()) |entry| {
             const key_copy = try allocator.dupe(u8, entry.key_ptr.*);
-            errdefer allocator.free(key_copy);
+            const macro_string = std.fmt.allocPrint(allocator, "<macro {s}>", .{entry.key_ptr.*}) catch |err| {
+                allocator.free(key_copy);
+                return err;
+            };
+            const macro_val = context.Value{ .string = macro_string };
+            exports.put(key_copy, macro_val) catch |err| {
+                allocator.free(key_copy);
+                allocator.free(macro_string);
+                return err;
+            };
 
-            const macro_val = context.Value{ .string = try std.fmt.allocPrint(allocator, "<macro {s}>", .{entry.key_ptr.*}) };
-            try exports.put(key_copy, macro_val);
+            const macro_key = try allocator.dupe(u8, entry.key_ptr.*);
+            macros.put(macro_key, entry.value_ptr.*) catch |err| {
+                allocator.free(macro_key);
+                return err;
+            };
         }
 
         const name_copy = if (template.name) |n| try allocator.dupe(u8, n) else null;
@@ -132,6 +153,7 @@ pub const TemplateModule = struct {
             .name = name_copy,
             .body_stream = body,
             .exports = exports,
+            .macros = macros,
         };
     }
 
@@ -148,11 +170,19 @@ pub const TemplateModule = struct {
             entry.value_ptr.*.deinit(self.allocator);
         }
         self.exports.deinit();
+
+        var macro_iter = self.macros.keyIterator();
+        while (macro_iter.next()) |key| self.allocator.free(key.*);
+        self.macros.deinit();
     }
 
     /// Get an exported value by name.
     pub fn get(self: *Self, name: []const u8) ?context.Value {
         return self.exports.get(name);
+    }
+
+    pub fn getMacro(self: *Self, name: []const u8) ?*anyopaque {
+        return self.macros.get(name);
     }
 
     /// Convert module to string (renders body).

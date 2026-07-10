@@ -214,6 +214,40 @@ pub const TokenStream = struct {
     }
 };
 
+const keyword_token_kinds = std.StaticStringMap(TokenKind).initComptime(.{
+    .{ "for", .FOR },
+    .{ "in", .IN },
+    .{ "if", .IF },
+    .{ "else", .ELSE },
+    .{ "elif", .ELIF },
+    .{ "endif", .ENDIF },
+    .{ "endfor", .ENDFOR },
+    .{ "block", .BLOCK },
+    .{ "endblock", .ENDBLOCK },
+    .{ "extends", .EXTENDS },
+    .{ "include", .INCLUDE },
+    .{ "import", .IMPORT },
+    .{ "from", .FROM },
+    .{ "macro", .MACRO },
+    .{ "endmacro", .ENDMACRO },
+    .{ "call", .CALL },
+    .{ "set", .SET },
+    .{ "with", .WITH },
+    .{ "endwith", .ENDWITH },
+    .{ "continue", .CONTINUE },
+    .{ "break", .BREAK },
+    .{ "do", .DO },
+    .{ "debug", .DEBUG },
+    .{ "and", .AND },
+    .{ "or", .OR },
+    .{ "not", .NOT },
+    .{ "is", .IS },
+    .{ "true", .BOOLEAN },
+    .{ "false", .BOOLEAN },
+    .{ "null", .NULL },
+    .{ "None", .NULL },
+});
+
 /// Jinja2-compatible lexer
 pub const Lexer = struct {
     /// Source code to tokenize
@@ -309,237 +343,238 @@ pub const Lexer = struct {
     }
 
     /// Get the next token
+    const PrefixPosition = struct { cursor: usize, column: usize };
+
+    fn linePrefixPosition(self: *const Self) PrefixPosition {
+        var position = PrefixPosition{ .cursor = self.cursor, .column = self.column };
+        while (position.cursor < self.source.len and
+            std.ascii.isWhitespace(self.source[position.cursor]) and
+            self.source[position.cursor] != '\n')
+        {
+            position.cursor += 1;
+            position.column += 1;
+        }
+        return position;
+    }
+
+    fn tokenizeLinePrefix(self: *Self, start_line: usize, start_column: usize) !?Token {
+        const position = self.linePrefixPosition();
+        if (position.column > 10) return null;
+
+        if (self.line_statement_prefix) |prefix| {
+            if (self.checkStartsWithAt(prefix, position.cursor)) {
+                self.cursor = position.cursor;
+                self.column = position.column;
+                return self.tokenizeDelimiter(.BLOCK_BEGIN, prefix, start_line, start_column);
+            }
+        }
+        if (self.line_comment_prefix) |prefix| {
+            if (self.checkStartsWithAt(prefix, position.cursor)) {
+                self.cursor = position.cursor;
+                self.column = position.column;
+                return try self.tokenizeLineComment(prefix, start_line, start_column);
+            }
+        }
+        return null;
+    }
+
+    fn tokenizeRawState(self: *Self, start_line: usize, start_column: usize) !Token {
+        if (self.startsWith(self.block_start)) {
+            const saved_cursor = self.cursor;
+            const saved_column = self.column;
+            self.cursor += self.block_start.len;
+            self.column += @intCast(self.block_start.len);
+            self.skipWhitespace();
+
+            if (self.startsWith("endraw")) {
+                self.cursor += 6;
+                self.column += 6;
+                self.skipWhitespace();
+                if (self.startsWith(self.block_end)) {
+                    self.cursor += self.block_end.len;
+                    self.column += @intCast(self.block_end.len);
+                    self.state = .initial;
+                    return Token.init(.RAW_END, "{% endraw %}", start_line, start_column, self.filename);
+                }
+            }
+
+            self.cursor = saved_cursor;
+            self.column = saved_column;
+        }
+        return try self.tokenizeRawContent(start_line, start_column);
+    }
+
+    fn tokenizeInitialState(self: *Self, start_line: usize, start_column: usize) Token {
+        if (self.startsWith(self.block_start)) {
+            const saved_cursor = self.cursor;
+            const saved_column = self.column;
+            const saved_lineno = self.lineno;
+            self.cursor += self.block_start.len;
+            self.column += @intCast(self.block_start.len);
+            self.skipWhitespace();
+
+            if (self.startsWith("raw")) {
+                self.cursor += 3;
+                self.column += 3;
+                self.skipWhitespace();
+                if (self.startsWith(self.block_end)) {
+                    self.cursor += self.block_end.len;
+                    self.column += @intCast(self.block_end.len);
+                    self.state = .in_raw;
+                    return Token.init(.RAW_BEGIN, "{% raw %}", start_line, start_column, self.filename);
+                }
+            }
+
+            self.cursor = saved_cursor;
+            self.column = saved_column;
+            self.lineno = saved_lineno;
+        }
+
+        if (self.startsWith(self.comment_start)) {
+            self.state = .in_comment;
+            return self.tokenizeOpeningDelimiter(.COMMENT_BEGIN, self.comment_start, start_line, start_column);
+        }
+        if (self.startsWith(self.variable_start)) {
+            self.state = .in_variable;
+            return self.tokenizeOpeningDelimiter(.VARIABLE_BEGIN, self.variable_start, start_line, start_column);
+        }
+        if (self.startsWith(self.block_start)) {
+            self.state = .in_block;
+            return self.tokenizeOpeningDelimiter(.BLOCK_BEGIN, self.block_start, start_line, start_column);
+        }
+        return self.tokenizeData(start_line, start_column);
+    }
+
+    fn tokenizeTagEnd(self: *Self, start_line: usize, start_column: usize) ?Token {
+        if (self.state == .in_comment and (self.startsWith(self.comment_end) or self.startsWithTrimmedEnd(self.comment_end))) {
+            self.state = .initial;
+            return self.tokenizeClosingDelimiter(.COMMENT_END, self.comment_end, start_line, start_column);
+        }
+        if (self.state == .in_variable and (self.startsWith(self.variable_end) or self.startsWithTrimmedEnd(self.variable_end))) {
+            self.state = .initial;
+            return self.tokenizeClosingDelimiter(.VARIABLE_END, self.variable_end, start_line, start_column);
+        }
+        if (self.state == .in_block and (self.startsWith(self.block_end) or self.startsWithTrimmedEnd(self.block_end))) {
+            self.state = .initial;
+            return self.tokenizeClosingDelimiter(.BLOCK_END, self.block_end, start_line, start_column);
+        }
+        return null;
+    }
+
+    fn tokenizeMultiOperator(self: *Self, start_line: usize, start_column: usize) ?Token {
+        const operators = [_]struct { text: []const u8, kind: TokenKind }{
+            .{ .text = "**", .kind = .POW },
+            .{ .text = "//", .kind = .FLOORDIV },
+            .{ .text = "==", .kind = .EQ },
+            .{ .text = "!=", .kind = .NE },
+            .{ .text = "<=", .kind = .LTEQ },
+            .{ .text = ">=", .kind = .GTEQ },
+        };
+        inline for (operators) |operator| {
+            if (self.startsWith(operator.text)) {
+                return self.tokenizeOperator(operator.kind, operator.text, start_line, start_column);
+            }
+        }
+        return null;
+    }
+
+    fn singleOperatorKind(byte: u8) ?TokenKind {
+        return switch (byte) {
+            '+' => .ADD,
+            '-' => .SUB,
+            '*' => .MUL,
+            '/' => .DIV,
+            '%' => .MOD,
+            '~' => .TILDE,
+            '<' => .LT,
+            '>' => .GT,
+            '=' => .ASSIGN,
+            '.' => .DOT,
+            ',' => .COMMA,
+            ':' => .COLON,
+            ';' => .SEMICOLON,
+            '|' => .PIPE,
+            '(' => .LPAREN,
+            ')' => .RPAREN,
+            '[' => .LBRACKET,
+            ']' => .RBRACKET,
+            '{' => .LBRACE,
+            '}' => .RBRACE,
+            else => null,
+        };
+    }
+
+    fn tokenizeTagPayload(self: *Self, start_line: usize, start_column: usize) !Token {
+        if (self.tokenizeMultiOperator(start_line, start_column)) |token| return token;
+        const byte = self.peek();
+        if (singleOperatorKind(byte)) |kind| {
+            return self.tokenizeOperator(kind, self.source[self.cursor .. self.cursor + 1], start_line, start_column);
+        }
+        if (byte == '\n') {
+            self.cursor += 1;
+            self.lineno += 1;
+            self.column = 1;
+            return Token.init(.DATA, "\n", start_line, start_column, self.filename);
+        }
+        if (byte == '\'' or byte == '"') return try self.tokenizeString(start_line, start_column);
+        if (std.ascii.isWhitespace(byte)) return self.tokenizeWhitespace(start_line, start_column);
+        if (std.ascii.isDigit(byte)) return try self.tokenizeNumber(start_line, start_column);
+        if (std.ascii.isAlphabetic(byte) or byte == '_') return try self.tokenizeName(start_line, start_column);
+
+        const char_start = self.cursor;
+        self.cursor += 1;
+        self.column += 1;
+        return Token.init(.DATA, self.source[char_start..self.cursor], start_line, start_column, self.filename);
+    }
+
+    /// Get the next token
     pub fn nextToken(self: *Self, allocator: std.mem.Allocator) !Token {
         _ = allocator;
-
         if (self.cursor >= self.source.len) {
             return Token.init(.EOF, "EOF", self.lineno, self.column, self.filename);
         }
 
         const start_line = self.lineno;
         const start_column = self.column;
+        if (try self.tokenizeLinePrefix(start_line, start_column)) |token| return token;
 
-        // Check for line statement prefix (must be at start of line after whitespace)
-        if (self.line_statement_prefix) |prefix| {
-            // Check if we're at the start of a line (column 1 or after leading whitespace)
-            var check_pos = self.cursor;
-            var check_col = self.column;
-            // Skip leading whitespace to check if prefix is at line start
-            while (check_pos < self.source.len and std.ascii.isWhitespace(self.source[check_pos]) and self.source[check_pos] != '\n') {
-                check_pos += 1;
-                check_col += 1;
-            }
-            if (check_col <= 10 and self.checkStartsWithAt(prefix, check_pos)) { // Allow some leading whitespace
-                // This is a line statement - treat prefix as BLOCK_BEGIN
-                self.cursor = check_pos;
-                self.column = check_col;
-                return self.tokenizeDelimiter(.BLOCK_BEGIN, prefix, start_line, start_column);
-            }
-        }
-
-        // Check for line comment prefix (must be at start of line)
-        if (self.line_comment_prefix) |prefix| {
-            // Check if we're at the start of a line
-            var check_pos = self.cursor;
-            var check_col = self.column;
-            // Skip leading whitespace to check if prefix is at line start
-            while (check_pos < self.source.len and std.ascii.isWhitespace(self.source[check_pos]) and self.source[check_pos] != '\n') {
-                check_pos += 1;
-                check_col += 1;
-            }
-            if (check_col <= 10 and self.checkStartsWithAt(prefix, check_pos)) { // Allow some leading whitespace
-                // This is a line comment
-                self.cursor = check_pos;
-                self.column = check_col;
-                return try self.tokenizeLineComment(prefix, start_line, start_column);
-            }
-        }
-
-        // Check for raw blocks FIRST - in raw mode, don't parse delimiters
-        if (self.state == .in_raw) {
-            // Look for {% endraw %}
-            if (self.startsWith(self.block_start)) {
-                // Check if this is {% endraw %}
-                const saved_cursor = self.cursor;
-                const saved_column = self.column;
-                self.cursor += self.block_start.len;
-                self.column += @intCast(self.block_start.len);
-                self.skipWhitespace();
-
-                // Check for "endraw" keyword
-                if (self.startsWith("endraw")) {
-                    self.cursor += 6; // "endraw".len
-                    self.column += 6;
-                    self.skipWhitespace();
-                    if (self.startsWith(self.block_end)) {
-                        self.cursor += self.block_end.len;
-                        self.column += @intCast(self.block_end.len);
-                        self.state = .initial;
-                        // Return RAW_END token so parser knows raw block has ended
-                        return Token.init(.RAW_END, "{% endraw %}", start_line, start_column, self.filename);
-                    }
-                }
-
-                // Not endraw, restore cursor
-                self.cursor = saved_cursor;
-                self.column = saved_column;
-            }
-
-            // In raw block - consume as data until we find endraw
-            return try self.tokenizeRawContent(start_line, start_column);
-        }
-
-        // In initial state (outside tags), handle delimiters or collect DATA
-        if (self.state == .initial) {
-            // Check for raw begin FIRST (special case of block start)
-            if (self.startsWith(self.block_start)) {
-                const saved_cursor = self.cursor;
-                const saved_column = self.column;
-                const saved_lineno = self.lineno;
-                self.cursor += self.block_start.len;
-                self.column += @intCast(self.block_start.len);
-                self.skipWhitespace();
-
-                // Check for "raw" keyword
-                if (self.startsWith("raw")) {
-                    self.cursor += 3; // "raw".len
-                    self.column += 3;
-                    self.skipWhitespace();
-                    if (self.startsWith(self.block_end)) {
-                        // Consume the entire {% raw %} tag
-                        self.cursor += self.block_end.len;
-                        self.column += @intCast(self.block_end.len);
-                        self.state = .in_raw;
-                        return Token.init(.RAW_BEGIN, "{% raw %}", start_line, start_column, self.filename);
-                    }
-                }
-
-                // Not raw block, restore cursor and fall through to normal block handling
-                self.cursor = saved_cursor;
-                self.column = saved_column;
-                self.lineno = saved_lineno;
-            }
-
-            // Check if we're at a delimiter
-            if (self.startsWith(self.comment_start)) {
-                self.state = .in_comment;
-                return self.tokenizeDelimiter(.COMMENT_BEGIN, self.comment_start, start_line, start_column);
-            }
-            if (self.startsWith(self.variable_start)) {
-                self.state = .in_variable;
-                return self.tokenizeDelimiter(.VARIABLE_BEGIN, self.variable_start, start_line, start_column);
-            }
-            if (self.startsWith(self.block_start)) {
-                self.state = .in_block;
-                return self.tokenizeDelimiter(.BLOCK_BEGIN, self.block_start, start_line, start_column);
-            }
-            // Not at a delimiter, collect DATA
-            return self.tokenizeData(start_line, start_column);
-        }
-
-        // Inside a tag, check for end delimiters
-        if (self.state == .in_comment and self.startsWith(self.comment_end)) {
-            self.state = .initial;
-            return self.tokenizeDelimiter(.COMMENT_END, self.comment_end, start_line, start_column);
-        }
-        if (self.state == .in_variable and self.startsWith(self.variable_end)) {
-            self.state = .initial;
-            return self.tokenizeDelimiter(.VARIABLE_END, self.variable_end, start_line, start_column);
-        }
-        if (self.state == .in_block and self.startsWith(self.block_end)) {
-            self.state = .initial;
-            return self.tokenizeDelimiter(.BLOCK_END, self.block_end, start_line, start_column);
-        }
-
-        // In comment state, skip content until end
-        if (self.state == .in_comment) {
-            return self.tokenizeCommentContent(start_line, start_column);
-        }
-
-        // Handle operators (check multi-character first)
-        if (self.startsWith("**")) {
-            return self.tokenizeOperator(.POW, "**", start_line, start_column);
-        }
-        if (self.startsWith("//")) {
-            return self.tokenizeOperator(.FLOORDIV, "//", start_line, start_column);
-        }
-        if (self.startsWith("==")) {
-            return self.tokenizeOperator(.EQ, "==", start_line, start_column);
-        }
-        if (self.startsWith("!=")) {
-            return self.tokenizeOperator(.NE, "!=", start_line, start_column);
-        }
-        if (self.startsWith("<=")) {
-            return self.tokenizeOperator(.LTEQ, "<=", start_line, start_column);
-        }
-        if (self.startsWith(">=")) {
-            return self.tokenizeOperator(.GTEQ, ">=", start_line, start_column);
-        }
-
-        // Single character operators
-        switch (self.peek()) {
-            '+' => return self.tokenizeOperator(.ADD, "+", start_line, start_column),
-            '-' => return self.tokenizeOperator(.SUB, "-", start_line, start_column),
-            '*' => return self.tokenizeOperator(.MUL, "*", start_line, start_column),
-            '/' => return self.tokenizeOperator(.DIV, "/", start_line, start_column),
-            '%' => return self.tokenizeOperator(.MOD, "%", start_line, start_column),
-            '~' => return self.tokenizeOperator(.TILDE, "~", start_line, start_column),
-            '<' => return self.tokenizeOperator(.LT, "<", start_line, start_column),
-            '>' => return self.tokenizeOperator(.GT, ">", start_line, start_column),
-            '=' => return self.tokenizeOperator(.ASSIGN, "=", start_line, start_column),
-            '.' => return self.tokenizeOperator(.DOT, ".", start_line, start_column),
-            ',' => return self.tokenizeOperator(.COMMA, ",", start_line, start_column),
-            ':' => return self.tokenizeOperator(.COLON, ":", start_line, start_column),
-            ';' => return self.tokenizeOperator(.SEMICOLON, ";", start_line, start_column),
-            '|' => return self.tokenizeOperator(.PIPE, "|", start_line, start_column),
-            '(' => return self.tokenizeOperator(.LPAREN, "(", start_line, start_column),
-            ')' => return self.tokenizeOperator(.RPAREN, ")", start_line, start_column),
-            '[' => return self.tokenizeOperator(.LBRACKET, "[", start_line, start_column),
-            ']' => return self.tokenizeOperator(.RBRACKET, "]", start_line, start_column),
-            '{' => return self.tokenizeOperator(.LBRACE, "{", start_line, start_column),
-            '}' => return self.tokenizeOperator(.RBRACE, "}", start_line, start_column),
-
-            '\n' => {
-                self.cursor += 1;
-                self.lineno += 1;
-                self.column = 1;
-                return Token.init(.DATA, "\n", start_line, start_column, self.filename);
-            },
-
-            '\'', '"' => {
-                return try self.tokenizeString(start_line, start_column);
-            },
-
-            else => {
-                // Check for whitespace
-                if (std.ascii.isWhitespace(self.peek())) {
-                    return self.tokenizeWhitespace(start_line, start_column);
-                }
-
-                // Check for numbers (integer or float)
-                if (std.ascii.isDigit(self.peek())) {
-                    return try self.tokenizeNumber(start_line, start_column);
-                }
-
-                // Check for identifiers/keywords
-                if (std.ascii.isAlphabetic(self.peek()) or self.peek() == '_') {
-                    return try self.tokenizeName(start_line, start_column);
-                }
-
-                // Default: single character as data
-                // Return a slice of the source string to avoid dangling pointer
-                const char_start = self.cursor;
-                self.cursor += 1;
-                self.column += 1;
-                return Token.init(.DATA, self.source[char_start..self.cursor], start_line, start_column, self.filename);
-            },
-        }
+        return switch (self.state) {
+            .in_raw => self.tokenizeRawState(start_line, start_column),
+            .initial => self.tokenizeInitialState(start_line, start_column),
+            .in_comment => self.tokenizeTagEnd(start_line, start_column) orelse
+                self.tokenizeCommentContent(start_line, start_column),
+            .in_variable, .in_block => self.tokenizeTagEnd(start_line, start_column) orelse
+                try self.tokenizeTagPayload(start_line, start_column),
+        };
     }
 
     fn tokenizeDelimiter(self: *Self, kind: TokenKind, delimiter: []const u8, lineno: usize, column: usize) Token {
         self.cursor += delimiter.len;
         self.column += @intCast(delimiter.len);
         return Token.init(kind, delimiter, lineno, column, self.filename);
+    }
+
+    fn tokenizeOpeningDelimiter(self: *Self, kind: TokenKind, delimiter: []const u8, lineno: usize, column: usize) Token {
+        const token = self.tokenizeDelimiter(kind, delimiter, lineno, column);
+        if (self.cursor < self.source.len and self.source[self.cursor] == '-') {
+            self.cursor += 1;
+            self.column += 1;
+        }
+        return token;
+    }
+
+    fn startsWithTrimmedEnd(self: *const Self, delimiter: []const u8) bool {
+        return self.cursor < self.source.len and
+            self.source[self.cursor] == '-' and
+            std.mem.startsWith(u8, self.source[self.cursor + 1 ..], delimiter);
+    }
+
+    fn tokenizeClosingDelimiter(self: *Self, kind: TokenKind, delimiter: []const u8, lineno: usize, column: usize) Token {
+        if (self.startsWithTrimmedEnd(delimiter)) {
+            self.cursor += 1;
+            self.column += 1;
+        }
+        return self.tokenizeDelimiter(kind, delimiter, lineno, column);
     }
 
     /// Tokenize a line comment (from line comment prefix to end of line)
@@ -714,6 +749,7 @@ pub const Lexer = struct {
         return Token.init(.STRING, self.source[start..], lineno, column, self.filename);
     }
 
+    // fallow-zig-ignore-next-line complexity-hot-function: this cohesive allocation-free scanner advances one cursor through integer, fraction, and exponent states; the token golden suite covers all transitions.
     fn tokenizeNumber(self: *Self, lineno: usize, column: usize) !Token {
         const start = self.cursor;
         var has_dot = false;
@@ -795,41 +831,7 @@ pub const Lexer = struct {
 
     fn keywordToTokenKind(self: *Self, keyword: []const u8) TokenKind {
         _ = self;
-        if (std.mem.eql(u8, keyword, "for")) return .FOR;
-        if (std.mem.eql(u8, keyword, "in")) return .IN;
-        if (std.mem.eql(u8, keyword, "if")) return .IF;
-        if (std.mem.eql(u8, keyword, "else")) return .ELSE;
-        if (std.mem.eql(u8, keyword, "elif")) return .ELIF;
-        if (std.mem.eql(u8, keyword, "endif")) return .ENDIF;
-        if (std.mem.eql(u8, keyword, "endfor")) return .ENDFOR;
-        if (std.mem.eql(u8, keyword, "block")) return .BLOCK;
-        if (std.mem.eql(u8, keyword, "endblock")) return .ENDBLOCK;
-        if (std.mem.eql(u8, keyword, "extends")) return .EXTENDS;
-        if (std.mem.eql(u8, keyword, "include")) return .INCLUDE;
-        if (std.mem.eql(u8, keyword, "import")) return .IMPORT;
-        if (std.mem.eql(u8, keyword, "from")) return .FROM;
-        if (std.mem.eql(u8, keyword, "macro")) return .MACRO;
-        if (std.mem.eql(u8, keyword, "endmacro")) return .ENDMACRO;
-        if (std.mem.eql(u8, keyword, "call")) return .CALL;
-        if (std.mem.eql(u8, keyword, "set")) return .SET;
-        if (std.mem.eql(u8, keyword, "with")) return .WITH;
-        if (std.mem.eql(u8, keyword, "endwith")) return .ENDWITH;
-        if (std.mem.eql(u8, keyword, "endfilter")) return .NAME; // endfilter parsed as NAME
-        if (std.mem.eql(u8, keyword, "endset")) return .NAME; // endset parsed as NAME
-        if (std.mem.eql(u8, keyword, "continue")) return .CONTINUE;
-        if (std.mem.eql(u8, keyword, "break")) return .BREAK;
-        if (std.mem.eql(u8, keyword, "do")) return .DO;
-        if (std.mem.eql(u8, keyword, "debug")) return .DEBUG;
-        if (std.mem.eql(u8, keyword, "and")) return .AND;
-        if (std.mem.eql(u8, keyword, "or")) return .OR;
-        if (std.mem.eql(u8, keyword, "not")) return .NOT;
-        if (std.mem.eql(u8, keyword, "is")) return .IS;
-        if (std.mem.eql(u8, keyword, "as")) return .NAME; // 'as' is parsed as NAME in import statements
-        if (std.mem.eql(u8, keyword, "true") or std.mem.eql(u8, keyword, "false")) return .BOOLEAN;
-        // Only "null" and "None" (Python-style) are null keywords
-        // "none" is NOT a keyword - it's the name of a test (value is none)
-        if (std.mem.eql(u8, keyword, "null") or std.mem.eql(u8, keyword, "None")) return .NULL;
-        return .NAME;
+        return keyword_token_kinds.get(keyword) orelse .NAME;
     }
 
     fn startsWith(self: *const Self, prefix: []const u8) bool {

@@ -5,6 +5,21 @@ All notable changes to vibe-jinja will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Bound deeply nested CLI JSON, context, and value traversal so hostile inputs return defined errors instead of exhausting the native stack.
+- Correct overlay and spontaneous-environment cache ownership across allocators and option sets.
+- Unify AST, bytecode, optimizer, macro/caller, attribute, item, hashing, and formatting semantics.
+- Make `sort`/`dictsort` stable and correct `rejectattr`, list-producing filter ownership, recursive JSON formatting, and mixed numeric equality.
+- Run every existing unit/integration test root from the default build graph.
+
+### Changed
+
+- Split bytecode schema, generation, synchronous VM, and async-specialized execution behind the existing public facade.
+- CLI JSON conversion now rejects inputs nested beyond 256 containers with `InputTooDeep`.
+
 ## [1.0.0] - 2025-12-29
 
 ### 🎉 Initial Release

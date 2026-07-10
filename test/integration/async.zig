@@ -7,7 +7,6 @@ const context = vibe_jinja.context;
 const async_utils = vibe_jinja.async_utils;
 const value_mod = vibe_jinja.value;
 const filters = vibe_jinja.filters;
-const tests_mod = vibe_jinja.tests;
 
 // ============================================================================
 // Basic Async Tests

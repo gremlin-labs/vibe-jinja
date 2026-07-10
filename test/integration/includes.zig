@@ -18,20 +18,11 @@ test "include basic" {
     const main_source = "Main content {% include 'header.jinja' %}";
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "header.jinja"), try allocator.dupe(u8, header_source));
     try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -59,20 +50,11 @@ test "include with context" {
     const main_source = "{% include 'partial.jinja' %}";
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "partial.jinja"), try allocator.dupe(u8, partial_source));
     try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -89,9 +71,7 @@ test "include with context" {
     }
 
     const name_key = try allocator.dupe(u8, "name");
-    defer allocator.free(name_key);
     const name_val = context.Value{ .string = try allocator.dupe(u8, "World") };
-    defer name_val.deinit(allocator);
     try vars.put(name_key, name_val);
 
     const result = try rt.renderString(main_source, vars, "main.jinja");
@@ -113,21 +93,12 @@ test "include nested" {
     const main_source = "{% include 'header.jinja' %}";
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "footer.jinja"), try allocator.dupe(u8, footer_source));
     try mapping.put(try allocator.dupe(u8, "header.jinja"), try allocator.dupe(u8, header_source));
     try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -154,19 +125,10 @@ test "include with ignore missing" {
     const main_source = "Main {% include 'missing.jinja' ignore missing %}";
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -181,9 +143,8 @@ test "include with ignore missing" {
     if (result) |res| {
         defer allocator.free(res);
         try testing.expect(std.mem.indexOf(u8, res, "Main") != null);
-    } else |err| {
+    } else |_| {
         // If ignore missing not implemented, this is expected
-        _ = err;
     }
 }
 
@@ -199,20 +160,11 @@ test "include variable template name" {
     const main_source = "{% set template_name = 'partial.jinja' %}{% include template_name %}";
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "partial.jinja"), try allocator.dupe(u8, partial_source));
     try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);

@@ -9,6 +9,8 @@ const bytecode_mod = @import("bytecode.zig");
 const loop_context_mod = @import("loop_context.zig");
 const value_pool = @import("value_pool.zig");
 const render_arena = @import("render_arena.zig");
+const semantics = @import("semantics.zig");
+const filters_mod = @import("filters.zig");
 
 /// Re-export optimized loop context
 pub const OptimizedLoopContext = loop_context_mod.OptimizedLoopContext;
@@ -23,61 +25,6 @@ fn normalizeIndex(idx: i64, len: i64) i64 {
         return idx + len;
     }
     return idx;
-}
-
-/// Value trees are data-driven and can nest arbitrarily; beyond this depth the
-/// hash folds to a sentinel instead of recursing further.
-const max_value_hash_depth: usize = 64;
-
-/// Compute a simple hash for a value (used by loop.changed())
-fn computeValueHash(val: value_mod.Value) u64 {
-    return computeValueHashDepth(val, 0);
-}
-
-fn computeValueHashDepth(val: value_mod.Value, depth: usize) u64 {
-    if (depth >= max_value_hash_depth) return 0x9E37_79B9_7F4A_7C15;
-    return switch (val) {
-        .integer => |i| @as(u64, @bitCast(i)),
-        .float => |f| @as(u64, @bitCast(f)),
-        .boolean => |b| if (b) 1 else 0,
-        .null => 0,
-        .string => |s| blk: {
-            var h: u64 = 0;
-            for (s) |c| {
-                h = h *% 31 +% c;
-            }
-            break :blk h;
-        },
-        .list => |l| blk: {
-            var h: u64 = 0;
-            for (l.items.items) |item| {
-                h = h *% 31 +% computeValueHashDepth(item, depth + 1);
-            }
-            break :blk h;
-        },
-        .dict => |d| blk: {
-            var h: u64 = 0;
-            var iter = d.map.iterator();
-            while (iter.next()) |entry| {
-                for (entry.key_ptr.*) |c| {
-                    h = h *% 31 +% c;
-                }
-                h = h *% 31 +% computeValueHashDepth(entry.value_ptr.*, depth + 1);
-            }
-            break :blk h;
-        },
-        .undefined => 0xDEADBEEF,
-        .markup => |m| blk: {
-            var h: u64 = 0;
-            for (m.content) |c| {
-                h = h *% 31 +% c;
-            }
-            break :blk h;
-        },
-        .async_result => 0xCAFEBABE,
-        .callable => 0xFEEDFACE,
-        .custom => 0xC0FFEE,
-    };
 }
 
 /// Loop context for tracking loop state (for loops)
@@ -223,6 +170,7 @@ pub const Frame = struct {
             // New key, duplicate it
             const name_copy = try self.allocator.dupe(u8, name);
             errdefer self.allocator.free(name_copy);
+            errdefer value.deinit(self.allocator);
             try self.variables.put(name_copy, value);
         }
     }
@@ -516,14 +464,9 @@ pub const Compiler = struct {
             }
         }
 
-        // Register blocks from this template (child blocks override parent blocks)
-        // Child blocks go at the front of the stack (index 0), parent blocks follow
-        for (node.body.items[body_start_idx..]) |stmt| {
-            if (stmt.tag == .block) {
-                const block_stmt = @as(*nodes.Block, @ptrCast(@alignCast(stmt)));
-                try ctx.prependBlock(block_stmt.name, block_stmt);
-            }
-        }
+        // Child blocks go at the front of the stack (index 0), including
+        // overrides nested inside parent control-flow or block bodies.
+        try self.registerBlocks(ctx, node.body.items[body_start_idx..], true, 0);
 
         // Now process the template body
         // In Jinja2, when a template extends:
@@ -535,8 +478,15 @@ pub const Compiler = struct {
         var output = std.ArrayList(u8){};
         defer output.deinit(self.allocator);
 
-        // Render child template's body (excluding extends which was already processed)
-        for (node.body.items[body_start_idx..]) |stmt| {
+        // Extending templates render the root ancestor's layout. Block dispatch
+        // below selects the most-derived registered override in that layout.
+        var render_template = node;
+        if (extends_processed) {
+            while (render_template.parent) |parent| render_template = parent;
+        }
+
+        for (render_template.body.items) |stmt| {
+            if (stmt.tag == .extends) continue;
             // Blocks are executed when encountered in body
             const stmt_output = try self.visitStatement(stmt, frame, ctx);
             defer self.allocator.free(stmt_output);
@@ -544,6 +494,34 @@ pub const Compiler = struct {
         }
 
         return try output.toOwnedSlice(self.allocator);
+    }
+
+    fn registerBlocks(self: *Self, ctx: *context.Context, statements: []const *nodes.Stmt, prepend: bool, depth: usize) !void {
+        if (depth >= 256) return exceptions.TemplateError.RuntimeError;
+        for (statements) |stmt| {
+            switch (stmt.tag) {
+                .block => {
+                    const block = @as(*nodes.Block, @ptrCast(@alignCast(stmt)));
+                    if (prepend) try ctx.prependBlock(block.name, block) else try ctx.addBlock(block.name, block);
+                    try self.registerBlocks(ctx, block.body.items, prepend, depth + 1);
+                },
+                .for_loop => {
+                    const for_loop = @as(*nodes.For, @ptrCast(@alignCast(stmt)));
+                    try self.registerBlocks(ctx, for_loop.body.items, prepend, depth + 1);
+                    try self.registerBlocks(ctx, for_loop.else_body.items, prepend, depth + 1);
+                },
+                .if_stmt => {
+                    const if_stmt = @as(*nodes.If, @ptrCast(@alignCast(stmt)));
+                    try self.registerBlocks(ctx, if_stmt.body.items, prepend, depth + 1);
+                    for (if_stmt.elif_bodies.items) |body| try self.registerBlocks(ctx, body.items, prepend, depth + 1);
+                    try self.registerBlocks(ctx, if_stmt.else_body.items, prepend, depth + 1);
+                },
+                .with => try self.registerBlocks(ctx, @as(*nodes.With, @ptrCast(@alignCast(stmt))).body.items, prepend, depth + 1),
+                .filter_block => try self.registerBlocks(ctx, @as(*nodes.FilterBlock, @ptrCast(@alignCast(stmt))).body.items, prepend, depth + 1),
+                .call_block => try self.registerBlocks(ctx, @as(*nodes.CallBlock, @ptrCast(@alignCast(stmt))).body.items, prepend, depth + 1),
+                else => {},
+            }
+        }
     }
 
     /// Error set for visitor methods
@@ -747,28 +725,34 @@ pub const Compiler = struct {
         var stack_args: [max_stack_args]value_mod.Value = undefined;
         var args: []value_mod.Value = undefined;
         var args_allocated = false;
+        var args_list = std.ArrayList(value_mod.Value).empty;
+        var initialized_args: usize = 0;
+        defer {
+            if (args_allocated) {
+                for (args_list.items[0..initialized_args]) |*arg| arg.deinit(self.allocator);
+                args_list.deinit(self.allocator);
+            } else {
+                for (stack_args[0..initialized_args]) |*arg| arg.deinit(self.allocator);
+            }
+        }
 
         if (node.args.items.len <= max_stack_args) {
             // Use stack-allocated array
             args = stack_args[0..node.args.items.len];
             for (node.args.items, 0..) |*arg_expr, i| {
                 args[i] = try self.visitExpression(arg_expr, frame, ctx);
+                initialized_args += 1;
             }
         } else {
             // Use ArrayList for larger argument lists
-            var args_list = std.ArrayList(value_mod.Value).empty;
-            defer {
-                for (args_list.items) |*arg| {
-                    arg.deinit(self.allocator);
-                }
-                args_list.deinit(self.allocator);
-            }
+            args_allocated = true;
+            try args_list.ensureTotalCapacity(self.allocator, node.args.items.len);
             for (node.args.items) |*arg_expr| {
                 const arg_val = try self.visitExpression(arg_expr, frame, ctx);
-                try args_list.append(self.allocator, arg_val);
+                args_list.appendAssumeCapacity(arg_val);
+                initialized_args += 1;
             }
             args = args_list.items;
-            args_allocated = true;
         }
 
         // Evaluate kwargs
@@ -789,12 +773,6 @@ pub const Compiler = struct {
 
         // Get filter from environment
         const filter = self.environment.getFilter(node.name) orelse {
-            // Clean up stack-allocated args if used
-            if (!args_allocated) {
-                for (args) |*arg| {
-                    arg.deinit(self.allocator);
-                }
-            }
             if (self.debug_trace) {
                 std.debug.print("[FILTER] {s} ERROR: filter not found\n", .{node.name});
             }
@@ -845,13 +823,6 @@ pub const Compiler = struct {
             std.debug.print("[FILTER] {s} EXIT ({d}ms)\n", .{ node.name, filter_elapsed });
         }
 
-        // Clean up stack-allocated args if used
-        if (!args_allocated) {
-            for (args) |*arg| {
-                arg.deinit(self.allocator);
-            }
-        }
-
         return result;
     }
 
@@ -882,148 +853,66 @@ pub const Compiler = struct {
         return try val.deepCopy(self.allocator);
     }
 
-    /// Visit Getattr node - access object attribute (obj.attr)
-    pub fn visitGetattr(self: *Self, node: *nodes.Getattr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
-        // OPTIMIZATION: Fast path for loop.* attribute access
-        // When accessing loop.index, loop.first, etc., resolve directly from OptimizedLoopContext
-        // without creating a Dict or evaluating the object expression
-        if (node.node == .name) {
-            if (std.mem.eql(u8, node.node.name.name, "loop")) {
-                if (frame.resolveLoopAttr(node.attr)) |val| {
-                    // Loop attributes are simple values (int/bool), no need to copy
-                    return val;
-                }
-            }
+    fn attributeFromUndefined(self: *Self, undefined_value: value_mod.Undefined, name: []const u8) !value_mod.Value {
+        undefined_value.logAccess("getAttribute");
+        if (undefined_value.behavior == .strict) return exceptions.TemplateError.UndefinedError;
+        return semantics.undefinedValue(self.allocator, name, undefined_value.behavior, undefined_value.logger);
+    }
+
+    fn attributeFromDict(self: *Self, dict: *value_mod.Dict, name: []const u8) !value_mod.Value {
+        if (dict.get(name)) |value| return value.deepCopy(self.allocator);
+        return semantics.undefinedValue(self.allocator, name, self.environment.undefined_behavior, null);
+    }
+
+    fn attributeFromCustom(self: *Self, custom: *value_mod.CustomObject, name: []const u8) !value_mod.Value {
+        if (try custom.getField(name, self.allocator)) |field| return field;
+        if (try custom.getMethod(name, self.allocator)) |method| {
+            const owned_name = try self.allocator.dupe(u8, name);
+            errdefer self.allocator.free(owned_name);
+            const callable = try self.allocator.create(value_mod.Callable);
+            callable.* = .{
+                .name = owned_name,
+                .is_async = false,
+                .callable_type = .function,
+                .func = method,
+            };
+            return .{ .callable = callable };
         }
+        return semantics.undefinedValue(self.allocator, name, self.environment.undefined_behavior, null);
+    }
 
-        // Evaluate the object expression
-        var obj_val = try self.visitExpression(&node.node, frame, ctx);
-        defer obj_val.deinit(self.allocator);
-
-        // Check sandbox security if enabled
-        if (self.environment.sandboxed) {
-            const sandbox_mod = @import("sandbox.zig");
-            if (!sandbox_mod.isSafeAttribute(obj_val, node.attr)) {
-                return exceptions.TemplateError.SecurityError;
-            }
-        }
-
-        // Handle undefined objects with chainable behavior
-        if (obj_val == .undefined) {
-            const u = obj_val.undefined;
-            // Log access if logger is set
-            u.logAccess("getAttribute");
-
-            // Chainable mode returns undefined for chained access
-            if (u.behavior == .chainable) {
-                const name_copy = try self.allocator.dupe(u8, node.attr);
-                return value_mod.Value{ .undefined = value_mod.Undefined{
-                    .name = name_copy,
-                    .behavior = .chainable,
-                    .logger = u.logger,
-                } };
-            }
-            // Strict mode raises error
-            if (u.behavior == .strict) {
-                return exceptions.TemplateError.UndefinedError;
-            }
-            // Other modes return undefined
-            const name_copy = try self.allocator.dupe(u8, node.attr);
-            return value_mod.Value{ .undefined = value_mod.Undefined{
-                .name = name_copy,
-                .behavior = u.behavior,
-                .logger = u.logger,
-            } };
-        }
-
-        // Access attribute based on object type
-        return switch (obj_val) {
-            .dict => |d| {
-                // For dicts, access by key
-                if (d.get(node.attr)) |val| {
-                    // Return a deep copy of the value
-                    return try val.deepCopy(self.allocator);
-                }
-                // Key not found - return undefined based on policy
-                const undefined_policy = self.environment.undefined_behavior;
-                const name_copy = try self.allocator.dupe(u8, node.attr);
-                return value_mod.Value{ .undefined = value_mod.Undefined{
-                    .name = name_copy,
-                    .behavior = undefined_policy,
-                } };
-            },
-            .list => {
-                // Lists don't have attributes
-                return exceptions.TemplateError.AttributeError;
-            },
-            .string, .integer, .float, .boolean, .null => {
-                // Primitive types don't have attributes
-                return exceptions.TemplateError.AttributeError;
-            },
-            .undefined => |u| {
-                // Log access if logger is set
-                u.logAccess("getAttribute");
-
-                // Chainable mode returns undefined for chained access
-                if (u.behavior == .chainable) {
-                    const name_copy = try self.allocator.dupe(u8, node.attr);
-                    return value_mod.Value{ .undefined = value_mod.Undefined{
-                        .name = name_copy,
-                        .behavior = .chainable,
-                        .logger = u.logger,
-                    } };
-                }
-                // Strict mode raises error
-                if (u.behavior == .strict) {
-                    return exceptions.TemplateError.UndefinedError;
-                }
-                // Other modes return undefined
-                const name_copy = try self.allocator.dupe(u8, node.attr);
-                return value_mod.Value{ .undefined = value_mod.Undefined{
-                    .name = name_copy,
-                    .behavior = u.behavior,
-                    .logger = u.logger,
-                } };
-            },
-            .markup => {
-                // Markup type doesn't have user-accessible attributes
-                return exceptions.TemplateError.AttributeError;
-            },
-            .async_result => {
-                // Async results don't expose attributes directly
-                return exceptions.TemplateError.AttributeError;
-            },
-            .callable => {
-                // Callable doesn't have attributes
-                return exceptions.TemplateError.AttributeError;
-            },
-            .custom => |custom| {
-                // Access field on custom object
-                if (try custom.getField(node.attr, self.allocator)) |field_val| {
-                    return field_val;
-                }
-                // Try to get method as a callable
-                if (try custom.getMethod(node.attr, self.allocator)) |method_fn| {
-                    const callable = try self.allocator.create(value_mod.Callable);
-                    callable.* = value_mod.Callable{
-                        .name = try self.allocator.dupe(u8, node.attr),
-                        .is_async = false,
-                        .callable_type = .function,
-                        .func = method_fn,
-                    };
-                    return value_mod.Value{ .callable = callable };
-                }
-                // Field/method not found - return undefined based on policy
-                const undefined_policy = self.environment.undefined_behavior;
-                const name_copy = try self.allocator.dupe(u8, node.attr);
-                return value_mod.Value{ .undefined = value_mod.Undefined{
-                    .name = name_copy,
-                    .behavior = undefined_policy,
-                } };
-            },
+    fn attributeFromValue(self: *Self, object: value_mod.Value, name: []const u8) !value_mod.Value {
+        return switch (object) {
+            .dict => |dict| self.attributeFromDict(dict, name),
+            .undefined => |undefined_value| self.attributeFromUndefined(undefined_value, name),
+            .custom => |custom| self.attributeFromCustom(custom, name),
+            .list,
+            .string,
+            .integer,
+            .float,
+            .boolean,
+            .null,
+            .markup,
+            .async_result,
+            .callable,
+            => exceptions.TemplateError.AttributeError,
         };
     }
 
+    /// Visit Getattr node - access object attribute (obj.attr)
+    pub fn visitGetattr(self: *Self, node: *nodes.Getattr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
+        if (node.node == .name and std.mem.eql(u8, node.node.name.name, "loop")) {
+            if (frame.resolveLoopAttr(node.attr)) |value| return value;
+        }
+
+        var object = try self.visitExpression(&node.node, frame, ctx);
+        defer object.deinit(self.allocator);
+        if (self.environment.sandboxed) {
+            const sandbox_mod = @import("sandbox.zig");
+            if (!sandbox_mod.isSafeAttribute(object, node.attr)) return exceptions.TemplateError.SecurityError;
+        }
+        return self.attributeFromValue(object, node.attr);
+    }
     /// Visit Getitem node - access list/dict item (obj[index]) or slice (obj[start:stop:step])
     pub fn visitGetitem(self: *Self, node: *nodes.Getitem, frame: *Frame, ctx: *context.Context) !value_mod.Value {
         // Evaluate the object expression
@@ -1039,115 +928,7 @@ pub const Compiler = struct {
         var index_val = try self.visitExpression(&node.arg, frame, ctx);
         defer index_val.deinit(self.allocator);
 
-        // Handle undefined objects with chainable behavior
-        if (obj_val == .undefined) {
-            const u = obj_val.undefined;
-            // Log access if logger is set
-            u.logAccess("getItem");
-
-            // Chainable mode returns undefined for chained access
-            if (u.behavior == .chainable) {
-                const name_copy = try self.allocator.dupe(u8, "item");
-                return value_mod.Value{ .undefined = value_mod.Undefined{
-                    .name = name_copy,
-                    .behavior = .chainable,
-                    .logger = u.logger,
-                } };
-            }
-            // Strict mode raises error
-            if (u.behavior == .strict) {
-                return exceptions.TemplateError.UndefinedError;
-            }
-            // Other modes return undefined
-            const name_copy = try self.allocator.dupe(u8, "item");
-            return value_mod.Value{ .undefined = value_mod.Undefined{
-                .name = name_copy,
-                .behavior = u.behavior,
-                .logger = u.logger,
-            } };
-        }
-
-        // Access item based on object type
-        return switch (obj_val) {
-            .list => |l| {
-                // For lists, index must be integer
-                const index_int = index_val.toInteger() orelse return exceptions.TemplateError.TypeError;
-                const len: i64 = @intCast(l.items.items.len);
-                // Handle negative indices (Python-style)
-                var actual_idx = index_int;
-                if (actual_idx < 0) {
-                    actual_idx = len + actual_idx;
-                }
-                if (actual_idx < 0 or actual_idx >= len) {
-                    return exceptions.TemplateError.IndexError;
-                }
-                const item = l.items.items[@intCast(actual_idx)];
-                // Return a deep copy of the value
-                return try item.deepCopy(self.allocator);
-            },
-            .dict => |d| {
-                // For dicts, index must be string
-                const index_str = index_val.toString(self.allocator) catch return exceptions.TemplateError.TypeError;
-                defer self.allocator.free(index_str);
-
-                if (d.get(index_str)) |val| {
-                    // Return a deep copy of the value
-                    return try val.deepCopy(self.allocator);
-                }
-                // Key not found - return undefined based on policy
-                const undefined_policy = self.environment.undefined_behavior;
-                const name_copy = try self.allocator.dupe(u8, index_str);
-                return value_mod.Value{ .undefined = value_mod.Undefined{
-                    .name = name_copy,
-                    .behavior = undefined_policy,
-                } };
-            },
-            .string => |s| {
-                // For strings, index must be integer
-                const index_int = index_val.toInteger() orelse return exceptions.TemplateError.TypeError;
-                const len: i64 = @intCast(s.len);
-                // Handle negative indices (Python-style)
-                var actual_idx = index_int;
-                if (actual_idx < 0) {
-                    actual_idx = len + actual_idx;
-                }
-                if (actual_idx < 0 or actual_idx >= len) {
-                    return exceptions.TemplateError.IndexError;
-                }
-                const char = s[@intCast(actual_idx)];
-                const char_str = try std.fmt.allocPrint(self.allocator, "{c}", .{char});
-                return value_mod.Value{ .string = char_str };
-            },
-            .integer, .float, .boolean, .null, .undefined => {
-                // Primitive types don't support indexing
-                return exceptions.TemplateError.TypeError;
-            },
-            .markup => {
-                // Markup types don't support indexing
-                return exceptions.TemplateError.TypeError;
-            },
-            .async_result => {
-                // Async results don't support direct indexing
-                return exceptions.TemplateError.TypeError;
-            },
-            .callable => {
-                // Callables don't support indexing
-                return exceptions.TemplateError.TypeError;
-            },
-            .custom => |custom| {
-                // Custom objects can implement subscript access via getItem
-                if (try custom.getItem(index_val, self.allocator)) |item_val| {
-                    return item_val;
-                }
-                // getItem returned null - item not found or not supported
-                const undefined_policy = self.environment.undefined_behavior;
-                const name_copy = try self.allocator.dupe(u8, "item");
-                return value_mod.Value{ .undefined = value_mod.Undefined{
-                    .name = name_copy,
-                    .behavior = undefined_policy,
-                } };
-            },
-        };
+        return semantics.getItem(self.allocator, obj_val, index_val, self.environment.undefined_behavior);
     }
 
     /// Evaluate slice expression on a value
@@ -1217,10 +998,8 @@ pub const Compiler = struct {
         // Create result list
         const result_list = try self.allocator.create(value_mod.List);
         result_list.* = value_mod.List.init(self.allocator);
-        errdefer {
-            result_list.deinit(self.allocator);
-            self.allocator.destroy(result_list);
-        }
+        errdefer result_list.deinit(self.allocator);
+        try result_list.items.ensureTotalCapacity(self.allocator, list.items.items.len);
 
         // Collect items according to slice
         var i = actual_start;
@@ -1229,7 +1008,7 @@ pub const Compiler = struct {
                 if (i >= 0 and i < len) {
                     const item = list.items.items[@intCast(i)];
                     const copied = try item.deepCopy(self.allocator);
-                    try result_list.append(copied);
+                    result_list.items.appendAssumeCapacity(copied);
                 }
             }
         } else {
@@ -1237,7 +1016,7 @@ pub const Compiler = struct {
                 if (i >= 0 and i < len) {
                     const item = list.items.items[@intCast(i)];
                     const copied = try item.deepCopy(self.allocator);
-                    try result_list.append(copied);
+                    result_list.items.appendAssumeCapacity(copied);
                 }
             }
         }
@@ -1268,18 +1047,19 @@ pub const Compiler = struct {
         // Build result string
         var result = std.ArrayList(u8){};
         errdefer result.deinit(self.allocator);
+        try result.ensureTotalCapacity(self.allocator, str.len);
 
         var i = actual_start;
         if (step > 0) {
             while (i < actual_stop) : (i += step) {
                 if (i >= 0 and i < len) {
-                    try result.append(self.allocator, str[@intCast(i)]);
+                    result.appendAssumeCapacity(str[@intCast(i)]);
                 }
             }
         } else {
             while (i > actual_stop) : (i += step) {
                 if (i >= 0 and i < len) {
-                    try result.append(self.allocator, str[@intCast(i)]);
+                    result.appendAssumeCapacity(str[@intCast(i)]);
                 }
             }
         }
@@ -1300,34 +1080,9 @@ pub const Compiler = struct {
         // The parser creates a BinExpr with IN, and we need to check if it was negated
         // Let's handle it in the parser by creating a special marker, or handle it here
 
-        return switch (node.op) {
-            .ADD => try self.evalAdd(left_val, right_val),
-            .SUB => try self.evalSub(left_val, right_val),
-            .MUL => try self.evalMul(left_val, right_val),
-            .DIV => try self.evalDiv(left_val, right_val),
-            .MOD => try self.evalMod(left_val, right_val),
-            .FLOORDIV => try self.evalFloorDiv(left_val, right_val),
-            .POW => try self.evalPow(left_val, right_val),
-            .EQ => try self.evalEq(left_val, right_val),
-            .NE => try self.evalNe(left_val, right_val),
-            .LT => try self.evalLt(left_val, right_val),
-            .LTEQ => try self.evalLte(left_val, right_val),
-            .GT => try self.evalGt(left_val, right_val),
-            .GTEQ => try self.evalGte(left_val, right_val),
-            .AND => try self.evalAnd(left_val, right_val),
-            .OR => try self.evalOr(left_val, right_val),
-            .IN => {
-                const in_result = try self.evalIn(left_val, right_val);
-                // Check if this was 'not in' - we need a better way to track this
-                // For now, we'll handle 'not in' by checking the left expression
-                // Actually, let's handle 'not in' properly in the parser
-                return in_result;
-            },
-            else => {
-                // Unknown operator - return empty string
-                return value_mod.Value{ .string = try self.allocator.dupe(u8, "") };
-            },
-        };
+        const op = semantics.BinaryOp.fromTokenKind(node.op) orelse
+            return value_mod.Value{ .string = try self.allocator.dupe(u8, "") };
+        return semantics.evalBinary(self.allocator, left_val, right_val, op);
     }
 
     /// Visit TestExpr node - evaluate test expression (value is test)
@@ -1354,10 +1109,11 @@ pub const Compiler = struct {
             }
             args.deinit(self.allocator);
         }
+        try args.ensureTotalCapacity(self.allocator, node.args.items.len);
 
         for (node.args.items) |*arg_expr| {
             const arg_val = try self.visitExpression(arg_expr, frame, ctx);
-            try args.append(self.allocator, arg_val);
+            args.appendAssumeCapacity(arg_val);
         }
 
         // Look up test function from environment
@@ -1446,37 +1202,6 @@ pub const Compiler = struct {
         return exceptions.TemplateError.BreakError;
     }
 
-    /// Evaluate 'in' operator
-    fn evalIn(self: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        // Check if left value is in right value (list, dict, or string)
-        return switch (right) {
-            .list => |l| {
-                // Check if left is in list
-                for (l.items.items) |item| {
-                    if (try left.isEqual(item)) {
-                        return value_pool.getTrue();
-                    }
-                }
-                return value_pool.getFalse();
-            },
-            .dict => |d| {
-                // For dicts, check if left is a key
-                const left_str = left.toString(self.allocator) catch return exceptions.TemplateError.TypeError;
-                defer self.allocator.free(left_str);
-                return value_pool.getBool(d.map.contains(left_str));
-            },
-            .string => |s| {
-                // Check if left string is substring of right string
-                const left_str = left.toString(self.allocator) catch return exceptions.TemplateError.TypeError;
-                defer self.allocator.free(left_str);
-                return value_pool.getBool(std.mem.indexOf(u8, s, left_str) != null);
-            },
-            else => {
-                return exceptions.TemplateError.TypeError;
-            },
-        };
-    }
-
     /// Visit UnaryExpr node - evaluate unary expression
     pub fn visitUnaryExpr(self: *Self, node: *nodes.UnaryExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
         // Create a mutable copy to avoid const issues
@@ -1521,14 +1246,12 @@ pub const Compiler = struct {
     pub fn visitListLiteral(self: *Self, node: *nodes.ListLiteral, frame: *Frame, ctx: *context.Context) !value_mod.Value {
         const list_ptr = try self.allocator.create(value_mod.List);
         list_ptr.* = value_mod.List.init(self.allocator);
-        errdefer {
-            list_ptr.deinit(self.allocator);
-            self.allocator.destroy(list_ptr);
-        }
+        errdefer list_ptr.deinit(self.allocator);
+        try list_ptr.items.ensureTotalCapacity(self.allocator, node.elements.items.len);
 
         for (node.elements.items) |*elem| {
             const val = try self.visitExpression(elem, frame, ctx);
-            try list_ptr.append(val);
+            list_ptr.items.appendAssumeCapacity(val);
         }
 
         return value_mod.Value{ .list = list_ptr };
@@ -1546,259 +1269,8 @@ pub const Compiler = struct {
         self.current_frame = if (self.frames.items.len > 0) self.frames.items[self.frames.items.len - 1] else null;
     }
 
-    // Binary expression evaluation methods
-    fn evalAdd(self: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        // Check actual types to preserve float vs integer distinction
-        // If either operand is a float, the result should be a float
-        const left_is_float = left == .float;
-        const right_is_float = right == .float;
-        const left_is_int = left == .integer;
-        const right_is_int = right == .integer;
-
-        // Both integers -> integer result
-        if (left_is_int and right_is_int) {
-            return value_mod.Value{ .integer = left.integer + right.integer };
-        }
-
-        // Any float involved -> float result
-        if (left_is_float or right_is_float or left_is_int or right_is_int) {
-            const left_float = left.toFloat();
-            const right_float = right.toFloat();
-            if (left_float != null and right_float != null) {
-                return value_mod.Value{ .float = left_float.? + right_float.? };
-            }
-        }
-
-        // List concatenation: [1,2] + [3,4] = [1,2,3,4]
-        const left_is_list = left == .list;
-        const right_is_list = right == .list;
-        if (left_is_list and right_is_list) {
-            const result_list = try self.allocator.create(value_mod.List);
-            result_list.* = value_mod.List.init(self.allocator);
-            errdefer {
-                result_list.deinit(self.allocator);
-                self.allocator.destroy(result_list);
-            }
-
-            // Copy elements from left list
-            for (left.list.items.items) |item| {
-                const item_copy = try item.deepCopy(self.allocator);
-                try result_list.append(item_copy);
-            }
-
-            // Copy elements from right list
-            for (right.list.items.items) |item| {
-                const item_copy = try item.deepCopy(self.allocator);
-                try result_list.append(item_copy);
-            }
-
-            return value_mod.Value{ .list = result_list };
-        }
-
-        // String concatenation (handles string + number, number + string, string + string)
-        const left_str = try left.toString(self.allocator);
-        defer self.allocator.free(left_str);
-        const right_str = try right.toString(self.allocator);
-        defer self.allocator.free(right_str);
-        var result = std.ArrayList(u8){};
-        defer result.deinit(self.allocator);
-        try result.appendSlice(self.allocator, left_str);
-        try result.appendSlice(self.allocator, right_str);
-        return value_mod.Value{ .string = try result.toOwnedSlice(self.allocator) };
-    }
-
-    fn evalSub(_: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        // Check actual types to preserve float vs integer distinction
-        const left_is_float = left == .float;
-        const right_is_float = right == .float;
-        const left_is_int = left == .integer;
-        const right_is_int = right == .integer;
-
-        // Both integers -> integer result
-        if (left_is_int and right_is_int) {
-            return value_mod.Value{ .integer = left.integer - right.integer };
-        }
-
-        // Any float involved -> float result
-        if (left_is_float or right_is_float or left_is_int or right_is_int) {
-            const left_float = left.toFloat();
-            const right_float = right.toFloat();
-            if (left_float != null and right_float != null) {
-                return value_mod.Value{ .float = left_float.? - right_float.? };
-            }
-        }
-
-        return exceptions.TemplateError.TypeError;
-    }
-
-    fn evalMul(_: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        // Check actual types to preserve float vs integer distinction
-        const left_is_float = left == .float;
-        const right_is_float = right == .float;
-        const left_is_int = left == .integer;
-        const right_is_int = right == .integer;
-
-        // Both integers -> integer result
-        if (left_is_int and right_is_int) {
-            return value_mod.Value{ .integer = left.integer * right.integer };
-        }
-
-        // Any float involved -> float result
-        if (left_is_float or right_is_float or left_is_int or right_is_int) {
-            const left_float = left.toFloat();
-            const right_float = right.toFloat();
-            if (left_float != null and right_float != null) {
-                return value_mod.Value{ .float = left_float.? * right_float.? };
-            }
-        }
-
-        return exceptions.TemplateError.TypeError;
-    }
-
-    fn evalDiv(_: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        const left_float = left.toFloat();
-        const right_float = right.toFloat();
-        if (left_float != null and right_float != null) {
-            if (right_float.? == 0.0) {
-                return exceptions.TemplateError.DivisionByZero;
-            }
-            return value_mod.Value{ .float = left_float.? / right_float.? };
-        }
-        const left_int = left.toInteger();
-        const right_int = right.toInteger();
-        if (left_int != null and right_int != null) {
-            if (right_int.? == 0) {
-                return exceptions.TemplateError.DivisionByZero;
-            }
-            return value_mod.Value{ .float = @as(f64, @floatFromInt(left_int.?)) / @as(f64, @floatFromInt(right_int.?)) };
-        }
-        return exceptions.TemplateError.TypeError;
-    }
-
-    fn evalMod(_: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        const left_int = left.toInteger();
-        const right_int = right.toInteger();
-        if (left_int != null and right_int != null) {
-            if (right_int.? == 0) {
-                return exceptions.TemplateError.DivisionByZero;
-            }
-            return value_mod.Value{ .integer = @rem(left_int.?, right_int.?) };
-        }
-        return exceptions.TemplateError.TypeError;
-    }
-
-    fn evalFloorDiv(_: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        const left_int = left.toInteger();
-        const right_int = right.toInteger();
-        if (left_int != null and right_int != null) {
-            if (right_int.? == 0) {
-                return exceptions.TemplateError.DivisionByZero;
-            }
-            return value_mod.Value{ .integer = @divTrunc(left_int.?, right_int.?) };
-        }
-        const left_float = left.toFloat();
-        const right_float = right.toFloat();
-        if (left_float != null and right_float != null) {
-            if (right_float.? == 0.0) {
-                return exceptions.TemplateError.DivisionByZero;
-            }
-            return value_mod.Value{ .integer = @intFromFloat(@floor(left_float.? / right_float.?)) };
-        }
-        return exceptions.TemplateError.TypeError;
-    }
-
-    fn evalPow(_: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        // Power operation always uses float for precision
-        const left_float = left.toFloat();
-        const right_float = right.toFloat();
-        if (left_float != null and right_float != null) {
-            return value_mod.Value{ .float = std.math.pow(f64, left_float.?, right_float.?) };
-        }
-        // Convert integers to floats for power operation
-        const left_int = left.toInteger();
-        const right_int = right.toInteger();
-        if (left_int != null and right_int != null) {
-            // For integer power with integer exponent, try integer result first
-            if (right_int.? >= 0 and right_int.? < 64) {
-                // std.math.powi can overflow, catch and use float instead
-                if (std.math.powi(i64, left_int.?, @intCast(right_int.?))) |result| {
-                    return value_mod.Value{ .integer = result };
-                } else |_| {
-                    // Overflow - use float
-                    return value_mod.Value{ .float = std.math.pow(f64, @as(f64, @floatFromInt(left_int.?)), @as(f64, @floatFromInt(right_int.?))) };
-                }
-            }
-            // Otherwise use float
-            return value_mod.Value{ .float = std.math.pow(f64, @as(f64, @floatFromInt(left_int.?)), @as(f64, @floatFromInt(right_int.?))) };
-        }
-        // Mixed int/float
-        const left_val = if (left_float) |f| f else if (left_int) |i| @as(f64, @floatFromInt(i)) else return exceptions.TemplateError.TypeError;
-        const right_val = if (right_float) |f| f else if (right_int) |i| @as(f64, @floatFromInt(i)) else return exceptions.TemplateError.TypeError;
-        return value_mod.Value{ .float = std.math.pow(f64, left_val, right_val) };
-    }
-
-    fn evalEq(self: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        _ = self;
-        // Use proper value comparison
-        return value_pool.getBool(try left.isEqual(right));
-    }
-
-    fn evalNe(self: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        const eq_result = try self.evalEq(left, right);
-        return value_pool.getBool(!(try eq_result.toBoolean()));
-    }
-
-    fn evalLt(self: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        const left_int = left.toInteger();
-        const right_int = right.toInteger();
-        if (left_int != null and right_int != null) {
-            return value_pool.getBool(left_int.? < right_int.?);
-        }
-        const left_float = left.toFloat();
-        const right_float = right.toFloat();
-        if (left_float != null and right_float != null) {
-            return value_pool.getBool(left_float.? < right_float.?);
-        }
-        // Mixed int/float comparison
-        if (left_int != null and right_float != null) {
-            return value_pool.getBool(@as(f64, @floatFromInt(left_int.?)) < right_float.?);
-        }
-        if (left_float != null and right_int != null) {
-            return value_pool.getBool(left_float.? < @as(f64, @floatFromInt(right_int.?)));
-        }
-        // String comparison
-        const left_str = try left.toString(self.allocator);
-        defer self.allocator.free(left_str);
-        const right_str = try right.toString(self.allocator);
-        defer self.allocator.free(right_str);
-        return value_pool.getBool(std.mem.order(u8, left_str, right_str) == .lt);
-    }
-
-    fn evalLte(self: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        const lt_result = try self.evalLt(left, right);
-        const eq_result = try self.evalEq(left, right);
-        return value_pool.getBool((try lt_result.toBoolean()) or (try eq_result.toBoolean()));
-    }
-
-    fn evalGt(self: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        const lt_result = try self.evalLt(left, right);
-        const eq_result = try self.evalEq(left, right);
-        return value_pool.getBool(!(try lt_result.toBoolean()) and !(try eq_result.toBoolean()));
-    }
-
-    fn evalGte(self: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        const lt_result = try self.evalLt(left, right);
-        return value_pool.getBool(!(try lt_result.toBoolean()));
-    }
-
-    fn evalAnd(_: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        return value_pool.getBool((try left.isTruthy()) and (try right.isTruthy()));
-    }
-
-    fn evalOr(_: *Self, left: value_mod.Value, right: value_mod.Value) !value_mod.Value {
-        return value_pool.getBool((try left.isTruthy()) or (try right.isTruthy()));
-    }
-
+    // Binary expression semantics live in semantics.zig so AST, bytecode, and
+    // optimizer paths cannot drift.
     // Unary expression evaluation methods
     fn evalUnarySub(_: *Self, val: value_mod.Value) !value_mod.Value {
         // Check actual type to preserve float vs integer distinction
@@ -1854,16 +1326,18 @@ pub const Compiler = struct {
         switch (iter_val) {
             .list => |l| {
                 // Deep copy list items - iter_val will be deinit'd later, we need our own copies
+                try items.ensureTotalCapacity(self.allocator, l.items.items.len);
                 for (l.items.items) |item| {
                     const item_copy = try item.deepCopy(self.allocator);
-                    try items.append(self.allocator, item_copy);
+                    items.appendAssumeCapacity(item_copy);
                 }
             },
             .string => |s| {
                 // Convert string to list of characters (as strings)
+                try items.ensureTotalCapacity(self.allocator, s.len);
                 for (s) |c| {
                     const char_str = try std.fmt.allocPrint(self.allocator, "{c}", .{c});
-                    try items.append(self.allocator, value_mod.Value{ .string = char_str });
+                    items.appendAssumeCapacity(value_mod.Value{ .string = char_str });
                 }
             },
             else => {
@@ -2013,202 +1487,134 @@ pub const Compiler = struct {
 
         return try output.toOwnedSlice(self.allocator);
     }
+    fn callAttributeSpecial(self: *Self, node: *nodes.CallExpr, frame: *Frame, ctx: *context.Context) !?value_mod.Value {
+        if (node.func != .getattr) return null;
+        const attribute = node.func.getattr;
+        if (attribute.node == .name and std.mem.eql(u8, attribute.node.name.name, "loop")) {
+            if (std.mem.eql(u8, attribute.attr, "cycle")) return try self.evaluateLoopCycle(node, frame, ctx);
+            if (std.mem.eql(u8, attribute.attr, "changed")) return try self.evaluateLoopChanged(node, frame, ctx);
+        }
+        if (attribute.node != .name) return null;
+
+        const module_handle = ctx.getImportedModule(attribute.node.name.name) orelse return null;
+        const module = @as(*runtime_types.TemplateModule, @ptrCast(@alignCast(module_handle)));
+        const macro_handle = module.getMacro(attribute.attr) orelse return null;
+        const macro = @as(*nodes.Macro, @ptrCast(@alignCast(macro_handle)));
+        return .{ .string = try self.callMacro(macro, node.args.items, node.kwargs, frame, ctx, null) };
+    }
+
+    fn callNamedSpecial(self: *Self, name: []const u8, node: *nodes.CallExpr, frame: *Frame, ctx: *context.Context) !?value_mod.Value {
+        if (std.mem.eql(u8, name, "super")) {
+            const block = frame.current_block orelse return exceptions.TemplateError.RuntimeError;
+            return .{ .string = try self.renderBlock(block.name, block, frame, ctx) };
+        }
+        if (std.mem.eql(u8, name, "caller")) {
+            const caller = frame.resolve("caller") orelse return exceptions.TemplateError.RuntimeError;
+            return try caller.deepCopy(self.allocator);
+        }
+        const macro_handle = ctx.getMacro(name) orelse return null;
+        const macro = @as(*nodes.Macro, @ptrCast(@alignCast(macro_handle)));
+        return .{ .string = try self.callMacro(macro, node.args.items, node.kwargs, frame, ctx, null) };
+    }
+
+    fn callFilterAsFunction(self: *Self, filter: *filters_mod.Filter, node: *nodes.CallExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
+        var args = std.ArrayList(value_mod.Value){};
+        defer {
+            for (args.items) |*argument| argument.deinit(self.allocator);
+            args.deinit(self.allocator);
+        }
+        try args.ensureTotalCapacity(self.allocator, node.args.items.len);
+        for (node.args.items) |*argument| {
+            args.appendAssumeCapacity(try self.visitExpression(argument, frame, ctx));
+        }
+
+        var kwargs = std.StringHashMap(value_mod.Value).init(self.allocator);
+        defer {
+            var iterator = kwargs.iterator();
+            while (iterator.next()) |entry| entry.value_ptr.*.deinit(self.allocator);
+            kwargs.deinit();
+        }
+        try kwargs.ensureTotalCapacity(@intCast(node.kwargs.count()));
+        var iterator = node.kwargs.iterator();
+        while (iterator.next()) |entry| {
+            var expression = entry.value_ptr.*;
+            kwargs.putAssumeCapacity(entry.key_ptr.*, try self.visitExpression(&expression, frame, ctx));
+        }
+
+        var empty = value_mod.Value{ .string = try self.allocator.dupe(u8, "") };
+        defer empty.deinit(self.allocator);
+        return filter.func(self.allocator, empty, args.items, &kwargs, ctx, self.environment);
+    }
+
+    fn callGlobal(self: *Self, global: value_mod.Value, node: *nodes.CallExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
+        if (global != .callable) return try global.deepCopy(self.allocator);
+        const callable = global.callable;
+
+        var args = std.ArrayList(value_mod.Value){};
+        defer {
+            for (args.items) |*argument| argument.deinit(self.allocator);
+            args.deinit(self.allocator);
+        }
+        try args.ensureTotalCapacity(self.allocator, node.args.items.len + @intFromBool(node.kwargs.count() > 0));
+        for (node.args.items) |*argument| {
+            args.appendAssumeCapacity(try self.visitExpression(argument, frame, ctx));
+        }
+
+        if (node.kwargs.count() > 0) {
+            const kwargs = try self.allocator.create(value_mod.Dict);
+            kwargs.* = value_mod.Dict.init(self.allocator);
+            errdefer kwargs.deinit(self.allocator);
+            try kwargs.map.ensureTotalCapacity(@intCast(node.kwargs.count()));
+
+            var iterator = node.kwargs.iterator();
+            while (iterator.next()) |entry| {
+                var expression = entry.value_ptr.*;
+                try kwargs.set(entry.key_ptr.*, try self.visitExpression(&expression, frame, ctx));
+            }
+            args.appendAssumeCapacity(.{ .dict = kwargs });
+        }
+
+        const function = callable.func orelse {
+            const callable_name = callable.name orelse "<anonymous>";
+            return .{ .undefined = .{
+                .name = try self.allocator.dupe(u8, callable_name),
+                .behavior = ctx.environment.undefined_behavior,
+            } };
+        };
+        return function(self.allocator, args.items, ctx, self.environment) catch |err| switch (err) {
+            error.RuntimeError, error.UndefinedError, error.InvalidArgument, error.TypeError, error.NotCallable => exceptions.TemplateError.RuntimeError,
+            error.OutOfMemory => error.OutOfMemory,
+        };
+    }
 
     /// Visit CallExpr node - evaluate function call expression
     pub fn visitCallExpr(self: *Self, node: *nodes.CallExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
-        // SPECIAL CASE: Handle loop.cycle() and loop.changed() methods
-        if (node.func == .getattr) {
-            const attr = node.func.getattr;
-            if (attr.node == .name and std.mem.eql(u8, attr.node.name.name, "loop")) {
-                // Check for loop.cycle(...) method
-                if (std.mem.eql(u8, attr.attr, "cycle")) {
-                    return try self.evaluateLoopCycle(node, frame, ctx);
-                }
-                // Check for loop.changed(...) method
-                if (std.mem.eql(u8, attr.attr, "changed")) {
-                    return try self.evaluateLoopChanged(node, frame, ctx);
-                }
-            }
-        }
+        if (try self.callAttributeSpecial(node, frame, ctx)) |result| return result;
 
-        // Extract function name from expression
-        var func_name: []const u8 = undefined;
-        var func_name_owned: ?[]u8 = null;
-        defer if (func_name_owned) |owned| self.allocator.free(owned);
-
-        // Evaluate function expression (needed for both name extraction and sandbox checking)
-        var func_val = try self.visitExpression(&node.func, frame, ctx);
-        defer func_val.deinit(self.allocator);
-
-        // Check sandbox security if enabled (for function calls)
+        var function_value = try self.visitExpression(&node.func, frame, ctx);
+        defer function_value.deinit(self.allocator);
         if (self.environment.sandboxed) {
             const sandbox_mod = @import("sandbox.zig");
-            if (!sandbox_mod.isSafeCallable(func_val)) {
-                return exceptions.TemplateError.SecurityError;
-            }
+            if (!sandbox_mod.isSafeCallable(function_value)) return exceptions.TemplateError.SecurityError;
         }
 
-        switch (node.func) {
-            .name => |n| {
-                func_name = n.name;
+        var owned_name: ?[]const u8 = null;
+        defer if (owned_name) |name| self.allocator.free(name);
+        const name = switch (node.func) {
+            .name => |function_name| function_name.name,
+            else => blk: {
+                owned_name = try function_value.toString(self.allocator);
+                break :blk owned_name.?;
             },
-            else => {
-                // Convert function value to string for name
-                const name_str = try func_val.toString(self.allocator);
-                defer self.allocator.free(name_str);
-                func_name_owned = try self.allocator.dupe(u8, name_str);
-                func_name = func_name_owned.?;
-            },
+        };
+
+        if (try self.callNamedSpecial(name, node, frame, ctx)) |result| return result;
+        if (self.environment.getFilter(name)) |filter| {
+            return try self.callFilterAsFunction(filter, node, frame, ctx);
         }
-
-        // Check if it's super() - special function for block inheritance
-        if (std.mem.eql(u8, func_name, "super")) {
-            // super() can only be called within a block
-            if (frame.current_block) |current_block| {
-                // Render the super block (parent block)
-                const super_output = try self.renderBlock(current_block.name, current_block, frame, ctx);
-                return value_mod.Value{ .string = super_output };
-            } else {
-                // super() called outside of block - error
-                return exceptions.TemplateError.RuntimeError;
-            }
+        if (self.environment.getGlobal(name)) |global| {
+            return try self.callGlobal(global, node, frame, ctx);
         }
-
-        // Check if it's caller() - special function for call blocks
-        // caller() returns the pre-rendered body passed from {% call %} block
-        if (std.mem.eql(u8, func_name, "caller")) {
-            if (frame.resolve("caller")) |caller_val| {
-                // Return a deep copy of the caller value
-                return try caller_val.deepCopy(self.allocator);
-            } else {
-                // caller() called outside of call block context - error
-                return exceptions.TemplateError.RuntimeError;
-            }
-        }
-
-        // Check if it's a macro
-        if (ctx.getMacro(func_name)) |macro_handle| {
-            const macro = @as(*nodes.Macro, @ptrCast(@alignCast(macro_handle)));
-            // Convert to Expression list for callMacro
-            var expr_args = std.ArrayList(nodes.Expression){};
-            defer expr_args.deinit(self.allocator);
-            for (node.args.items) |arg| {
-                try expr_args.append(self.allocator, arg);
-            }
-
-            // Call macro and return result as string value
-            const result_str = try self.callMacro(macro, expr_args.items, node.kwargs, frame, ctx, null);
-            return value_mod.Value{ .string = result_str };
-        }
-
-        // Check if it's a filter (filters can be called as functions)
-        if (self.environment.getFilter(func_name)) |filter| {
-            // Evaluate arguments
-            var filter_args = std.ArrayList(value_mod.Value){};
-            defer {
-                for (filter_args.items) |*arg| {
-                    arg.deinit(self.allocator);
-                }
-                filter_args.deinit(self.allocator);
-            }
-
-            // First argument is the value (empty for function-style calls)
-            // Then add positional arguments
-            for (node.args.items) |*arg_expr| {
-                const arg_val = try self.visitExpression(arg_expr, frame, ctx);
-                try filter_args.append(self.allocator, arg_val);
-            }
-
-            // Evaluate kwargs
-            var filter_kwargs = std.StringHashMap(value_mod.Value).init(self.allocator);
-            defer {
-                var iter = filter_kwargs.iterator();
-                while (iter.next()) |entry| {
-                    entry.value_ptr.*.deinit(self.allocator);
-                }
-                filter_kwargs.deinit();
-            }
-            var kwarg_iter = node.kwargs.iterator();
-            while (kwarg_iter.next()) |entry| {
-                var kwarg_expr = entry.value_ptr.*;
-                const kwarg_val = try self.visitExpression(&kwarg_expr, frame, ctx);
-                try filter_kwargs.put(entry.key_ptr.*, kwarg_val);
-            }
-
-            // Apply filter with empty value (function-style call)
-            var empty_val = value_mod.Value{ .string = try self.allocator.dupe(u8, "") };
-            defer empty_val.deinit(self.allocator);
-
-            // Call the filter function directly
-            const result = try filter.func(self.allocator, empty_val, filter_args.items, &filter_kwargs, ctx, self.environment);
-            return result;
-        }
-
-        // Check if it's a global function
-        if (self.environment.getGlobal(func_name)) |global_val| {
-            // Check if the global is a callable value with a function pointer
-            if (global_val == .callable) {
-                const callable_obj = global_val.callable;
-
-                // Evaluate arguments
-                var call_args = std.ArrayList(value_mod.Value){};
-                defer {
-                    for (call_args.items) |*arg| {
-                        arg.deinit(self.allocator);
-                    }
-                    call_args.deinit(self.allocator);
-                }
-
-                for (node.args.items) |arg| {
-                    const arg_val = try self.visitExpression(@constCast(&arg), frame, ctx);
-                    try call_args.append(self.allocator, arg_val);
-                }
-
-                // If there are kwargs, build a dict and pass it as the last argument
-                // This enables global functions like namespace() to receive kwargs
-                if (node.kwargs.count() > 0) {
-                    const kwargs_dict = try self.allocator.create(value_mod.Dict);
-                    errdefer self.allocator.destroy(kwargs_dict);
-                    kwargs_dict.* = value_mod.Dict.init(self.allocator);
-                    errdefer kwargs_dict.deinit(self.allocator);
-
-                    var kwarg_iter = node.kwargs.iterator();
-                    while (kwarg_iter.next()) |entry| {
-                        var kwarg_expr = entry.value_ptr.*;
-                        const kwarg_val = try self.visitExpression(&kwarg_expr, frame, ctx);
-                        try kwargs_dict.set(entry.key_ptr.*, kwarg_val);
-                    }
-
-                    try call_args.append(self.allocator, value_mod.Value{ .dict = kwargs_dict });
-                }
-
-                // Call the function if it has a function pointer
-                if (callable_obj.func) |func| {
-                    const result = func(self.allocator, call_args.items, ctx, self.environment) catch |err| {
-                        return switch (err) {
-                            error.RuntimeError, error.UndefinedError, error.InvalidArgument, error.TypeError, error.NotCallable => exceptions.TemplateError.RuntimeError,
-                            error.OutOfMemory => error.OutOfMemory,
-                        };
-                    };
-                    return result;
-                } else {
-                    // Callable without function pointer - return undefined
-                    const name_copy = if (callable_obj.name) |n|
-                        try self.allocator.dupe(u8, n)
-                    else
-                        try self.allocator.dupe(u8, "<anonymous>");
-                    return value_mod.Value{ .undefined = value_mod.Undefined{
-                        .name = name_copy,
-                        .behavior = ctx.environment.undefined_behavior,
-                    } };
-                }
-            }
-
-            // Non-callable global - return as-is
-            return try global_val.deepCopy(self.allocator);
-        }
-
-        // Function not found
         return exceptions.TemplateError.RuntimeError;
     }
 
@@ -2248,7 +1654,7 @@ pub const Compiler = struct {
             defer arg_val.deinit(self.allocator);
 
             // Simple hash computation based on value
-            const val_hash = computeValueHash(arg_val);
+            const val_hash = arg_val.hash();
             hash = hash *% 31 +% val_hash;
         }
 
@@ -2407,73 +1813,19 @@ pub const Compiler = struct {
 
     /// Visit ContextReference node - get current template context
     pub fn visitContextReference(self: *Self, _: *nodes.ContextReference, _: *Frame, ctx: *context.Context) !value_mod.Value {
-
-        // Return a reference to the current context
-        // In Jinja2, this returns the Context object itself
-        // For Zig, we'll return a dict representation of the context
-        const ctx_dict = try self.allocator.create(value_mod.Dict);
-        ctx_dict.* = value_mod.Dict.init(self.allocator);
-        errdefer ctx_dict.deinit(self.allocator);
-        errdefer self.allocator.destroy(ctx_dict);
-
-        // Add context properties
-        if (ctx.name) |name| {
-            // Note: name_copy is used for the value - Dict.set will duplicate for key
-            const name_copy = try self.allocator.dupe(u8, name);
-            try ctx_dict.set(name, value_mod.Value{ .string = name_copy });
-        }
-
-        // Add exported vars
-        // Note: Dict.set duplicates keys internally, so pass original key directly
-        var exported_iter = ctx.exported_vars.iterator();
-        while (exported_iter.next()) |entry| {
-            const val = ctx.resolve(entry.key_ptr.*);
-            if (val != .undefined) {
-                const val_copy = try val.deepCopy(self.allocator);
-                try ctx_dict.set(entry.key_ptr.*, val_copy);
-            }
-        }
-
-        return value_mod.Value{ .dict = ctx_dict };
+        return semantics.contextToValue(self.allocator, ctx);
     }
 
     /// Visit DerivedContextReference node - get current context including locals
     pub fn visitDerivedContextReference(self: *Self, node: *nodes.DerivedContextReference, frame: *Frame, ctx: *context.Context) !value_mod.Value {
         _ = node;
-
-        // Similar to ContextReference but includes local variables from frame
-        const ctx_dict = try self.allocator.create(value_mod.Dict);
-        ctx_dict.* = value_mod.Dict.init(self.allocator);
-        errdefer ctx_dict.deinit(self.allocator);
-        errdefer self.allocator.destroy(ctx_dict);
-
-        // Add context properties
-        if (ctx.name) |name| {
-            // Note: name_copy is used for both key AND value - Dict.set will duplicate for key
-            const name_copy = try self.allocator.dupe(u8, name);
-            try ctx_dict.set(name, value_mod.Value{ .string = name_copy });
+        var result = try semantics.contextToValue(self.allocator, ctx);
+        errdefer result.deinit(self.allocator);
+        var frame_variables = frame.variables.iterator();
+        while (frame_variables.next()) |entry| {
+            try result.dict.set(entry.key_ptr.*, try entry.value_ptr.*.deepCopy(self.allocator));
         }
-
-        // Add frame variables (locals)
-        // Note: Dict.set duplicates keys internally, so pass original key directly
-        var frame_vars_iter = frame.variables.iterator();
-        while (frame_vars_iter.next()) |entry| {
-            const val_copy = try entry.value_ptr.*.deepCopy(self.allocator);
-            try ctx_dict.set(entry.key_ptr.*, val_copy);
-        }
-
-        // Add exported vars from context
-        // Note: Dict.set duplicates keys internally, so pass original key directly
-        var exported_iter = ctx.exported_vars.iterator();
-        while (exported_iter.next()) |entry| {
-            const val = ctx.resolve(entry.key_ptr.*);
-            if (val != .undefined) {
-                const val_copy = try val.deepCopy(self.allocator);
-                try ctx_dict.set(entry.key_ptr.*, val_copy);
-            }
-        }
-
-        return value_mod.Value{ .dict = ctx_dict };
+        return result;
     }
 
     /// Visit CallBlock node - call macro with body
@@ -2521,8 +1873,9 @@ pub const Compiler = struct {
 
         if (node.call_expr == .call_expr) {
             const call = node.call_expr.call_expr;
+            try args.ensureTotalCapacity(self.allocator, call.args.items.len);
             for (call.args.items) |arg| {
-                try args.append(self.allocator, arg);
+                args.appendAssumeCapacity(arg);
             }
             var kw_iter = call.kwargs.iterator();
             while (kw_iter.next()) |entry| {
@@ -2531,6 +1884,106 @@ pub const Compiler = struct {
         }
 
         return try self.callMacro(macro, args.items, kwargs, frame, ctx, caller_value);
+    }
+
+    fn bindMacroParameters(
+        self: *Self,
+        macro: *nodes.Macro,
+        args: []nodes.Expression,
+        kwargs: std.StringHashMap(nodes.Expression),
+        source_frame: *Frame,
+        macro_frame: *Frame,
+        ctx: *context.Context,
+        used_kwargs: *std.StringHashMap(void),
+    ) !void {
+        try used_kwargs.ensureTotalCapacity(@intCast(macro.args.items.len));
+        for (macro.args.items, 0..) |macro_arg, index| {
+            var argument: ?value_mod.Value = null;
+            errdefer if (argument) |value| value.deinit(self.allocator);
+
+            if (index < args.len) argument = try self.visitExpression(&args[index], source_frame, ctx);
+            if (kwargs.get(macro_arg.name)) |keyword_expression| {
+                if (argument) |value| value.deinit(self.allocator);
+                var expression = keyword_expression;
+                argument = try self.visitExpression(&expression, source_frame, ctx);
+                used_kwargs.putAssumeCapacity(macro_arg.name, {});
+            }
+            if (argument == null) {
+                const default_expression = macro_arg.default_value orelse return exceptions.TemplateError.RuntimeError;
+                var expression = default_expression;
+                argument = try self.visitExpression(&expression, source_frame, ctx);
+            }
+
+            try macro_frame.set(macro_arg.name, argument.?);
+            argument = null;
+        }
+    }
+
+    fn bindMacroVarargs(
+        self: *Self,
+        macro: *nodes.Macro,
+        args: []nodes.Expression,
+        source_frame: *Frame,
+        macro_frame: *Frame,
+        ctx: *context.Context,
+    ) !void {
+        const expected = macro.args.items.len;
+        if (!macro.catch_varargs) {
+            if (args.len > expected) return exceptions.TemplateError.RuntimeError;
+            return;
+        }
+
+        const extra_count = if (args.len > expected) args.len - expected else 0;
+        const varargs = try self.allocator.create(value_mod.List);
+        varargs.* = value_mod.List.init(self.allocator);
+        errdefer varargs.deinit(self.allocator);
+        try varargs.items.ensureTotalCapacity(self.allocator, extra_count);
+        if (args.len > expected) {
+            for (args[expected..]) |*expression| {
+                varargs.items.appendAssumeCapacity(try self.visitExpression(expression, source_frame, ctx));
+            }
+        }
+        try macro_frame.set("varargs", .{ .list = varargs });
+    }
+
+    fn bindMacroKwargs(
+        self: *Self,
+        macro: *nodes.Macro,
+        kwargs: std.StringHashMap(nodes.Expression),
+        used_kwargs: *const std.StringHashMap(void),
+        source_frame: *Frame,
+        macro_frame: *Frame,
+        ctx: *context.Context,
+    ) !void {
+        if (!macro.catch_kwargs) {
+            var iterator = kwargs.iterator();
+            while (iterator.next()) |entry| {
+                if (!used_kwargs.contains(entry.key_ptr.*)) return exceptions.TemplateError.RuntimeError;
+            }
+            return;
+        }
+
+        const extras = try self.allocator.create(value_mod.Dict);
+        extras.* = value_mod.Dict.init(self.allocator);
+        errdefer extras.deinit(self.allocator);
+        try extras.map.ensureTotalCapacity(@intCast(kwargs.count()));
+        var iterator = kwargs.iterator();
+        while (iterator.next()) |entry| {
+            if (used_kwargs.contains(entry.key_ptr.*)) continue;
+            try extras.set(entry.key_ptr.*, try self.visitExpression(@constCast(entry.value_ptr), source_frame, ctx));
+        }
+        try macro_frame.set("kwargs", .{ .dict = extras });
+    }
+
+    fn renderStatements(self: *Self, statements: []*nodes.Stmt, frame: *Frame, ctx: *context.Context) ![]const u8 {
+        var output = std.ArrayList(u8){};
+        defer output.deinit(self.allocator);
+        for (statements) |statement| {
+            const statement_output = try self.visitStatement(statement, frame, ctx);
+            defer self.allocator.free(statement_output);
+            try output.appendSlice(self.allocator, statement_output);
+        }
+        return output.toOwnedSlice(self.allocator);
     }
 
     /// Helper function to call a macro with arguments
@@ -2543,112 +1996,18 @@ pub const Compiler = struct {
         ctx: *context.Context,
         caller: ?value_mod.Value,
     ) ![]const u8 {
-        // Create new frame for macro execution
         var macro_frame = Frame.init("macro", frame, self.allocator);
         defer macro_frame.deinit();
-
-        // Track which kwargs have been used
         var used_kwargs = std.StringHashMap(void).init(self.allocator);
         defer used_kwargs.deinit();
 
-        // Set macro arguments
-        var arg_index: usize = 0;
-        for (macro.args.items) |macro_arg| {
-            var arg_value: ?value_mod.Value = null;
-
-            // Check if provided as positional argument
-            if (arg_index < args.len) {
-                arg_value = try self.visitExpression(&args[arg_index], frame, ctx);
-            }
-
-            // Check if provided as keyword argument
-            if (kwargs.get(macro_arg.name)) |kw_expr| {
-                if (arg_value) |val| {
-                    val.deinit(self.allocator);
-                }
-                arg_value = try self.visitExpression(@constCast(&kw_expr), frame, ctx);
-                try used_kwargs.put(macro_arg.name, {});
-            }
-
-            // Use default value if not provided
-            if (arg_value == null) {
-                if (macro_arg.default_value) |default_expr| {
-                    arg_value = try self.visitExpression(@constCast(&default_expr), frame, ctx);
-                } else {
-                    return exceptions.TemplateError.RuntimeError;
-                }
-            }
-
-            // Set argument in macro frame (deep copy)
-            const arg_copy = try arg_value.?.deepCopy(self.allocator);
-            try macro_frame.set(macro_arg.name, arg_copy);
-            arg_value.?.deinit(self.allocator);
-            arg_index += 1;
+        try self.bindMacroParameters(macro, args, kwargs, frame, &macro_frame, ctx, &used_kwargs);
+        try self.bindMacroVarargs(macro, args, frame, &macro_frame, ctx);
+        try self.bindMacroKwargs(macro, kwargs, &used_kwargs, frame, &macro_frame, ctx);
+        if (caller) |caller_value| {
+            try macro_frame.set("caller", try caller_value.deepCopy(self.allocator));
         }
-
-        // Handle varargs - collect extra positional arguments
-        if (macro.catch_varargs) {
-            const varargs_list = try self.allocator.create(value_mod.List);
-            varargs_list.* = value_mod.List.init(self.allocator);
-
-            // Add extra positional arguments to varargs
-            const expected_args = macro.args.items.len;
-            if (args.len > expected_args) {
-                for (args[expected_args..]) |*extra_arg| {
-                    const extra_val = try self.visitExpression(extra_arg, frame, ctx);
-                    try varargs_list.append(extra_val);
-                }
-            }
-
-            try macro_frame.set("varargs", value_mod.Value{ .list = varargs_list });
-        } else if (args.len > macro.args.items.len) {
-            // Too many positional arguments and macro doesn't catch varargs
-            return exceptions.TemplateError.RuntimeError;
-        }
-
-        // Handle kwargs - collect extra keyword arguments
-        if (macro.catch_kwargs) {
-            const kwargs_dict = try self.allocator.create(value_mod.Dict);
-            kwargs_dict.* = value_mod.Dict.init(self.allocator);
-
-            // Add unused keyword arguments to kwargs dict
-            var kw_iter = kwargs.iterator();
-            while (kw_iter.next()) |entry| {
-                if (!used_kwargs.contains(entry.key_ptr.*)) {
-                    const kw_val = try self.visitExpression(@constCast(entry.value_ptr), frame, ctx);
-                    try kwargs_dict.set(entry.key_ptr.*, kw_val);
-                }
-            }
-
-            try macro_frame.set("kwargs", value_mod.Value{ .dict = kwargs_dict });
-        } else {
-            // Check for unused kwargs when macro doesn't catch them
-            var kw_iter = kwargs.iterator();
-            while (kw_iter.next()) |entry| {
-                if (!used_kwargs.contains(entry.key_ptr.*)) {
-                    // Unknown keyword argument
-                    return exceptions.TemplateError.RuntimeError;
-                }
-            }
-        }
-
-        // Set caller if provided (for call blocks) - deep copy
-        if (caller) |caller_val| {
-            const caller_copy = try caller_val.deepCopy(self.allocator);
-            try macro_frame.set("caller", caller_copy);
-        }
-
-        // Execute macro body
-        var output = std.ArrayList(u8){};
-        defer output.deinit(self.allocator);
-
-        for (macro.body.items) |stmt| {
-            const stmt_output = try self.visitStatement(stmt, &macro_frame, ctx);
-            defer self.allocator.free(stmt_output);
-            try output.appendSlice(self.allocator, stmt_output);
-        }
-
-        return try output.toOwnedSlice(self.allocator);
+        return self.renderStatements(macro.body.items, &macro_frame, ctx);
     }
 
     /// Visit Set node - assign variable
@@ -2805,16 +2164,18 @@ pub const Compiler = struct {
         // Extract filter arguments and kwargs if filter_expr is a FilterExpr
         if (node.filter_expr == .filter) {
             const filter_expr = node.filter_expr.filter;
+            try filter_args.ensureTotalCapacity(self.allocator, filter_expr.args.items.len);
             for (filter_expr.args.items) |*arg_expr| {
                 const arg_val = try self.visitExpression(arg_expr, frame, ctx);
-                try filter_args.append(self.allocator, arg_val);
+                filter_args.appendAssumeCapacity(arg_val);
             }
             // Extract kwargs
+            try filter_kwargs.ensureTotalCapacity(@intCast(filter_expr.kwargs.count()));
             var kwarg_iter = filter_expr.kwargs.iterator();
             while (kwarg_iter.next()) |entry| {
                 var kwarg_expr = entry.value_ptr.*;
                 const kwarg_val = try self.visitExpression(&kwarg_expr, frame, ctx);
-                try filter_kwargs.put(entry.key_ptr.*, kwarg_val);
+                filter_kwargs.putAssumeCapacity(entry.key_ptr.*, kwarg_val);
             }
         }
 
@@ -2893,8 +2254,11 @@ pub const Compiler = struct {
         if (depth >= max_inheritance_depth) {
             return exceptions.TemplateError.RuntimeError;
         }
-        // First process grandparent if parent extends another template
-        // Find extends statement in parent template
+        // Register the immediate parent first so super() walks child -> parent
+        // -> grandparent rather than skipping a generation.
+        try self.registerBlocks(ctx, parent_template.body.items, false, 0);
+
+        // Then process the grandparent inheritance chain.
         for (parent_template.body.items) |stmt| {
             if (stmt.tag == .extends) {
                 const extends_stmt = @as(*nodes.Extends, @ptrCast(@alignCast(stmt)));
@@ -2920,23 +2284,6 @@ pub const Compiler = struct {
                 break;
             }
         }
-
-        // Now process parent template's blocks
-        // Blocks from parent template body
-        for (parent_template.body.items) |stmt| {
-            if (stmt.tag == .block) {
-                const block_stmt = @as(*nodes.Block, @ptrCast(@alignCast(stmt)));
-                // Add parent block to context (will be after child blocks in stack)
-                try ctx.addBlock(block_stmt.name, block_stmt);
-            }
-        }
-
-        // Also process blocks from parent template's blocks map (if any)
-        var parent_iter = parent_template.blocks.iterator();
-        while (parent_iter.next()) |entry| {
-            // Add parent block to context
-            try ctx.addBlock(entry.key_ptr.*, entry.value_ptr.*);
-        }
     }
 
     /// Visit Block node - execute block content
@@ -2961,16 +2308,25 @@ pub const Compiler = struct {
             }
         }
 
+        const selected = if (ctx.getBlock(node.name)) |handle|
+            @as(*nodes.Block, @ptrCast(@alignCast(handle)))
+        else
+            node;
+
+        return try self.renderSelectedBlock(selected, frame, ctx);
+    }
+
+    fn renderSelectedBlock(self: *Self, selected: *nodes.Block, frame: *Frame, ctx: *context.Context) ![]const u8 {
         // Set current block in frame for super() support
         const previous_block = frame.current_block;
-        frame.current_block = node;
+        frame.current_block = selected;
         defer frame.current_block = previous_block;
 
         // Execute block body
         var output = std.ArrayList(u8){};
         defer output.deinit(self.allocator);
 
-        for (node.body.items) |stmt| {
+        for (selected.body.items) |stmt| {
             const stmt_output = try self.visitStatement(stmt, frame, ctx);
             defer self.allocator.free(stmt_output);
             try output.appendSlice(self.allocator, stmt_output);
@@ -3018,8 +2374,9 @@ pub const Compiler = struct {
         // Get the super block (parent block in stack)
         if (ctx.getSuperBlock(block_name, current_block)) |super_block_handle| {
             const super_block = @as(*nodes.Block, @ptrCast(@alignCast(super_block_handle)));
-            // Render the super block
-            return try self.visitBlock(super_block, frame, ctx);
+            // Render this exact parent block; ordinary visitBlock dispatch would
+            // select the child override again and recurse forever.
+            return try self.renderSelectedBlock(super_block, frame, ctx);
         }
 
         // No super block found - return empty string
@@ -3074,14 +2431,21 @@ pub const Compiler = struct {
         return try self.visitTemplate(included_template, &include_frame, &include_ctx);
     }
 
-    fn createTemplateModule(self: *Self, template: *nodes.Template, ctx: *context.Context) !runtime_types.TemplateModule {
+    fn createTemplateModule(
+        self: *Self,
+        template: *nodes.Template,
+        ctx: *context.Context,
+        owner_allocator: std.mem.Allocator,
+    ) !runtime_types.TemplateModule {
         var module_frame = Frame.init("module", null, self.allocator);
         defer module_frame.deinit();
 
         const body = try self.visitTemplate(template, &module_frame, ctx);
-        errdefer self.allocator.free(body);
+        defer self.allocator.free(body);
+        const owned_body = try owner_allocator.dupe(u8, body);
+        errdefer owner_allocator.free(owned_body);
 
-        return try runtime_types.TemplateModule.initFromRenderedBody(self.allocator, template, ctx, body);
+        return try runtime_types.TemplateModule.initFromRenderedBody(owner_allocator, template, ctx, owned_body);
     }
 
     /// Visit Import node - import a template as a module
@@ -3113,9 +2477,11 @@ pub const Compiler = struct {
         defer import_ctx.deinit();
 
         // Create template module
-        const module = try self.allocator.create(runtime_types.TemplateModule);
-        errdefer self.allocator.destroy(module);
-        module.* = try self.createTemplateModule(imported_template, &import_ctx);
+        // The module escapes the render arena through the caller's Context, so it
+        // must use the Context allocator and live until Context.deinit().
+        const module = try ctx.allocator.create(runtime_types.TemplateModule);
+        errdefer ctx.allocator.destroy(module);
+        module.* = try self.createTemplateModule(imported_template, &import_ctx, ctx.allocator);
 
         // Store module in context with target name
         try ctx.setImportedModule(node.target, module);
@@ -3155,7 +2521,11 @@ pub const Compiler = struct {
         // Create template module
         const module = try self.allocator.create(runtime_types.TemplateModule);
         errdefer self.allocator.destroy(module);
-        module.* = try self.createTemplateModule(imported_template, &import_ctx);
+        module.* = try self.createTemplateModule(imported_template, &import_ctx, self.allocator);
+        defer {
+            module.deinit();
+            self.allocator.destroy(module);
+        }
 
         // Import specific names from module
         for (node.imports.items) |import_name| {
@@ -3166,11 +2536,12 @@ pub const Compiler = struct {
             const alias_name = name_parts.next();
             const final_name = if (alias_name) |a| a else original_name;
 
-            // Get value from module
-            if (module.get(original_name)) |val| {
+            if (module.getMacro(original_name)) |macro_handle| {
+                try ctx.setMacro(final_name, macro_handle);
+            } else if (module.get(original_name)) |val| {
                 // Copy value and store in context with final name (alias or original)
-                const val_copy = try copyValueForImport(self.allocator, val);
-                errdefer val_copy.deinit(self.allocator);
+                const val_copy = try copyValueForImport(ctx.allocator, val);
+                errdefer val_copy.deinit(ctx.allocator);
 
                 try ctx.set(final_name, val_copy);
             } else {
@@ -3286,72 +2657,50 @@ pub fn compile(env: *environment.Environment, template: *nodes.Template, filenam
 
 /// Check if a template uses features not supported by bytecode
 fn templateHasUnsupportedFeatures(template: *nodes.Template) bool {
-    for (template.body.items) |stmt| {
-        if (stmtHasUnsupportedFeatures(stmt, 0)) return true;
+    return statementsHaveUnsupportedFeatures(template.body.items, 0);
+}
+
+fn statementsHaveUnsupportedFeatures(statements: []*nodes.Stmt, depth: usize) bool {
+    for (statements) |statement| {
+        if (stmtHasUnsupportedFeatures(statement, depth)) return true;
+    }
+    return false;
+}
+
+fn ifHasUnsupportedFeatures(statement: *nodes.If, depth: usize) bool {
+    if (statementsHaveUnsupportedFeatures(statement.body.items, depth)) return true;
+    if (statementsHaveUnsupportedFeatures(statement.else_body.items, depth)) return true;
+    for (statement.elif_bodies.items) |body| {
+        if (statementsHaveUnsupportedFeatures(body.items, depth)) return true;
     }
     return false;
 }
 
 fn stmtHasUnsupportedFeatures(stmt: *nodes.Stmt, depth: usize) bool {
-    // Parser bounds AST nesting; at this backstop depth, conservatively report
-    // "unsupported" so the template routes to the interpreter instead of bytecode.
     if (depth >= 256) return true;
-    switch (stmt.tag) {
-        // Phase 5: macros, call, call_block now supported in bytecode
-        .import, .from_import, .include, .extends => return true,
-        .for_loop => {
-            const for_stmt: *nodes.For = @ptrCast(@alignCast(stmt));
-            for (for_stmt.body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
-            }
-            for (for_stmt.else_body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
-            }
-            return false;
+    const child_depth = depth + 1;
+    return switch (stmt.tag) {
+        .import, .from_import, .include, .extends, .filter_block => true,
+        .for_loop => blk: {
+            const statement: *nodes.For = @ptrCast(@alignCast(stmt));
+            break :blk statementsHaveUnsupportedFeatures(statement.body.items, child_depth) or
+                statementsHaveUnsupportedFeatures(statement.else_body.items, child_depth);
         },
-        .if_stmt => {
-            const if_stmt: *nodes.If = @ptrCast(@alignCast(stmt));
-            for (if_stmt.body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
-            }
-            for (if_stmt.else_body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
-            }
-            for (if_stmt.elif_bodies.items) |body| {
-                for (body.items) |s| {
-                    if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
-                }
-            }
-            return false;
+        .if_stmt => ifHasUnsupportedFeatures(@ptrCast(@alignCast(stmt)), child_depth),
+        .block => statementsHaveUnsupportedFeatures(
+            @as(*nodes.Block, @ptrCast(@alignCast(stmt))).body.items,
+            child_depth,
+        ),
+        .with => statementsHaveUnsupportedFeatures(
+            @as(*nodes.With, @ptrCast(@alignCast(stmt))).body.items,
+            child_depth,
+        ),
+        .set => blk: {
+            const statement: *nodes.Set = @ptrCast(@alignCast(stmt));
+            break :blk statement.body != null or statement.target_attr != null;
         },
-        .block => {
-            const block_stmt: *nodes.Block = @ptrCast(@alignCast(stmt));
-            for (block_stmt.body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
-            }
-            return false;
-        },
-        .with => {
-            const with_stmt: *nodes.With = @ptrCast(@alignCast(stmt));
-            for (with_stmt.body.items) |s| {
-                if (stmtHasUnsupportedFeatures(s, depth + 1)) return true;
-            }
-            return false;
-        },
-        .filter_block => {
-            // Filter blocks are not supported by bytecode
-            return true;
-        },
-        .set => {
-            const set_stmt: *nodes.Set = @ptrCast(@alignCast(stmt));
-            // Set blocks ({% set x %}...{% endset %}) are not supported by bytecode
-            if (set_stmt.body != null) return true;
-            // Namespace attribute assignment ({% set ns.attr = val %}) not supported by bytecode
-            if (set_stmt.target_attr != null) return true;
-            return false;
-        },
-        else => return false,
-    }
+        else => false,
+    };
 }
 
 /// Compile a template with bytecode generation

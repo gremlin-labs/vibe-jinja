@@ -50,6 +50,41 @@ test "value isEqual cross type int float" {
     try testing.expect(try int_val.isEqual(float_val) == true);
 }
 
+test "value isEqual mixed numeric comparison does not truncate" {
+    const integer = value.Value{ .integer = 42 };
+    const fractional = value.Value{ .float = 42.5 };
+
+    try testing.expect(!try integer.isEqual(fractional));
+    try testing.expect(!try fractional.isEqual(integer));
+}
+
+test "value isEqual handles non-finite floats exactly" {
+    const positive_infinity = value.Value{ .float = std.math.inf(f64) };
+    const negative_infinity = value.Value{ .float = -std.math.inf(f64) };
+    const not_a_number = value.Value{ .float = std.math.nan(f64) };
+
+    try testing.expect(try positive_infinity.isEqual(positive_infinity));
+    try testing.expect(!try positive_infinity.isEqual(negative_infinity));
+    try testing.expect(!try not_a_number.isEqual(not_a_number));
+}
+
+test "value isEqual terminates for equivalent cyclic lists" {
+    const allocator = testing.allocator;
+    const left = try allocator.create(value.List);
+    left.* = value.List.init(allocator);
+    const right = try allocator.create(value.List);
+    right.* = value.List.init(allocator);
+    try left.append(.{ .list = left });
+    try right.append(.{ .list = right });
+
+    try testing.expect(try (value.Value{ .list = left }).isEqual(.{ .list = right }));
+
+    left.items.items[0] = .{ .null = {} };
+    right.items.items[0] = .{ .null = {} };
+    left.deinit(allocator);
+    right.deinit(allocator);
+}
+
 test "value isEqual null values" {
     const null_val1 = value.Value{ .null = {} };
     const null_val2 = value.Value{ .null = {} };

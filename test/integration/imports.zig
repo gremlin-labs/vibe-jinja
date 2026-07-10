@@ -26,20 +26,11 @@ test "import basic" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "utils.jinja"), try allocator.dupe(u8, utils_source));
     try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -77,20 +68,11 @@ test "from import" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "utils.jinja"), try allocator.dupe(u8, utils_source));
     try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -129,20 +111,11 @@ test "from import multiple" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "utils.jinja"), try allocator.dupe(u8, utils_source));
     try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -178,20 +151,11 @@ test "import namespace access" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "utils.jinja"), try allocator.dupe(u8, utils_source));
     try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -227,20 +191,11 @@ test "import with context" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "utils.jinja"), try allocator.dupe(u8, utils_source));
     try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -257,9 +212,7 @@ test "import with context" {
     }
 
     const name_key = try allocator.dupe(u8, "name");
-    defer allocator.free(name_key);
     const name_val = context.Value{ .string = try allocator.dupe(u8, "World") };
-    defer name_val.deinit(allocator);
     try vars.put(name_key, name_val);
 
     const result = try rt.renderString(main_source, vars, "main.jinja");
@@ -288,20 +241,11 @@ test "import without context" {
     ;
 
     var mapping = std.StringHashMap([]const u8).init(allocator);
-    defer {
-        var iter = mapping.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*);
-        }
-        mapping.deinit();
-    }
 
     try mapping.put(try allocator.dupe(u8, "utils.jinja"), try allocator.dupe(u8, utils_source));
     try mapping.put(try allocator.dupe(u8, "main.jinja"), try allocator.dupe(u8, main_source));
 
-    var loader = try loaders.DictLoader.init(allocator, mapping);
-    defer loader.deinit();
+    var loader = loaders.DictLoader.init(allocator, mapping);
     env.loader = &loader.loader;
 
     var rt = runtime.Runtime.init(&env, allocator);

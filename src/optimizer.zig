@@ -63,6 +63,7 @@
 const std = @import("std");
 const nodes = @import("nodes.zig");
 const value_mod = @import("value.zig");
+const semantics = @import("semantics.zig");
 
 /// Optimizer for template AST
 /// Performs optimizations like constant folding, dead code elimination, etc.
@@ -113,7 +114,14 @@ pub const Optimizer = struct {
             if (right_val) |right| {
                 defer left.deinit(self.allocator);
                 defer right.deinit(self.allocator);
-                return try self.foldBinExpr(left, right, bin.op);
+                return self.foldBinExpr(left, right, bin.op) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    error.Overflow => return error.Overflow,
+                    error.UndefinedError => return error.UndefinedError,
+                    // An invalid constant expression must keep its runtime
+                    // error behavior rather than being replaced with a value.
+                    else => return null,
+                };
             } else {
                 // Only left is constant, can't fold - free left
                 var left_mut = left;
@@ -154,99 +162,8 @@ pub const Optimizer = struct {
 
     /// Fold binary expression with constant values
     fn foldBinExpr(self: *Self, left: value_mod.Value, right: value_mod.Value, op: @import("lexer.zig").TokenKind) !value_mod.Value {
-        // This is a simplified version - full implementation would handle all operators
-        return switch (op) {
-            .ADD => {
-                const left_int = left.toInteger();
-                const right_int = right.toInteger();
-                if (left_int != null and right_int != null) {
-                    return value_mod.Value{ .integer = left_int.? + right_int.? };
-                }
-                const left_float = left.toFloat();
-                const right_float = right.toFloat();
-                if (left_float != null and right_float != null) {
-                    return value_mod.Value{ .float = left_float.? + right_float.? };
-                }
-                // String concatenation
-                const left_str = try left.toString(self.allocator);
-                defer self.allocator.free(left_str);
-                const right_str = try right.toString(self.allocator);
-                defer self.allocator.free(right_str);
-                var result = std.ArrayList(u8){};
-                defer result.deinit(self.allocator);
-                try result.appendSlice(self.allocator, left_str);
-                try result.appendSlice(self.allocator, right_str);
-                return value_mod.Value{ .string = try result.toOwnedSlice(self.allocator) };
-            },
-            .SUB => {
-                const left_int = left.toInteger();
-                const right_int = right.toInteger();
-                if (left_int != null and right_int != null) {
-                    return value_mod.Value{ .integer = left_int.? - right_int.? };
-                }
-                const left_float = left.toFloat();
-                const right_float = right.toFloat();
-                if (left_float != null and right_float != null) {
-                    return value_mod.Value{ .float = left_float.? - right_float.? };
-                }
-                return value_mod.Value{ .null = {} };
-            },
-            .MUL => {
-                const left_int = left.toInteger();
-                const right_int = right.toInteger();
-                if (left_int != null and right_int != null) {
-                    return value_mod.Value{ .integer = left_int.? * right_int.? };
-                }
-                const left_float = left.toFloat();
-                const right_float = right.toFloat();
-                if (left_float != null and right_float != null) {
-                    return value_mod.Value{ .float = left_float.? * right_float.? };
-                }
-                return value_mod.Value{ .null = {} };
-            },
-            .DIV => {
-                const left_float = left.toFloat();
-                const right_float = right.toFloat();
-                if (left_float != null and right_float != null) {
-                    if (right_float.? == 0.0) {
-                        return value_mod.Value{ .null = {} };
-                    }
-                    return value_mod.Value{ .float = left_float.? / right_float.? };
-                }
-                return value_mod.Value{ .null = {} };
-            },
-            .EQ => value_mod.Value{ .boolean = left.isEqual(right) catch false },
-            .NE => value_mod.Value{ .boolean = !(left.isEqual(right) catch false) },
-            .LT => {
-                const left_int = left.toInteger();
-                const right_int = right.toInteger();
-                if (left_int != null and right_int != null) {
-                    return value_mod.Value{ .boolean = left_int.? < right_int.? };
-                }
-                const left_float = left.toFloat();
-                const right_float = right.toFloat();
-                if (left_float != null and right_float != null) {
-                    return value_mod.Value{ .boolean = left_float.? < right_float.? };
-                }
-                return value_mod.Value{ .null = {} };
-            },
-            .GT => {
-                const left_int = left.toInteger();
-                const right_int = right.toInteger();
-                if (left_int != null and right_int != null) {
-                    return value_mod.Value{ .boolean = left_int.? > right_int.? };
-                }
-                const left_float = left.toFloat();
-                const right_float = right.toFloat();
-                if (left_float != null and right_float != null) {
-                    return value_mod.Value{ .boolean = left_float.? > right_float.? };
-                }
-                return value_mod.Value{ .null = {} };
-            },
-            .AND => value_mod.Value{ .boolean = (left.isTruthy() catch false) and (right.isTruthy() catch false) },
-            .OR => value_mod.Value{ .boolean = (left.isTruthy() catch false) or (right.isTruthy() catch false) },
-            else => value_mod.Value{ .null = {} },
-        };
+        const binary_op = semantics.BinaryOp.fromTokenKind(op) orelse return value_mod.Value{ .null = {} };
+        return semantics.evalBinary(self.allocator, left, right, binary_op);
     }
 
     /// Fold unary expression with constant value
@@ -274,18 +191,19 @@ pub const Optimizer = struct {
     /// Removes unreachable code (e.g., after return statements, false conditions, etc.)
     pub fn removeDeadCode(self: *Self, template: *nodes.Template) !void {
         // Optimize template body
-        try self.optimizeStatements(&template.body);
+        try self.optimizeStatements(&template.body, 0);
 
         // Optimize blocks
         var block_iter = template.blocks.iterator();
         while (block_iter.next()) |entry| {
             const block = entry.value_ptr.*;
-            try self.optimizeStatements(&block.body);
+            try self.optimizeStatements(&block.body, 0);
         }
     }
 
     /// Optimize a list of statements, removing dead code
-    fn optimizeStatements(self: *Self, statements: *std.ArrayList(*nodes.Stmt)) !void {
+    fn optimizeStatements(self: *Self, statements: *std.ArrayList(*nodes.Stmt), depth: usize) !void {
+        if (depth >= 256) return error.RuntimeError;
         var i: usize = 0;
         while (i < statements.items.len) {
             const stmt = statements.items[i];
@@ -301,43 +219,32 @@ pub const Optimizer = struct {
 
                         // If condition is constant, replace if with appropriate branch
                         if (val.isTruthy() catch false) {
-                            // Condition is always true - replace with body
-                            // First, optimize the body
-                            try self.optimizeStatements(&if_stmt.body);
-
-                            // Remove the if statement and replace with its body
-                            // Deinit the if statement
+                            try self.optimizeStatements(&if_stmt.body, depth + 1);
+                            const replacement_count = if_stmt.body.items.len;
+                            if (replacement_count > 1) {
+                                try statements.ensureUnusedCapacity(self.allocator, replacement_count - 1);
+                            }
+                            var replacement = if_stmt.body;
+                            if_stmt.body = .{};
+                            statements.replaceRangeAssumeCapacity(i, 1, replacement.items);
+                            replacement.deinit(self.allocator);
                             if_stmt.deinit(self.allocator);
                             self.allocator.destroy(if_stmt);
-
-                            // Insert body statements in place of if
-                            const body_stmts = if_stmt.body.items;
-                            _ = statements.orderedRemove(i);
-
-                            // Insert body statements
-                            for (body_stmts) |body_stmt| {
-                                try statements.insert(self.allocator, i, body_stmt);
-                                i += 1;
-                            }
-
-                            // Don't increment i - we'll process the inserted statements
                             continue;
                         } else {
                             // Condition is always false - check for else/elif
                             if (if_stmt.else_body.items.len > 0) {
-                                // Replace with else body
-                                try self.optimizeStatements(&if_stmt.else_body);
-
-                                const else_stmts = if_stmt.else_body.items;
+                                try self.optimizeStatements(&if_stmt.else_body, depth + 1);
+                                const replacement_count = if_stmt.else_body.items.len;
+                                if (replacement_count > 1) {
+                                    try statements.ensureUnusedCapacity(self.allocator, replacement_count - 1);
+                                }
+                                var replacement = if_stmt.else_body;
+                                if_stmt.else_body = .{};
+                                statements.replaceRangeAssumeCapacity(i, 1, replacement.items);
+                                replacement.deinit(self.allocator);
                                 if_stmt.deinit(self.allocator);
                                 self.allocator.destroy(if_stmt);
-
-                                _ = statements.orderedRemove(i);
-
-                                for (else_stmts) |else_stmt| {
-                                    try statements.insert(self.allocator, i, else_stmt);
-                                    i += 1;
-                                }
                                 continue;
                             } else {
                                 // No else - remove the if statement entirely
@@ -350,31 +257,31 @@ pub const Optimizer = struct {
                         }
                     } else {
                         // Condition is not constant - optimize branches recursively
-                        try self.optimizeStatements(&if_stmt.body);
-                        try self.optimizeStatements(&if_stmt.else_body);
+                        try self.optimizeStatements(&if_stmt.body, depth + 1);
+                        try self.optimizeStatements(&if_stmt.else_body, depth + 1);
                     }
                 },
                 .for_loop => {
                     const for_loop = @as(*nodes.For, @ptrCast(@alignCast(stmt)));
                     // Optimize loop body
-                    try self.optimizeStatements(&for_loop.body);
-                    try self.optimizeStatements(&for_loop.else_body);
+                    try self.optimizeStatements(&for_loop.body, depth + 1);
+                    try self.optimizeStatements(&for_loop.else_body, depth + 1);
                 },
                 .block => {
                     const block = @as(*nodes.Block, @ptrCast(@alignCast(stmt)));
-                    try self.optimizeStatements(&block.body);
+                    try self.optimizeStatements(&block.body, depth + 1);
                 },
                 .with => {
                     const with_stmt = @as(*nodes.With, @ptrCast(@alignCast(stmt)));
-                    try self.optimizeStatements(&with_stmt.body);
+                    try self.optimizeStatements(&with_stmt.body, depth + 1);
                 },
                 .filter_block => {
                     const filter_block = @as(*nodes.FilterBlock, @ptrCast(@alignCast(stmt)));
-                    try self.optimizeStatements(&filter_block.body);
+                    try self.optimizeStatements(&filter_block.body, depth + 1);
                 },
                 .call_block => {
                     const call_block = @as(*nodes.CallBlock, @ptrCast(@alignCast(stmt)));
-                    try self.optimizeStatements(&call_block.body);
+                    try self.optimizeStatements(&call_block.body, depth + 1);
                 },
                 else => {},
             }
@@ -387,18 +294,19 @@ pub const Optimizer = struct {
     /// Merges consecutive output statements, removes empty outputs
     pub fn optimizeOutput(self: *Self, template: *nodes.Template) !void {
         // Optimize template body
-        try self.optimizeOutputStatements(&template.body);
+        try self.optimizeOutputStatements(&template.body, 0);
 
         // Optimize blocks
         var block_iter = template.blocks.iterator();
         while (block_iter.next()) |entry| {
             const block = entry.value_ptr.*;
-            try self.optimizeOutputStatements(&block.body);
+            try self.optimizeOutputStatements(&block.body, 0);
         }
     }
 
     /// Optimize output statements in a statement list
-    fn optimizeOutputStatements(self: *Self, statements: *std.ArrayList(*nodes.Stmt)) !void {
+    fn optimizeOutputStatements(self: *Self, statements: *std.ArrayList(*nodes.Stmt), depth: usize) !void {
+        if (depth >= 256) return error.RuntimeError;
         var i: usize = 0;
         while (i < statements.items.len) {
             const stmt = statements.items[i];
@@ -450,8 +358,9 @@ pub const Optimizer = struct {
                             }
 
                             // Move expressions from next_output to output
+                            try output.nodes.ensureUnusedCapacity(self.allocator, next_output.nodes.items.len);
                             for (next_output.nodes.items) |expr| {
-                                try output.nodes.append(self.allocator, expr);
+                                output.nodes.appendAssumeCapacity(expr);
                             }
 
                             // Clear next_output's nodes list (but don't free expressions - they're now in output)
@@ -473,34 +382,34 @@ pub const Optimizer = struct {
                 switch (stmt.tag) {
                     .if_stmt => {
                         const if_stmt = @as(*nodes.If, @ptrCast(@alignCast(stmt)));
-                        try self.optimizeOutputStatements(&if_stmt.body);
-                        try self.optimizeOutputStatements(&if_stmt.else_body);
+                        try self.optimizeOutputStatements(&if_stmt.body, depth + 1);
+                        try self.optimizeOutputStatements(&if_stmt.else_body, depth + 1);
                     },
                     .for_loop => {
                         const for_loop = @as(*nodes.For, @ptrCast(@alignCast(stmt)));
-                        try self.optimizeOutputStatements(&for_loop.body);
-                        try self.optimizeOutputStatements(&for_loop.else_body);
+                        try self.optimizeOutputStatements(&for_loop.body, depth + 1);
+                        try self.optimizeOutputStatements(&for_loop.else_body, depth + 1);
                     },
                     .block => {
                         const block = @as(*nodes.Block, @ptrCast(@alignCast(stmt)));
-                        try self.optimizeOutputStatements(&block.body);
+                        try self.optimizeOutputStatements(&block.body, depth + 1);
                     },
                     .with => {
                         const with_stmt = @as(*nodes.With, @ptrCast(@alignCast(stmt)));
-                        try self.optimizeOutputStatements(&with_stmt.body);
+                        try self.optimizeOutputStatements(&with_stmt.body, depth + 1);
                     },
                     .filter_block => {
                         const filter_block = @as(*nodes.FilterBlock, @ptrCast(@alignCast(stmt)));
-                        try self.optimizeOutputStatements(&filter_block.body);
+                        try self.optimizeOutputStatements(&filter_block.body, depth + 1);
                     },
                     .call_block => {
                         const call_block = @as(*nodes.CallBlock, @ptrCast(@alignCast(stmt)));
-                        try self.optimizeOutputStatements(&call_block.body);
+                        try self.optimizeOutputStatements(&call_block.body, depth + 1);
                     },
                     .set => {
                         const set_stmt = @as(*nodes.Set, @ptrCast(@alignCast(stmt)));
                         if (set_stmt.body) |*body| {
-                            try self.optimizeOutputStatements(body);
+                            try self.optimizeOutputStatements(body, depth + 1);
                         }
                     },
                     else => {},

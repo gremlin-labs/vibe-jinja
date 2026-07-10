@@ -5,6 +5,15 @@ const environment = vibe_jinja.environment;
 const runtime = vibe_jinja.runtime;
 const context = vibe_jinja.context;
 
+fn deinitVars(allocator: std.mem.Allocator, vars: *std.StringHashMap(context.Value)) void {
+    var iter = vars.iterator();
+    while (iter.next()) |entry| {
+        allocator.free(entry.key_ptr.*);
+        entry.value_ptr.*.deinit(allocator);
+    }
+    vars.deinit();
+}
+
 test "filter chain basic" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -16,19 +25,10 @@ test "filter chain basic" {
     const source = "{{ text | upper | reverse }}";
     
     var vars = std.StringHashMap(context.Value).init(allocator);
-    defer {
-        var iter = vars.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            entry.value_ptr.*.deinit(allocator);
-        }
-        vars.deinit();
-    }
+    defer deinitVars(allocator, &vars);
 
     const text_key = try allocator.dupe(u8, "text");
-    defer allocator.free(text_key);
     const text_val = context.Value{ .string = try allocator.dupe(u8, "hello") };
-    defer text_val.deinit(allocator);
     try vars.put(text_key, text_val);
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -52,19 +52,10 @@ test "filter chain with arguments" {
     const source = "{{ text | replace('world', 'zig') | upper }}";
     
     var vars = std.StringHashMap(context.Value).init(allocator);
-    defer {
-        var iter = vars.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            entry.value_ptr.*.deinit(allocator);
-        }
-        vars.deinit();
-    }
+    defer deinitVars(allocator, &vars);
 
     const text_key = try allocator.dupe(u8, "text");
-    defer allocator.free(text_key);
     const text_val = context.Value{ .string = try allocator.dupe(u8, "hello world") };
-    defer text_val.deinit(allocator);
     try vars.put(text_key, text_val);
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -88,19 +79,10 @@ test "filter chain multiple filters" {
     const source = "{{ text | trim | upper | reverse }}";
     
     var vars = std.StringHashMap(context.Value).init(allocator);
-    defer {
-        var iter = vars.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            entry.value_ptr.*.deinit(allocator);
-        }
-        vars.deinit();
-    }
+    defer deinitVars(allocator, &vars);
 
     const text_key = try allocator.dupe(u8, "text");
-    defer allocator.free(text_key);
     const text_val = context.Value{ .string = try allocator.dupe(u8, "  hello  ") };
-    defer text_val.deinit(allocator);
     try vars.put(text_key, text_val);
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -124,20 +106,11 @@ test "filter with default argument" {
     const source = "{{ value | default('N/A') | upper }}";
     
     var vars = std.StringHashMap(context.Value).init(allocator);
-    defer {
-        var iter = vars.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            entry.value_ptr.*.deinit(allocator);
-        }
-        vars.deinit();
-    }
+    defer deinitVars(allocator, &vars);
 
     // Empty value should use default
     const value_key = try allocator.dupe(u8, "value");
-    defer allocator.free(value_key);
     const value_val = context.Value{ .string = try allocator.dupe(u8, "") };
-    defer value_val.deinit(allocator);
     try vars.put(value_key, value_val);
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -162,18 +135,10 @@ test "filter error handling" {
     const source = "{{ value | default('safe') }}";
     
     var vars = std.StringHashMap(context.Value).init(allocator);
-    defer {
-        var iter = vars.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            entry.value_ptr.*.deinit(allocator);
-        }
-        vars.deinit();
-    }
+    defer deinitVars(allocator, &vars);
 
     // Use undefined value
     const value_key = try allocator.dupe(u8, "value");
-    defer allocator.free(value_key);
     const value_val = context.Value{ .null = {} };
     try vars.put(value_key, value_val);
 
@@ -199,24 +164,15 @@ test "filter with list operations" {
     
     const list = try allocator.create(vibe_jinja.value.List);
     list.* = vibe_jinja.value.List.init(allocator);
-    defer list.deinit(allocator);
     
     try list.append(vibe_jinja.value.Value{ .integer = 1 });
     try list.append(vibe_jinja.value.Value{ .integer = 2 });
     try list.append(vibe_jinja.value.Value{ .integer = 3 });
 
     var vars = std.StringHashMap(context.Value).init(allocator);
-    defer {
-        var iter = vars.iterator();
-        while (iter.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-            entry.value_ptr.*.deinit(allocator);
-        }
-        vars.deinit();
-    }
+    defer deinitVars(allocator, &vars);
 
     const items_key = try allocator.dupe(u8, "items");
-    defer allocator.free(items_key);
     try vars.put(items_key, context.Value{ .list = list });
 
     var rt = runtime.Runtime.init(&env, allocator);

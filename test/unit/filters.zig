@@ -465,6 +465,126 @@ test "filter sort ascending" {
     try testing.expect(result.list.items.items[2].integer == 3);
 }
 
+test "filter sort is stable and supports nested attributes" {
+    const allocator = testing.allocator;
+    const input = try allocator.create(value.List);
+    input.* = value.List.init(allocator);
+    defer input.deinit(allocator);
+
+    for ([_]struct { name: []const u8, rank: i64 }{
+        .{ .name = "first", .rank = 2 },
+        .{ .name = "second", .rank = 1 },
+        .{ .name = "third", .rank = 1 },
+    }) |fixture| {
+        const metadata = try allocator.create(value.Dict);
+        metadata.* = value.Dict.init(allocator);
+        try metadata.set("rank", .{ .integer = fixture.rank });
+        const item = try allocator.create(value.Dict);
+        item.* = value.Dict.init(allocator);
+        try item.set("name", .{ .string = try allocator.dupe(u8, fixture.name) });
+        try item.set("metadata", .{ .dict = metadata });
+        try input.append(.{ .dict = item });
+    }
+
+    var args = [_]value.Value{ .{ .boolean = false }, .{ .boolean = true }, .{ .string = "metadata.rank" } };
+    var result = try callFilter(filters.BuiltinFilters.sort, allocator, .{ .list = input }, &args);
+    defer result.deinit(allocator);
+
+    try testing.expectEqualStrings("second", result.list.items.items[0].dict.get("name").?.string);
+    try testing.expectEqualStrings("third", result.list.items.items[1].dict.get("name").?.string);
+    try testing.expectEqualStrings("first", result.list.items.items[2].dict.get("name").?.string);
+}
+
+test "filter dictsort handles empty input and value mode" {
+    const allocator = testing.allocator;
+    const empty = try allocator.create(value.Dict);
+    empty.* = value.Dict.init(allocator);
+    defer empty.deinit(allocator);
+
+    var empty_result = try callFilter(filters.BuiltinFilters.dictsort, allocator, .{ .dict = empty }, &.{});
+    defer empty_result.deinit(allocator);
+    try testing.expectEqual(@as(usize, 0), empty_result.list.items.items.len);
+
+    const input = try allocator.create(value.Dict);
+    input.* = value.Dict.init(allocator);
+    defer input.deinit(allocator);
+    try input.set("first", .{ .integer = 20 });
+    try input.set("second", .{ .integer = 10 });
+    var args = [_]value.Value{ .{ .boolean = false }, .{ .string = "value" } };
+    var result = try callFilter(filters.BuiltinFilters.dictsort, allocator, .{ .dict = input }, &args);
+    defer result.deinit(allocator);
+
+    try testing.expectEqualStrings("second", result.list.items.items[0].dict.get("key").?.string);
+    try testing.expectEqual(@as(i64, 10), result.list.items.items[0].dict.get("value").?.integer);
+    try testing.expectEqualStrings("first", result.list.items.items[1].dict.get("key").?.string);
+}
+
+test "filter dictsort defaults to case-insensitive stable key ordering" {
+    const allocator = testing.allocator;
+    const input = try allocator.create(value.Dict);
+    input.* = value.Dict.init(allocator);
+    defer input.deinit(allocator);
+    try input.set("b", .{ .integer = 1 });
+    try input.set("A", .{ .integer = 2 });
+    try input.set("a", .{ .integer = 3 });
+
+    var result = try callFilter(filters.BuiltinFilters.dictsort, allocator, .{ .dict = input }, &.{});
+    defer result.deinit(allocator);
+    try testing.expect(std.ascii.eqlIgnoreCase(result.list.items.items[0].dict.get("key").?.string, "a"));
+    try testing.expect(std.ascii.eqlIgnoreCase(result.list.items.items[1].dict.get("key").?.string, "a"));
+    try testing.expectEqualStrings("b", result.list.items.items[2].dict.get("key").?.string);
+}
+
+test "selectattr and rejectattr are complementary and own their results" {
+    const allocator = testing.allocator;
+
+    const input = try allocator.create(value.List);
+    input.* = value.List.init(allocator);
+    defer input.deinit(allocator);
+
+    for ([_]?bool{ true, false, null }) |enabled| {
+        const item = try allocator.create(value.Dict);
+        item.* = value.Dict.init(allocator);
+        if (enabled) |flag| try item.set("enabled", .{ .boolean = flag });
+        try input.append(.{ .dict = item });
+    }
+
+    var attr = value.Value{ .string = try allocator.dupe(u8, "enabled") };
+    defer attr.deinit(allocator);
+    var args = [_]value.Value{attr};
+
+    var selected = try callFilter(filters.BuiltinFilters.selectattr, allocator, .{ .list = input }, &args);
+    defer selected.deinit(allocator);
+    try testing.expectEqual(@as(usize, 1), selected.list.items.items.len);
+    try testing.expect(selected.list.items.items[0].dict.get("enabled").?.boolean);
+
+    var rejected = try callFilter(filters.BuiltinFilters.rejectattr, allocator, .{ .list = input }, &args);
+    defer rejected.deinit(allocator);
+    try testing.expectEqual(@as(usize, 2), rejected.list.items.items.len);
+    try testing.expect(!rejected.list.items.items[0].dict.get("enabled").?.boolean);
+    try testing.expect(rejected.list.items.items[1].dict.get("enabled") == null);
+}
+
+test "filter tojson compact and pretty reject recursive values without truncated output" {
+    const allocator = testing.allocator;
+    const recursive = try allocator.create(value.List);
+    recursive.* = value.List.init(allocator);
+    try recursive.append(.{ .list = recursive });
+
+    try testing.expectError(
+        error.RuntimeError,
+        callFilter(filters.BuiltinFilters.tojson, allocator, .{ .list = recursive }, &.{}),
+    );
+    var pretty_args = [_]value.Value{.{ .integer = 2 }};
+    try testing.expectError(
+        error.RuntimeError,
+        callFilter(filters.BuiltinFilters.tojson, allocator, .{ .list = recursive }, &pretty_args),
+    );
+
+    recursive.items.items[0] = .{ .null = {} };
+    recursive.deinit(allocator);
+}
+
 // ============================================================================
 // Escape Filter (Jinja2 test_escape)
 // ============================================================================

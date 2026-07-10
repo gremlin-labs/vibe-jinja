@@ -6,3 +6,9 @@ rule = "zig-alloc-inside-token-loop"
 path = "src/environment.zig"
 expires = "2026-10-01"
 reason = "environment.zig is marked file-level hot for its render-time filter/test lookups, but Environment.overlay() is a one-time derived-environment constructor (creates a scoped/sandboxed Environment), not a render-time hot path -- its allocator.create() calls inside the extension-rebind loop run once per overlay() call, not per render."
+
+[[suppressions]]
+rule = "zig-alloc-page-allocator-hot-path"
+path = "src/render_arena.zig"
+expires = "2027-01-01"
+reason = "The page allocator owns the reusable thread-local arena backing store; measured rendering performs one escaping caller allocation and bulk-resets this arena, so replacing it with a per-render caller allocator would undo the verified allocation design."

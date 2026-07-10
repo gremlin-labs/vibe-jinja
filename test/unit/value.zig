@@ -57,6 +57,43 @@ test "value toString for boolean" {
     try testing.expectEqualStrings("false", str_false);
 }
 
+test "value toString rejects a cyclic list" {
+    const allocator = testing.allocator;
+    const list = try allocator.create(value.List);
+    list.* = value.List.init(allocator);
+    try list.append(.{ .list = list });
+
+    try testing.expectError(error.Overflow, (value.Value{ .list = list }).toString(allocator));
+
+    list.items.items[0] = .{ .null = {} };
+    list.deinit(allocator);
+}
+
+test "value toString rejects excessive container depth" {
+    const allocator = testing.allocator;
+    const depth = 65;
+    var lists: [depth]*value.List = undefined;
+    for (&lists) |*slot| {
+        slot.* = try allocator.create(value.List);
+        slot.*.* = value.List.init(allocator);
+    }
+    for (lists[0 .. depth - 1], lists[1..]) |parent, child| {
+        try parent.append(.{ .list = child });
+    }
+    try lists[depth - 1].append(.{ .integer = 1 });
+
+    try testing.expectError(error.Overflow, (value.Value{ .list = lists[0] }).toString(allocator));
+
+    // Break ownership links from the deepest container upward so every list
+    // can be deinitialized exactly once.
+    var index: usize = depth - 1;
+    while (index > 0) : (index -= 1) {
+        lists[index - 1].items.items[0] = .{ .null = {} };
+        lists[index].deinit(allocator);
+    }
+    lists[0].deinit(allocator);
+}
+
 test "value toInteger" {
     const val_int = value.Value{ .integer = 42 };
     try testing.expect(val_int.toInteger() == 42);

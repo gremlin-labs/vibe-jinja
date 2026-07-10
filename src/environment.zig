@@ -1,5 +1,6 @@
 const std = @import("std");
 const defaults = @import("defaults.zig");
+const owned_registry = @import("owned_registry.zig");
 const exceptions = @import("exceptions.zig");
 const filters = @import("filters.zig");
 const tests = @import("tests.zig");
@@ -111,6 +112,11 @@ pub const Environment = struct {
     linked_to: ?*Environment = null,
     /// Whether this environment is shared (used by spontaneous environments)
     shared: bool = false,
+    /// Overlay loaders inherited from a parent are borrowed; root or explicitly
+    /// overridden loaders are owned by this environment.
+    owns_loader: bool = true,
+    /// Configuration strings duplicated for overlays/spontaneous environments.
+    owned_config_strings: std.ArrayList([]const u8) = .empty,
 
     // Systems
     loader: ?*loaders.Loader,
@@ -329,6 +335,7 @@ pub const Environment = struct {
         };
     }
 
+    // fallow-zig-ignore-next-line complexity-hot-function: callable lookup intentionally checks the three public registries after the intrinsic Value callable test; splitting would duplicate environment access without reducing decisions.
     fn callableTest(val: Value, args: []const Value, ctx: ?*anyopaque, env: ?*anyopaque) bool {
         _ = args;
         _ = ctx;
@@ -527,15 +534,109 @@ pub const Environment = struct {
         }
         self.active_template_loads.deinit();
 
-        // Free loader if present
-        if (self.loader) |loader| {
+        // Free loader if present and owned by this environment.
+        if (self.owns_loader) if (self.loader) |loader| {
             loader.deinit();
-        }
+        };
 
         // Free extension registry if present
         if (self.extension_registry) |registry| {
             registry.deinit();
             self.allocator.destroy(registry);
+        }
+
+        for (self.owned_config_strings.items) |string| self.allocator.free(string);
+        self.owned_config_strings.deinit(self.allocator);
+    }
+
+    fn appendOwnedConfigCopy(self: *Self, owned: *std.ArrayList([]const u8), string: []const u8) ![]const u8 {
+        const copy = try self.allocator.dupe(u8, string);
+        errdefer self.allocator.free(copy);
+        try owned.append(self.allocator, copy);
+        return copy;
+    }
+
+    fn ownConfigurationStrings(self: *Self) !void {
+        std.debug.assert(self.owned_config_strings.items.len == 0);
+        var owned = std.ArrayList([]const u8).empty;
+        errdefer {
+            for (owned.items) |string| self.allocator.free(string);
+            owned.deinit(self.allocator);
+        }
+
+        const block_start = try self.appendOwnedConfigCopy(&owned, self.block_start_string);
+        const block_end = try self.appendOwnedConfigCopy(&owned, self.block_end_string);
+        const variable_start = try self.appendOwnedConfigCopy(&owned, self.variable_start_string);
+        const variable_end = try self.appendOwnedConfigCopy(&owned, self.variable_end_string);
+        const comment_start = try self.appendOwnedConfigCopy(&owned, self.comment_start_string);
+        const comment_end = try self.appendOwnedConfigCopy(&owned, self.comment_end_string);
+        const newline = try self.appendOwnedConfigCopy(&owned, self.newline_sequence);
+        const line_statement = if (self.line_statement_prefix) |prefix|
+            try self.appendOwnedConfigCopy(&owned, prefix)
+        else
+            null;
+        const line_comment = if (self.line_comment_prefix) |prefix|
+            try self.appendOwnedConfigCopy(&owned, prefix)
+        else
+            null;
+
+        self.block_start_string = block_start;
+        self.block_end_string = block_end;
+        self.variable_start_string = variable_start;
+        self.variable_end_string = variable_end;
+        self.comment_start_string = comment_start;
+        self.comment_end_string = comment_end;
+        self.newline_sequence = newline;
+        self.line_statement_prefix = line_statement;
+        self.line_comment_prefix = line_comment;
+        self.owned_config_strings = owned;
+    }
+
+    fn cloneRegistriesFrom(self: *Self, parent: *Self) !void {
+        var filter_iter = parent.filters_map.iterator();
+        while (filter_iter.next()) |entry| {
+            const key = try self.allocator.dupe(u8, entry.key_ptr.*);
+            const filter = self.allocator.create(filters.Filter) catch |err| {
+                self.allocator.free(key);
+                return err;
+            };
+            filter.* = entry.value_ptr.*.*;
+            filter.name = key;
+            self.filters_map.put(key, filter) catch |err| {
+                self.allocator.destroy(filter);
+                self.allocator.free(key);
+                return err;
+            };
+        }
+
+        var test_iter = parent.tests_map.iterator();
+        while (test_iter.next()) |entry| {
+            const key = try self.allocator.dupe(u8, entry.key_ptr.*);
+            const test_obj = self.allocator.create(tests.Test) catch |err| {
+                self.allocator.free(key);
+                return err;
+            };
+            test_obj.* = entry.value_ptr.*.*;
+            test_obj.name = key;
+            self.tests_map.put(key, test_obj) catch |err| {
+                self.allocator.destroy(test_obj);
+                self.allocator.free(key);
+                return err;
+            };
+        }
+
+        var global_iter = parent.globals_map.iterator();
+        while (global_iter.next()) |entry| {
+            const key = try self.allocator.dupe(u8, entry.key_ptr.*);
+            const global = entry.value_ptr.*.deepCopy(self.allocator) catch |err| {
+                self.allocator.free(key);
+                return err;
+            };
+            self.globals_map.put(key, global) catch |err| {
+                global.deinit(self.allocator);
+                self.allocator.free(key);
+                return err;
+            };
         }
     }
 
@@ -652,6 +753,29 @@ pub const Environment = struct {
         }
     }
 
+    fn cachedTemplateForSource(self: *Self, source: []const u8, name: []const u8) ?*nodes.Template {
+        const cache = self.template_cache orelse return null;
+        const entry = cache.get(name) orelse return null;
+        if (!self.auto_reload or entry.source_checksum == TemplateCacheEntry.calculateChecksum(source)) {
+            return entry.template;
+        }
+        _ = cache.remove(name);
+        return null;
+    }
+
+    fn cacheParsedTemplate(self: *Self, source: []const u8, name: []const u8, template: *nodes.Template) !void {
+        const cache = self.template_cache orelse return;
+        const entry = try self.allocator.create(TemplateCacheEntry);
+        errdefer self.allocator.destroy(entry);
+        entry.* = .{
+            .template = template,
+            .last_modified = std.time.timestamp(),
+            .access_count = 0,
+            .source_checksum = TemplateCacheEntry.calculateChecksum(source),
+        };
+        try cache.put(name, entry);
+    }
+
     /// Create a template from a string
     ///
     /// Parses the template source code and returns a compiled template AST.
@@ -681,22 +805,7 @@ pub const Environment = struct {
     pub fn fromString(self: *Self, source: []const u8, name: ?[]const u8) !*nodes.Template {
         const template_name = name orelse "<string>";
 
-        // Check cache if enabled
-        if (self.template_cache) |cache| {
-            if (cache.get(template_name)) |entry| {
-                if (!self.auto_reload) {
-                    return entry.template;
-                }
-                // Check if source changed (for auto_reload)
-                const source_checksum = TemplateCacheEntry.calculateChecksum(source);
-                if (entry.source_checksum == source_checksum) {
-                    // Source hasn't changed - return cached template
-                    return entry.template;
-                }
-                // Source changed - remove from cache and reload
-                _ = cache.remove(template_name);
-            }
-        }
+        if (self.cachedTemplateForSource(source, template_name)) |template| return template;
 
         // Preprocess source with extensions
         var processed_source = source;
@@ -731,18 +840,7 @@ pub const Environment = struct {
             try opt.optimize(template);
         }
 
-        // Cache if enabled
-        if (self.template_cache) |cache| {
-            // Add to cache (LRU cache handles eviction automatically)
-            const entry = try self.allocator.create(TemplateCacheEntry);
-            entry.* = TemplateCacheEntry{
-                .template = template,
-                .last_modified = std.time.timestamp(),
-                .access_count = 0,
-                .source_checksum = TemplateCacheEntry.calculateChecksum(source),
-            };
-            try cache.put(template_name, entry);
-        }
+        try self.cacheParsedTemplate(source, template_name, template);
 
         return template;
     }
@@ -893,21 +991,7 @@ pub const Environment = struct {
     /// try env.addFilter("myfilter", myFilter);
     /// ```
     pub fn addFilter(self: *Self, name: []const u8, filter_func: filters.FilterFn) !void {
-        const name_copy = try self.allocator.dupe(u8, name);
-        errdefer self.allocator.free(name_copy);
-
-        const filter = try self.allocator.create(filters.Filter);
-        errdefer self.allocator.destroy(filter);
-
-        filter.* = filters.Filter.init(name_copy, filter_func);
-
-        // Remove old filter if exists
-        if (self.filters_map.fetchRemove(name_copy)) |old| {
-            self.allocator.free(old.key);
-            self.allocator.destroy(old.value);
-        }
-
-        try self.filters_map.put(name_copy, filter);
+        try owned_registry.putNamed(filters.Filter, self.allocator, &self.filters_map, name, filters.Filter.init("", filter_func));
     }
 
     /// Add an async filter to the environment
@@ -1003,21 +1087,7 @@ pub const Environment = struct {
     /// try env.addTest("mytest", myTest);
     /// ```
     pub fn addTest(self: *Self, name: []const u8, test_func: tests.TestFn) !void {
-        const name_copy = try self.allocator.dupe(u8, name);
-        errdefer self.allocator.free(name_copy);
-
-        const test_obj = try self.allocator.create(tests.Test);
-        errdefer self.allocator.destroy(test_obj);
-
-        test_obj.* = tests.Test.init(name_copy, test_func);
-
-        // Remove old test if exists
-        if (self.tests_map.fetchRemove(name_copy)) |old| {
-            self.allocator.free(old.key);
-            self.allocator.destroy(old.value);
-        }
-
-        try self.tests_map.put(name_copy, test_obj);
+        try owned_registry.putNamed(tests.Test, self.allocator, &self.tests_map, name, tests.Test.init("", test_func));
     }
 
     /// Add an async test to the environment
@@ -1237,6 +1307,75 @@ pub const Environment = struct {
         finalize: ??FinalizeFn = null,
     };
 
+    fn initializeOverlayCache(self: *Self) !void {
+        if (self.cache_size == 0) return;
+        const cache = try self.allocator.create(LRUCache);
+        cache.* = LRUCache.init(self.allocator, self.cache_size);
+        self.template_cache = cache;
+    }
+
+    fn cloneOverlayExtensions(self: *Self, parent: *Self) !void {
+        const parent_registry = parent.extension_registry orelse return;
+        const registry = try self.allocator.create(extensions.ExtensionRegistry);
+        registry.* = extensions.ExtensionRegistry.init(self.allocator);
+        self.extension_registry = registry;
+        try registry.extensions.ensureTotalCapacity(self.allocator, parent_registry.extensions.items.len);
+
+        for (parent_registry.extensions.items) |extension| {
+            const bound = try extension.bind(self);
+            const bound_pointer = try self.allocator.create(extensions.Extension);
+            bound_pointer.* = bound;
+            // Parent extensions are already priority-sorted; binding preserves priority.
+            registry.extensions.appendAssumeCapacity(bound_pointer);
+        }
+    }
+
+    fn applyOverlayDelimiterOptions(self: *Self, options: OverlayOptions) void {
+        if (options.block_start_string) |value| self.block_start_string = value;
+        if (options.block_end_string) |value| self.block_end_string = value;
+        if (options.variable_start_string) |value| self.variable_start_string = value;
+        if (options.variable_end_string) |value| self.variable_end_string = value;
+        if (options.comment_start_string) |value| self.comment_start_string = value;
+        if (options.comment_end_string) |value| self.comment_end_string = value;
+    }
+
+    fn applyOverlayLayoutOptions(self: *Self, options: OverlayOptions) void {
+        if (options.line_statement_prefix) |value| self.line_statement_prefix = value;
+        if (options.line_comment_prefix) |value| self.line_comment_prefix = value;
+        if (options.trim_blocks) |value| self.trim_blocks = value;
+        if (options.lstrip_blocks) |value| self.lstrip_blocks = value;
+        if (options.newline_sequence) |value| self.newline_sequence = value;
+        if (options.keep_trailing_newline) |value| self.keep_trailing_newline = value;
+    }
+
+    fn applyOverlayBehaviorOptions(self: *Self, options: OverlayOptions) void {
+        if (options.autoescape) |value| self.autoescape = value;
+        if (options.optimized) |value| self.optimized = value;
+        if (options.enable_async) |value| self.enable_async = value;
+        if (options.finalize) |value| self.finalize = value;
+        if (options.cache_size) |value| self.cache_size = value;
+        if (options.auto_reload) |value| self.auto_reload = value;
+    }
+
+    fn initializeOverlayState(self: *Self, overlay_environment: *Self, options: OverlayOptions) void {
+        overlay_environment.* = self.*;
+        overlay_environment.owned_config_strings = .empty;
+        overlay_environment.overlayed = true;
+        overlay_environment.linked_to = self;
+        overlay_environment.shared = false;
+        overlay_environment.owns_loader = options.loader != null;
+        overlay_environment.loader = options.loader orelse self.loader;
+        overlay_environment.filters_map = std.StringHashMap(*filters.Filter).init(self.allocator);
+        overlay_environment.tests_map = std.StringHashMap(*tests.Test).init(self.allocator);
+        overlay_environment.globals_map = std.StringHashMap(Value).init(self.allocator);
+        overlay_environment.extension_registry = null;
+        overlay_environment.active_template_loads = std.StringHashMap(usize).init(self.allocator);
+        overlay_environment.template_cache = null;
+        overlay_environment.applyOverlayDelimiterOptions(options);
+        overlay_environment.applyOverlayLayoutOptions(options);
+        overlay_environment.applyOverlayBehaviorOptions(options);
+    }
+
     /// Create a new overlay environment that shares all the data with the
     /// current environment except for cache and the overridden attributes.
     ///
@@ -1270,64 +1409,14 @@ pub const Environment = struct {
         const rv = try self.allocator.create(Self);
         errdefer self.allocator.destroy(rv);
 
-        // Copy all fields from parent
-        rv.* = Self{
-            .allocator = self.allocator,
-            .block_start_string = options.block_start_string orelse self.block_start_string,
-            .block_end_string = options.block_end_string orelse self.block_end_string,
-            .variable_start_string = options.variable_start_string orelse self.variable_start_string,
-            .variable_end_string = options.variable_end_string orelse self.variable_end_string,
-            .comment_start_string = options.comment_start_string orelse self.comment_start_string,
-            .comment_end_string = options.comment_end_string orelse self.comment_end_string,
-            .line_statement_prefix = if (options.line_statement_prefix) |prefix| prefix else self.line_statement_prefix,
-            .line_comment_prefix = if (options.line_comment_prefix) |prefix| prefix else self.line_comment_prefix,
-            .trim_blocks = options.trim_blocks orelse self.trim_blocks,
-            .lstrip_blocks = options.lstrip_blocks orelse self.lstrip_blocks,
-            .newline_sequence = options.newline_sequence orelse self.newline_sequence,
-            .keep_trailing_newline = options.keep_trailing_newline orelse self.keep_trailing_newline,
-            .autoescape = if (options.autoescape) |ae| ae else self.autoescape,
-            .optimized = options.optimized orelse self.optimized,
-            .undefined_behavior = self.undefined_behavior,
-            .sandboxed = self.sandboxed,
-            .enable_async = options.enable_async orelse self.enable_async,
-            .finalize = if (options.finalize) |f| f else self.finalize,
-            .overlayed = true,
-            .linked_to = self,
-            .shared = false,
-            // Systems - share parent's maps (don't copy, just reference)
-            .loader = options.loader orelse self.loader,
-            .filters_map = self.filters_map, // Share reference
-            .tests_map = self.tests_map, // Share reference
-            .globals_map = self.globals_map, // Share reference
-            .extension_registry = null, // Will be set up below
-            .active_template_loads = std.StringHashMap(usize).init(self.allocator),
-            // Create new cache
-            .template_cache = null,
-            .cache_size = options.cache_size orelse self.cache_size,
-            .auto_reload = options.auto_reload orelse self.auto_reload,
-        };
+        self.initializeOverlayState(rv, options);
+        errdefer rv.deinit();
 
-        // Create new cache for overlay
-        if (rv.cache_size > 0) {
-            const lru_cache = try self.allocator.create(LRUCache);
-            lru_cache.* = LRUCache.init(self.allocator, rv.cache_size);
-            rv.template_cache = lru_cache;
-        }
+        try rv.cloneRegistriesFrom(self);
+        try rv.ownConfigurationStrings();
 
-        // Copy and rebind extensions to the new environment
-        if (self.extension_registry) |parent_registry| {
-            const registry = try self.allocator.create(extensions.ExtensionRegistry);
-            registry.* = extensions.ExtensionRegistry.init(self.allocator);
-            rv.extension_registry = registry;
-
-            // Rebind all parent extensions to the new overlay environment
-            for (parent_registry.extensions.items) |ext| {
-                const bound = try ext.bind(rv);
-                const bound_ptr = try self.allocator.create(extensions.Extension);
-                bound_ptr.* = bound;
-                try registry.register(bound_ptr);
-            }
-        }
+        try rv.initializeOverlayCache();
+        try rv.cloneOverlayExtensions(self);
 
         return rv;
     }
@@ -1354,51 +1443,146 @@ pub const Environment = struct {
 // Spontaneous Environments
 // ============================================================================
 
-/// Configuration key for spontaneous environment caching
-/// Uses a hash of configuration values to identify equivalent environments
-const SpontaneousKey = struct {
-    block_start_string: []const u8,
-    block_end_string: []const u8,
-    variable_start_string: []const u8,
-    variable_end_string: []const u8,
-    comment_start_string: []const u8,
-    comment_end_string: []const u8,
-    trim_blocks: bool,
-    lstrip_blocks: bool,
-    keep_trailing_newline: bool,
-    optimized: bool,
-    autoescape_bool: bool,
-
-    fn hash(self: SpontaneousKey) u64 {
-        var h: u64 = 0;
-        h = h *% 31 +% hashString(self.block_start_string);
-        h = h *% 31 +% hashString(self.block_end_string);
-        h = h *% 31 +% hashString(self.variable_start_string);
-        h = h *% 31 +% hashString(self.variable_end_string);
-        h = h *% 31 +% hashString(self.comment_start_string);
-        h = h *% 31 +% hashString(self.comment_end_string);
-        h = h *% 31 +% @intFromBool(self.trim_blocks);
-        h = h *% 31 +% @intFromBool(self.lstrip_blocks);
-        h = h *% 31 +% @intFromBool(self.keep_trailing_newline);
-        h = h *% 31 +% @intFromBool(self.optimized);
-        h = h *% 31 +% @intFromBool(self.autoescape_bool);
-        return h;
-    }
-
-    fn hashString(s: []const u8) u64 {
-        var h: u64 = 0;
-        for (s) |c| {
-            h = h *% 31 +% c;
-        }
-        return h;
-    }
-};
-
 /// Cache for spontaneous environments
 /// Spontaneous environments are used for templates created directly without an existing environment
-var spontaneous_cache: ?std.AutoHashMap(u64, *Environment) = null;
+const SpontaneousEntry = struct {
+    environment: *Environment,
+    allocator: std.mem.Allocator,
+};
+
+var spontaneous_cache: ?std.StringHashMap(SpontaneousEntry) = null;
+var spontaneous_cache_allocator: ?std.mem.Allocator = null;
 var spontaneous_cache_mutex: std.Thread.Mutex = .{};
 const SPONTANEOUS_CACHE_SIZE: usize = 10;
+
+fn appendSpontaneousKeyPart(allocator: std.mem.Allocator, key: *std.ArrayList(u8), value: []const u8) !void {
+    try key.writer(allocator).print("{d}:{s}|", .{ value.len, value });
+}
+
+fn appendOptionalSpontaneousKeyPart(allocator: std.mem.Allocator, key: *std.ArrayList(u8), value: ?[]const u8) !void {
+    if (value) |string| {
+        try key.append(allocator, 'S');
+        try appendSpontaneousKeyPart(allocator, key, string);
+    } else {
+        try key.appendSlice(allocator, "N|");
+    }
+}
+
+fn appendSpontaneousSyntaxKey(allocator: std.mem.Allocator, key: *std.ArrayList(u8), options: Environment.OverlayOptions) !void {
+    try appendSpontaneousKeyPart(allocator, key, options.block_start_string orelse defaults.BLOCK_START_STRING);
+    try appendSpontaneousKeyPart(allocator, key, options.block_end_string orelse defaults.BLOCK_END_STRING);
+    try appendSpontaneousKeyPart(allocator, key, options.variable_start_string orelse defaults.VARIABLE_START_STRING);
+    try appendSpontaneousKeyPart(allocator, key, options.variable_end_string orelse defaults.VARIABLE_END_STRING);
+    try appendSpontaneousKeyPart(allocator, key, options.comment_start_string orelse defaults.COMMENT_START_STRING);
+    try appendSpontaneousKeyPart(allocator, key, options.comment_end_string orelse defaults.COMMENT_END_STRING);
+    try appendOptionalSpontaneousKeyPart(allocator, key, if (options.line_statement_prefix) |value| value else defaults.LINE_STATEMENT_PREFIX);
+    try appendOptionalSpontaneousKeyPart(allocator, key, if (options.line_comment_prefix) |value| value else defaults.LINE_COMMENT_PREFIX);
+    try appendSpontaneousKeyPart(allocator, key, options.newline_sequence orelse defaults.NEWLINE_SEQUENCE);
+}
+
+fn appendSpontaneousBehaviorKey(allocator: std.mem.Allocator, key: *std.ArrayList(u8), options: Environment.OverlayOptions) !void {
+    const autoescape = if (options.autoescape) |value| value.bool else defaults.AUTOESCAPE;
+    try key.writer(allocator).print("{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|", .{
+        @intFromBool(options.trim_blocks orelse defaults.TRIM_BLOCKS),
+        @intFromBool(options.lstrip_blocks orelse defaults.LSTRIP_BLOCKS),
+        @intFromBool(options.keep_trailing_newline orelse defaults.KEEP_TRAILING_NEWLINE),
+        @intFromBool(options.optimized orelse defaults.OPTIMIZED),
+        @intFromBool(autoescape),
+        options.cache_size orelse defaults.CACHE_SIZE,
+        @intFromBool(options.auto_reload orelse defaults.AUTO_RELOAD),
+        @intFromBool(options.enable_async orelse false),
+    });
+}
+
+fn buildSpontaneousKey(allocator: std.mem.Allocator, options: Environment.OverlayOptions) ![]const u8 {
+    var key = std.ArrayList(u8).empty;
+    errdefer key.deinit(allocator);
+    try appendSpontaneousSyntaxKey(allocator, &key, options);
+    try appendSpontaneousBehaviorKey(allocator, &key, options);
+    return try key.toOwnedSlice(allocator);
+}
+
+fn spontaneousOptionsAreCacheable(options: Environment.OverlayOptions) bool {
+    if (options.loader != null) return false;
+    if (options.autoescape) |value| if (value == .function) return false;
+    if (options.finalize) |value| if (value != null) return false;
+    return true;
+}
+
+fn applySpontaneousDelimiterOptions(env: *Environment, options: Environment.OverlayOptions) void {
+    if (options.block_start_string) |value| env.block_start_string = value;
+    if (options.block_end_string) |value| env.block_end_string = value;
+    if (options.variable_start_string) |value| env.variable_start_string = value;
+    if (options.variable_end_string) |value| env.variable_end_string = value;
+    if (options.comment_start_string) |value| env.comment_start_string = value;
+    if (options.comment_end_string) |value| env.comment_end_string = value;
+}
+
+fn applySpontaneousLayoutOptions(env: *Environment, options: Environment.OverlayOptions) void {
+    if (options.line_statement_prefix) |value| env.line_statement_prefix = value;
+    if (options.line_comment_prefix) |value| env.line_comment_prefix = value;
+    if (options.trim_blocks) |value| env.trim_blocks = value;
+    if (options.lstrip_blocks) |value| env.lstrip_blocks = value;
+    if (options.newline_sequence) |value| env.newline_sequence = value;
+}
+
+fn applySpontaneousBehaviorOptions(env: *Environment, options: Environment.OverlayOptions) void {
+    if (options.keep_trailing_newline) |value| env.keep_trailing_newline = value;
+    if (options.optimized) |value| env.optimized = value;
+    if (options.autoescape) |value| env.autoescape = value;
+    if (options.loader) |value| env.loader = value;
+    if (options.auto_reload) |value| env.auto_reload = value;
+    if (options.enable_async) |value| env.enable_async = value;
+    if (options.finalize) |value| env.finalize = value;
+}
+
+fn applySpontaneousCacheOptions(env: *Environment, options: Environment.OverlayOptions) !void {
+    const cache_size = options.cache_size orelse defaults.CACHE_SIZE;
+    if (cache_size != env.cache_size) {
+        if (env.template_cache) |cache| {
+            cache.deinit();
+            env.allocator.destroy(cache);
+            env.template_cache = null;
+        }
+        env.cache_size = cache_size;
+        if (cache_size > 0) {
+            const cache = try env.allocator.create(LRUCache);
+            cache.* = LRUCache.init(env.allocator, cache_size);
+            env.template_cache = cache;
+        }
+    }
+}
+
+fn applySpontaneousOptions(env: *Environment, options: Environment.OverlayOptions) !void {
+    applySpontaneousDelimiterOptions(env, options);
+    applySpontaneousLayoutOptions(env, options);
+    applySpontaneousBehaviorOptions(env, options);
+    try applySpontaneousCacheOptions(env, options);
+}
+
+fn createSpontaneousEnvironment(allocator: std.mem.Allocator, options: Environment.OverlayOptions, shared: bool) !*Environment {
+    const environment = try allocator.create(Environment);
+    environment.* = Environment.init(allocator);
+    errdefer {
+        environment.deinit();
+        allocator.destroy(environment);
+    }
+    try applySpontaneousOptions(environment, options);
+    try environment.ownConfigurationStrings();
+    environment.shared = shared;
+    return environment;
+}
+
+fn clearSpontaneousEntries(cache_allocator: std.mem.Allocator, cache: *std.StringHashMap(SpontaneousEntry)) void {
+    var iter = cache.iterator();
+    while (iter.next()) |entry| {
+        const cached = entry.value_ptr.*;
+        cached.environment.deinit();
+        cached.allocator.destroy(cached.environment);
+        cache_allocator.free(entry.key_ptr.*);
+    }
+    cache.clearRetainingCapacity();
+}
 
 /// Get or create a spontaneous environment with the given configuration
 ///
@@ -1416,97 +1600,53 @@ const SPONTANEOUS_CACHE_SIZE: usize = 10;
 /// # Errors
 /// - `error.OutOfMemory` - Memory allocation failed
 pub fn getSpontaneousEnvironment(allocator: std.mem.Allocator, options: Environment.OverlayOptions) !*Environment {
-    const key = SpontaneousKey{
-        .block_start_string = options.block_start_string orelse defaults.BLOCK_START_STRING,
-        .block_end_string = options.block_end_string orelse defaults.BLOCK_END_STRING,
-        .variable_start_string = options.variable_start_string orelse defaults.VARIABLE_START_STRING,
-        .variable_end_string = options.variable_end_string orelse defaults.VARIABLE_END_STRING,
-        .comment_start_string = options.comment_start_string orelse defaults.COMMENT_START_STRING,
-        .comment_end_string = options.comment_end_string orelse defaults.COMMENT_END_STRING,
-        .trim_blocks = options.trim_blocks orelse defaults.TRIM_BLOCKS,
-        .lstrip_blocks = options.lstrip_blocks orelse defaults.LSTRIP_BLOCKS,
-        .keep_trailing_newline = options.keep_trailing_newline orelse defaults.KEEP_TRAILING_NEWLINE,
-        .optimized = options.optimized orelse defaults.OPTIMIZED,
-        .autoescape_bool = if (options.autoescape) |ae| switch (ae) {
-            .bool => |b| b,
-            .function => false,
-        } else defaults.AUTOESCAPE,
-    };
-
-    const key_hash = key.hash();
+    if (!spontaneousOptionsAreCacheable(options)) {
+        return try createSpontaneousEnvironment(allocator, options, false);
+    }
 
     spontaneous_cache_mutex.lock();
     defer spontaneous_cache_mutex.unlock();
 
     // Initialize cache if needed
     if (spontaneous_cache == null) {
-        spontaneous_cache = std.AutoHashMap(u64, *Environment).init(allocator);
+        spontaneous_cache_allocator = allocator;
+        spontaneous_cache = std.StringHashMap(SpontaneousEntry).init(allocator);
+    }
+    const cache_allocator = spontaneous_cache_allocator.?;
+    const key = try buildSpontaneousKey(cache_allocator, options);
+    errdefer cache_allocator.free(key);
+
+    if (spontaneous_cache.?.get(key)) |entry| {
+        cache_allocator.free(key);
+        return entry.environment;
     }
 
-    // Check cache
-    if (spontaneous_cache.?.get(key_hash)) |env| {
-        return env;
+    const environment = try createSpontaneousEnvironment(allocator, options, true);
+    errdefer {
+        environment.deinit();
+        allocator.destroy(environment);
     }
 
-    // Create new environment
-    var env = Environment.init(allocator);
-
-    // Apply options
-    if (options.block_start_string) |v| env.block_start_string = v;
-    if (options.block_end_string) |v| env.block_end_string = v;
-    if (options.variable_start_string) |v| env.variable_start_string = v;
-    if (options.variable_end_string) |v| env.variable_end_string = v;
-    if (options.comment_start_string) |v| env.comment_start_string = v;
-    if (options.comment_end_string) |v| env.comment_end_string = v;
-    if (options.line_statement_prefix) |v| env.line_statement_prefix = v;
-    if (options.line_comment_prefix) |v| env.line_comment_prefix = v;
-    if (options.trim_blocks) |v| env.trim_blocks = v;
-    if (options.lstrip_blocks) |v| env.lstrip_blocks = v;
-    if (options.newline_sequence) |v| env.newline_sequence = v;
-    if (options.keep_trailing_newline) |v| env.keep_trailing_newline = v;
-    if (options.optimized) |v| env.optimized = v;
-    if (options.autoescape) |v| env.autoescape = v;
-    if (options.loader) |v| env.loader = v;
-    if (options.cache_size) |v| env.cache_size = v;
-    if (options.auto_reload) |v| env.auto_reload = v;
-    if (options.enable_async) |v| env.enable_async = v;
-    if (options.finalize) |v| env.finalize = v;
-
-    env.shared = true;
-
-    // Store in cache (evict old entries if needed)
-    const env_ptr = try allocator.create(Environment);
-    env_ptr.* = env;
-
-    // Simple eviction: if cache is full, clear it
     if (spontaneous_cache.?.count() >= SPONTANEOUS_CACHE_SIZE) {
-        // Clear old environments
-        var iter = spontaneous_cache.?.iterator();
-        while (iter.next()) |entry| {
-            entry.value_ptr.*.deinit();
-            allocator.destroy(entry.value_ptr.*);
-        }
-        spontaneous_cache.?.clearRetainingCapacity();
+        clearSpontaneousEntries(cache_allocator, &spontaneous_cache.?);
     }
 
-    try spontaneous_cache.?.put(key_hash, env_ptr);
+    try spontaneous_cache.?.put(key, .{ .environment = environment, .allocator = allocator });
 
-    return env_ptr;
+    return environment;
 }
 
 /// Clear the spontaneous environment cache
 /// This should be called during application shutdown or when you want to reclaim memory
 pub fn clearSpontaneousCache(allocator: std.mem.Allocator) void {
+    _ = allocator; // Entries remember the allocator that owns each environment.
     spontaneous_cache_mutex.lock();
     defer spontaneous_cache_mutex.unlock();
 
     if (spontaneous_cache) |*cache| {
-        var iter = cache.iterator();
-        while (iter.next()) |entry| {
-            entry.value_ptr.*.deinit();
-            allocator.destroy(entry.value_ptr.*);
-        }
+        clearSpontaneousEntries(spontaneous_cache_allocator.?, cache);
         cache.deinit();
         spontaneous_cache = null;
+        spontaneous_cache_allocator = null;
     }
 }

@@ -83,6 +83,9 @@ const std = @import("std");
 const exceptions = @import("exceptions.zig");
 const value_mod = @import("value.zig");
 const PassArg = @import("pass_arg.zig").PassArg;
+const value_format = @import("value_format.zig");
+const support = @import("filter_support.zig");
+const html_escape = @import("html_escape.zig");
 
 /// Re-export Value type for convenience
 pub const Value = value_mod.Value;
@@ -90,30 +93,11 @@ pub const Value = value_mod.Value;
 /// Error type for filter functions
 pub const FilterError = exceptions.TemplateError || std.mem.Allocator.Error || error{ Overflow, InvalidCharacter };
 
-fn createList(allocator: std.mem.Allocator, capacity: usize) !*value_mod.List {
-    const list = try allocator.create(value_mod.List);
-    list.* = value_mod.List.init(allocator);
-    errdefer list.deinit(allocator);
-
-    if (capacity > 0) {
-        try list.items.ensureTotalCapacity(allocator, capacity);
-    }
-
-    return list;
-}
-
-fn createDict(allocator: std.mem.Allocator, capacity: usize) !*value_mod.Dict {
-    const dict = try allocator.create(value_mod.Dict);
-    dict.* = value_mod.Dict.init(allocator);
-    errdefer dict.deinit(allocator);
-
-    if (capacity > 0) {
-        const map_capacity = std.math.cast(u32, capacity) orelse std.math.maxInt(u32);
-        try dict.map.ensureTotalCapacity(map_capacity);
-    }
-
-    return dict;
-}
+const createList = support.createList;
+const createDict = support.createDict;
+const attributeTruthy = support.attributeTruthy;
+const appendOwnedCopy = support.appendOwnedCopy;
+const deinitGroups = support.deinitGroups;
 
 /// Filter function signature
 /// Takes value, args, kwargs, optional context, optional environment, and returns filtered value
@@ -492,20 +476,19 @@ pub const BuiltinFilters = struct {
         const new_str_val = try args[1].toString(allocator);
         defer allocator.free(new_str_val);
 
-        var result = std.ArrayList(u8){};
-        defer result.deinit(allocator);
-
-        var i: usize = 0;
-        while (i < str.len) {
-            if (i + old_str_val.len <= str.len and std.mem.eql(u8, str[i .. i + old_str_val.len], old_str_val)) {
-                try result.appendSlice(allocator, new_str_val);
-                i += old_str_val.len;
-            } else {
-                try result.append(allocator, str[i]);
-                i += 1;
-            }
+        if (old_str_val.len > 0) {
+            return Value{ .string = try std.mem.replaceOwned(u8, allocator, str, old_str_val, new_str_val) };
         }
 
+        // Python/Jinja inserts the replacement at every boundary for an empty needle.
+        var result = std.ArrayList(u8){};
+        defer result.deinit(allocator);
+        try result.ensureTotalCapacity(allocator, str.len + (str.len + 1) * new_str_val.len);
+        result.appendSliceAssumeCapacity(new_str_val);
+        for (str) |byte| {
+            result.appendAssumeCapacity(byte);
+            result.appendSliceAssumeCapacity(new_str_val);
+        }
         return Value{ .string = try result.toOwnedSlice(allocator) };
     }
 
@@ -632,15 +615,7 @@ pub const BuiltinFilters = struct {
 
         // FAST PATH: Check if any escaping is needed
         // This avoids allocation for strings with no special characters
-        var needs_escape = false;
-        for (str) |c| {
-            if (c == '&' or c == '<' or c == '>' or c == '"' or c == '\'') {
-                needs_escape = true;
-                break;
-            }
-        }
-
-        if (!needs_escape) {
+        if (!html_escape.needsEscaping(str, false)) {
             // No escaping needed - return as-is (already allocated by toString)
             return Value{ .string = str };
         }
@@ -648,22 +623,7 @@ pub const BuiltinFilters = struct {
         // SLOW PATH: Actual escaping needed
         defer allocator.free(str);
 
-        // Pre-allocate with worst-case estimate (each char could become 6 chars)
-        var result = try std.ArrayList(u8).initCapacity(allocator, str.len + str.len / 2);
-        errdefer result.deinit(allocator);
-
-        for (str) |c| {
-            switch (c) {
-                '&' => try result.appendSlice(allocator, "&amp;"),
-                '<' => try result.appendSlice(allocator, "&lt;"),
-                '>' => try result.appendSlice(allocator, "&gt;"),
-                '"' => try result.appendSlice(allocator, "&quot;"),
-                '\'' => try result.appendSlice(allocator, "&#x27;"),
-                else => try result.append(allocator, c),
-            }
-        }
-
-        return Value{ .string = try result.toOwnedSlice(allocator) };
+        return Value{ .string = try html_escape.escapeOwned(allocator, str, false) };
     }
 
     /// Force HTML escape (same as escape for now)
@@ -682,6 +642,7 @@ pub const BuiltinFilters = struct {
 
         var result = std.ArrayList(u8){};
         defer result.deinit(allocator);
+        try result.ensureTotalCapacity(allocator, format_str.len);
 
         var arg_index: usize = 0;
         var i: usize = 0;
@@ -791,6 +752,7 @@ pub const BuiltinFilters = struct {
 
         var result = std.ArrayList(u8){};
         defer result.deinit(allocator);
+        try result.ensureTotalCapacity(allocator, str.len);
 
         var i: usize = 0;
         while (i < str.len) {
@@ -801,7 +763,7 @@ pub const BuiltinFilters = struct {
                 }
                 if (i < str.len) i += 1; // Skip the >
             } else {
-                try result.append(allocator, str[i]);
+                result.appendAssumeCapacity(str[i]);
                 i += 1;
             }
         }
@@ -904,15 +866,13 @@ pub const BuiltinFilters = struct {
 
         var result = std.ArrayList(u8){};
         defer result.deinit(allocator);
+        try result.ensureTotalCapacity(allocator, str.len * 3);
 
         for (str) |c| {
             if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '.' or c == '~') {
-                try result.append(allocator, c);
+                result.appendAssumeCapacity(c);
             } else {
-                const hex = try std.fmt.allocPrint(allocator, "%{X:0>2}", .{c});
-                defer allocator.free(hex);
-                try result.append(allocator, '%');
-                try result.appendSlice(allocator, hex);
+                try result.writer(allocator).print("%{X:0>2}", .{c});
             }
         }
 
@@ -933,6 +893,8 @@ pub const BuiltinFilters = struct {
         // This is a simplified version
         var result = std.ArrayList(u8){};
         defer result.deinit(allocator);
+        const result_capacity = try support.urlOutputCapacity(str.len);
+        try result.ensureTotalCapacity(allocator, result_capacity);
 
         var i: usize = 0;
         while (i < str.len) {
@@ -956,7 +918,7 @@ pub const BuiltinFilters = struct {
                 defer allocator.free(url_str);
                 try result.appendSlice(allocator, url_str);
             } else {
-                try result.append(allocator, str[i]);
+                result.appendAssumeCapacity(str[i]);
                 i += 1;
             }
         }
@@ -991,6 +953,19 @@ pub const BuiltinFilters = struct {
         return Value{ .integer = @intCast(word_count) };
     }
 
+    fn appendWrappedWord(allocator: std.mem.Allocator, output: *std.ArrayList(u8), word: []const u8, width: usize, line_length: *usize) !void {
+        if (word.len == 0) return;
+        if (line_length.* > 0 and line_length.* + 1 + word.len > width) {
+            try output.append(allocator, '\n');
+            line_length.* = 0;
+        } else if (line_length.* > 0) {
+            try output.append(allocator, ' ');
+            line_length.* += 1;
+        }
+        try output.appendSlice(allocator, word);
+        line_length.* += word.len;
+    }
+
     /// Word wrap text
     pub fn wordwrap(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
         _ = kwargs;
@@ -1001,11 +976,13 @@ pub const BuiltinFilters = struct {
         defer allocator.free(str);
 
         const raw_wrap_width = if (args.len > 0) (args[0].toInteger() orelse 79) else 79;
-        const width = std.math.clamp(raw_wrap_width, 1, max_filter_width);
+        const width: usize = @intCast(std.math.clamp(raw_wrap_width, 1, max_filter_width));
         _ = if (args.len > 1) (args[1].toBoolean() catch true) else true; // break_long_words - not fully implemented yet
 
         var result = std.ArrayList(u8){};
         defer result.deinit(allocator);
+        // Wrapping replaces or drops whitespace, so output never exceeds input length.
+        try result.ensureTotalCapacity(allocator, str.len);
 
         var line_len: usize = 0;
         var word_start: usize = 0;
@@ -1013,28 +990,13 @@ pub const BuiltinFilters = struct {
 
         while (i < str.len) {
             if (str[i] == '\n') {
-                if (word_start < i) {
-                    try result.appendSlice(allocator, str[word_start..i]);
-                }
+                try appendWrappedWord(allocator, &result, str[word_start..i], width, &line_len);
                 try result.append(allocator, '\n');
                 line_len = 0;
                 word_start = i + 1;
                 i += 1;
             } else if (std.ascii.isWhitespace(str[i])) {
-                if (word_start < i) {
-                    const word = str[word_start..i];
-                    if (line_len + word.len > @as(usize, @intCast(width))) {
-                        if (line_len > 0) {
-                            try result.append(allocator, '\n');
-                            line_len = 0;
-                        }
-                    } else if (line_len > 0) {
-                        try result.append(allocator, ' ');
-                        line_len += 1;
-                    }
-                    try result.appendSlice(allocator, word);
-                    line_len += word.len;
-                }
+                try appendWrappedWord(allocator, &result, str[word_start..i], width, &line_len);
                 word_start = i + 1;
                 i += 1;
             } else {
@@ -1043,17 +1005,7 @@ pub const BuiltinFilters = struct {
         }
 
         // Last word
-        if (word_start < str.len) {
-            const word = str[word_start..];
-            if (line_len + word.len > @as(usize, @intCast(width))) {
-                if (line_len > 0) {
-                    try result.append(allocator, '\n');
-                }
-            } else if (line_len > 0) {
-                try result.append(allocator, ' ');
-            }
-            try result.appendSlice(allocator, word);
-        }
+        try appendWrappedWord(allocator, &result, str[word_start..], width, &line_len);
 
         return Value{ .string = try result.toOwnedSlice(allocator) };
     }
@@ -1069,6 +1021,7 @@ pub const BuiltinFilters = struct {
             .dict => |d| {
                 var result = std.ArrayList(u8){};
                 defer result.deinit(allocator);
+                try result.ensureTotalCapacity(allocator, d.map.count());
 
                 var iter = d.map.iterator();
                 var is_first_entry = true;
@@ -1083,17 +1036,21 @@ pub const BuiltinFilters = struct {
                     // Escape XML special chars in value
                     var escaped_val = std.ArrayList(u8){};
                     defer escaped_val.deinit(allocator);
+                    const escaped_capacity = std.math.mul(usize, val_str.len, 6) catch return error.OutOfMemory;
+                    try escaped_val.ensureTotalCapacity(allocator, escaped_capacity);
                     for (val_str) |c| {
                         switch (c) {
-                            '&' => try escaped_val.appendSlice(allocator, "&amp;"),
-                            '<' => try escaped_val.appendSlice(allocator, "&lt;"),
-                            '>' => try escaped_val.appendSlice(allocator, "&gt;"),
-                            '"' => try escaped_val.appendSlice(allocator, "&quot;"),
-                            else => try escaped_val.append(allocator, c),
+                            '&' => escaped_val.appendSliceAssumeCapacity("&amp;"),
+                            '<' => escaped_val.appendSliceAssumeCapacity("&lt;"),
+                            '>' => escaped_val.appendSliceAssumeCapacity("&gt;"),
+                            '"' => escaped_val.appendSliceAssumeCapacity("&quot;"),
+                            else => escaped_val.appendAssumeCapacity(c),
                         }
                     }
 
-                    const attr_str = try std.fmt.allocPrint(allocator, "{s}=\"{s}\"", .{ key, try escaped_val.toOwnedSlice(allocator) });
+                    const escaped = try escaped_val.toOwnedSlice(allocator);
+                    defer allocator.free(escaped);
+                    const attr_str = try std.fmt.allocPrint(allocator, "{s}=\"{s}\"", .{ key, escaped });
                     defer allocator.free(attr_str);
                     try result.appendSlice(allocator, attr_str);
                     is_first_entry = false;
@@ -1128,18 +1085,19 @@ pub const BuiltinFilters = struct {
                 var i: usize = 0;
                 while (i < l.items.items.len) {
                     const batch_item_list = try createList(allocator, batch_size);
+                    errdefer batch_item_list.deinit(allocator);
 
                     const end = @min(i + batch_size, l.items.items.len);
                     for (l.items.items[i..end]) |item| {
-                        try batch_item_list.append(item);
+                        batch_item_list.items.appendAssumeCapacity(try item.deepCopy(allocator));
                     }
 
                     // Fill with fill_with if needed
                     while (batch_item_list.items.items.len < batch_size) {
-                        try batch_item_list.append(fill_with);
+                        batch_item_list.items.appendAssumeCapacity(try fill_with.deepCopy(allocator));
                     }
 
-                    try batch_list.append(Value{ .list = batch_item_list });
+                    batch_list.items.appendAssumeCapacity(Value{ .list = batch_item_list });
                     i += batch_size;
                 }
 
@@ -1148,7 +1106,7 @@ pub const BuiltinFilters = struct {
             else => {
                 // Convert to list first
                 const single_list = try createList(allocator, 1);
-                try single_list.append(val);
+                single_list.items.appendAssumeCapacity(try val.deepCopy(allocator));
                 return Value{ .list = single_list };
             },
         };
@@ -1221,13 +1179,13 @@ pub const BuiltinFilters = struct {
                     // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: list filter returns owned one-byte strings; Value has no borrowed-string variant.
                     var char_str = try allocator.alloc(u8, 1);
                     char_str[0] = c;
-                    try result_list.append(Value{ .string = char_str });
+                    result_list.items.appendAssumeCapacity(Value{ .string = char_str });
                 }
                 return Value{ .list = result_list };
             },
             else => {
                 const result_list = try createList(allocator, 1);
-                try result_list.append(val);
+                result_list.items.appendAssumeCapacity(try val.deepCopy(allocator));
                 return Value{ .list = result_list };
             },
         };
@@ -1253,11 +1211,11 @@ pub const BuiltinFilters = struct {
                             .dict => |d| d.get(attr_name) orelse Value{ .null = {} },
                             else => item,
                         };
-                        try result_list.append(mapped_val);
+                        result_list.items.appendAssumeCapacity(try mapped_val.deepCopy(allocator));
                     } else {
                         // Just convert to string
                         const item_str = try item.toString(allocator);
-                        try result_list.append(Value{ .string = item_str });
+                        result_list.items.appendAssumeCapacity(Value{ .string = item_str });
                     }
                 }
 
@@ -1265,7 +1223,7 @@ pub const BuiltinFilters = struct {
             },
             else => {
                 const result_list = try createList(allocator, 1);
-                try result_list.append(val);
+                result_list.items.appendAssumeCapacity(try val.deepCopy(allocator));
                 return Value{ .list = result_list };
             },
         };
@@ -1280,12 +1238,11 @@ pub const BuiltinFilters = struct {
 
         return switch (val) {
             .list => |l| {
-                const result_list = try allocator.create(value_mod.List);
-                result_list.* = value_mod.List.init(allocator);
+                const result_list = try createList(allocator, l.items.items.len);
 
                 for (l.items.items) |item| {
                     if (!(item.isTruthy() catch false)) {
-                        try result_list.append(item);
+                        try appendOwnedCopy(allocator, result_list, item);
                     }
                 }
 
@@ -1306,21 +1263,10 @@ pub const BuiltinFilters = struct {
 
         return switch (val) {
             .list => |l| {
-                const result_list = try allocator.create(value_mod.List);
-                result_list.* = value_mod.List.init(allocator);
+                const result_list = try createList(allocator, l.items.items.len);
 
                 for (l.items.items) |item| {
-                    var should_keep = true;
-                    if (item == .dict) {
-                        if (item.dict.get(attr_name)) |attr_val| {
-                            should_keep = attr_val.isTruthy() catch false;
-                        } else {
-                            should_keep = true;
-                        }
-                    }
-                    if (should_keep) {
-                        try result_list.append(item);
-                    }
+                    if (!attributeTruthy(item, attr_name)) try appendOwnedCopy(allocator, result_list, item);
                 }
 
                 return Value{ .list = result_list };
@@ -1338,12 +1284,11 @@ pub const BuiltinFilters = struct {
 
         return switch (val) {
             .list => |l| {
-                const result_list = try allocator.create(value_mod.List);
-                result_list.* = value_mod.List.init(allocator);
+                const result_list = try createList(allocator, l.items.items.len);
 
                 for (l.items.items) |item| {
                     if (item.isTruthy() catch false) {
-                        try result_list.append(item);
+                        try appendOwnedCopy(allocator, result_list, item);
                     }
                 }
 
@@ -1364,21 +1309,10 @@ pub const BuiltinFilters = struct {
 
         return switch (val) {
             .list => |l| {
-                const result_list = try allocator.create(value_mod.List);
-                result_list.* = value_mod.List.init(allocator);
+                const result_list = try createList(allocator, l.items.items.len);
 
                 for (l.items.items) |item| {
-                    var should_select = false;
-                    if (item == .dict) {
-                        if (item.dict.get(attr_name)) |attr_val| {
-                            should_select = attr_val.isTruthy() catch false;
-                        } else {
-                            should_select = false;
-                        }
-                    }
-                    if (should_select) {
-                        try result_list.append(item);
-                    }
+                    if (attributeTruthy(item, attr_name)) try appendOwnedCopy(allocator, result_list, item);
                 }
 
                 return Value{ .list = result_list };
@@ -1405,18 +1339,19 @@ pub const BuiltinFilters = struct {
                 var i: usize = 0;
                 while (i < l.items.items.len) {
                     const slice_list = try createList(allocator, slice_size);
+                    errdefer slice_list.deinit(allocator);
 
                     const end = @min(i + slice_size, l.items.items.len);
                     for (l.items.items[i..end]) |item| {
-                        try slice_list.append(item);
+                        slice_list.items.appendAssumeCapacity(try item.deepCopy(allocator));
                     }
 
                     // Fill with fill_with if needed
                     while (slice_list.items.items.len < slice_size) {
-                        try slice_list.append(fill_with);
+                        slice_list.items.appendAssumeCapacity(try fill_with.deepCopy(allocator));
                     }
 
-                    try result_list.append(Value{ .list = slice_list });
+                    result_list.items.appendAssumeCapacity(Value{ .list = slice_list });
                     i += slice_size;
                 }
 
@@ -1431,7 +1366,7 @@ pub const BuiltinFilters = struct {
                     const end = @min(i + slice_size, s.len);
                     // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: slice filter returns owned string slices; borrowing source storage would outlive the input Value.
                     const slice_str = try allocator.dupe(u8, s[i..end]);
-                    try result_list.append(Value{ .string = slice_str });
+                    result_list.items.appendAssumeCapacity(Value{ .string = slice_str });
                     i += slice_size;
                 }
 
@@ -1439,7 +1374,7 @@ pub const BuiltinFilters = struct {
             },
             else => {
                 const result_list = try createList(allocator, 1);
-                try result_list.append(val);
+                result_list.items.appendAssumeCapacity(try val.deepCopy(allocator));
                 return Value{ .list = result_list };
             },
         };
@@ -1451,186 +1386,91 @@ pub const BuiltinFilters = struct {
     const max_filter_width: i64 = 1_000_000;
 
     /// Sort list
+    fn sortAttributeValue(item: Value, attribute: ?[]const u8) Value {
+        const path = attribute orelse return item;
+        var current = item;
+        var parts = std.mem.splitScalar(u8, path, '.');
+        while (parts.next()) |part| {
+            if (part.len == 0) continue;
+            current = switch (current) {
+                .dict => |dict| dict.get(part) orelse return .{ .null = {} },
+                .list => |sequence| blk: {
+                    const index = std.fmt.parseInt(usize, part, 10) catch return .{ .null = {} };
+                    if (index >= sequence.items.items.len) return .{ .null = {} };
+                    break :blk sequence.items.items[index];
+                },
+                else => return .{ .null = {} },
+            };
+        }
+        return current;
+    }
+
+    fn ownedSortKey(allocator: std.mem.Allocator, item: Value, attribute: ?[]const u8, case_sensitive: bool) ![]u8 {
+        const key_value = sortAttributeValue(item, attribute);
+        const key = @constCast(try key_value.toString(allocator));
+        if (!case_sensitive) {
+            for (key) |*byte| byte.* = std.ascii.toLower(byte.*);
+        }
+        return key;
+    }
+
+    /// Stable O(n log n) sequence sort with keys computed once per item.
     pub fn sort(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
         _ = kwargs;
         _ = ctx;
+        _ = env;
 
-        // Parse arguments: sort(reverse, case_sensitive, attribute)
-        // Args can be positional - we'll parse by type and position
         var reverse_order = false;
         var case_sensitive = false;
         var attribute: ?[]const u8 = null;
+        if (args.len > 0 and args[0] == .boolean) reverse_order = args[0].boolean;
+        if (args.len > 1 and args[1] == .boolean) case_sensitive = args[1].boolean;
+        if (args.len > 2 and args[2] == .string) attribute = args[2].string;
+        // Preserve the prior convenience form where a lone string is the attribute.
+        for (args) |arg| if (arg == .string) {
+            attribute = arg.string;
+        };
 
-        // Parse arguments - check types to determine what they are
-        for (args) |arg| {
-            switch (arg) {
-                .boolean => |b| {
-                    if (!reverse_order) {
-                        reverse_order = b;
-                    } else {
-                        case_sensitive = b;
-                    }
-                },
-                .string => |s| {
-                    // String argument is the attribute name
-                    attribute = s;
-                },
-                else => {},
+        if (val != .list) return val;
+
+        const Entry = struct {
+            value: Value,
+            key: []u8,
+        };
+        var entries = std.ArrayList(Entry){};
+        defer entries.deinit(allocator);
+        try entries.ensureTotalCapacity(allocator, val.list.items.items.len);
+        errdefer {
+            for (entries.items) |*entry| {
+                entry.value.deinit(allocator);
+                allocator.free(entry.key);
             }
         }
 
-        // If no case_sensitive was set, default to false (case-insensitive by default)
-        if (args.len == 0) {
-            case_sensitive = false;
+        for (val.list.items.items) |item| {
+            var item_copy = try item.deepCopy(allocator);
+            errdefer item_copy.deinit(allocator);
+            const key = try ownedSortKey(allocator, item, attribute, case_sensitive);
+            entries.appendAssumeCapacity(.{ .value = item_copy, .key = key });
         }
 
-        return switch (val) {
-            .list => |l| {
-                const result_list = try allocator.create(value_mod.List);
-                result_list.* = value_mod.List.init(allocator);
+        const SortContext = struct {
+            reverse: bool,
 
-                // Copy items (deep copy)
-                for (l.items.items) |item| {
-                    const item_copy = try item.deepCopy(allocator);
-                    try result_list.append(item_copy);
-                }
-
-                // Sort context with attribute support
-                const SortContext = struct {
-                    allocator: std.mem.Allocator,
-                    case_sensitive: bool,
-                    attribute: ?[]const u8,
-                    env: ?*anyopaque,
-
-                    pub fn getSortKey(sort_ctx: @This(), item: Value) !Value {
-                        // If no attribute specified, use item itself
-                        if (sort_ctx.attribute == null) {
-                            return try item.deepCopy(sort_ctx.allocator);
-                        }
-
-                        // Extract attribute value using dot notation
-                        return sort_ctx.getAttribute(item, sort_ctx.attribute.?);
-                    }
-
-                    pub fn getAttribute(sort_ctx: @This(), item: Value, attr_path: []const u8) !Value {
-                        // Split attribute path by dots
-                        var parts = std.ArrayList([]const u8){};
-                        defer parts.deinit(sort_ctx.allocator);
-
-                        var iter = std.mem.splitSequence(u8, attr_path, ".");
-                        while (iter.next()) |part| {
-                            if (part.len > 0) {
-                                try parts.append(sort_ctx.allocator, part);
-                            }
-                        }
-
-                        var current: Value = item;
-                        defer current.deinit(sort_ctx.allocator);
-
-                        // Navigate through nested attributes
-                        for (parts.items) |part| {
-                            // Try to parse as integer for list indexing
-                            if (std.fmt.parseInt(usize, part, 10) catch null) |index| {
-                                // List access
-                                if (current == .list) {
-                                    if (index < current.list.items.items.len) {
-                                        const next = current.list.items.items[index];
-                                        current.deinit(sort_ctx.allocator);
-                                        current = try next.deepCopy(sort_ctx.allocator);
-                                    } else {
-                                        return Value{ .null = {} };
-                                    }
-                                } else {
-                                    return Value{ .null = {} };
-                                }
-                            } else {
-                                // Dict/attribute access
-                                if (current == .dict) {
-                                    if (current.dict.get(part)) |dict_val| {
-                                        current.deinit(sort_ctx.allocator);
-                                        current = try dict_val.deepCopy(sort_ctx.allocator);
-                                    } else {
-                                        return Value{ .null = {} };
-                                    }
-                                } else {
-                                    return Value{ .null = {} };
-                                }
-                            }
-                        }
-
-                        // Return copy of final value
-                        return try current.deepCopy(sort_ctx.allocator);
-                    }
-
-                    pub fn lessThan(sort_ctx: @This(), a: Value, b: Value) bool {
-                        // Get sort keys
-                        var a_key = sort_ctx.getSortKey(a) catch return false;
-                        defer a_key.deinit(sort_ctx.allocator);
-
-                        var b_key = sort_ctx.getSortKey(b) catch return false;
-                        defer b_key.deinit(sort_ctx.allocator);
-
-                        // Compare keys
-                        const a_str = a_key.toString(sort_ctx.allocator) catch return false;
-                        defer sort_ctx.allocator.free(a_str);
-                        const b_str = b_key.toString(sort_ctx.allocator) catch return false;
-                        defer sort_ctx.allocator.free(b_str);
-
-                        if (sort_ctx.case_sensitive) {
-                            return std.mem.order(u8, a_str, b_str) == .lt;
-                        } else {
-                            // Case-insensitive comparison
-                            var a_lower = std.ArrayList(u8){};
-                            defer a_lower.deinit(sort_ctx.allocator);
-                            var b_lower = std.ArrayList(u8){};
-                            defer b_lower.deinit(sort_ctx.allocator);
-
-                            for (a_str) |c| {
-                                a_lower.append(sort_ctx.allocator, std.ascii.toLower(c)) catch return false;
-                            }
-                            for (b_str) |c| {
-                                b_lower.append(sort_ctx.allocator, std.ascii.toLower(c)) catch return false;
-                            }
-
-                            return std.mem.order(u8, a_lower.items, b_lower.items) == .lt;
-                        }
-                    }
-                };
-
-                const sort_ctx = SortContext{
-                    .allocator = allocator,
-                    .case_sensitive = case_sensitive,
-                    .attribute = attribute,
-                    .env = env,
-                };
-
-                // Use insertion sort (stable and simple)
-                // Sort in-place
-                var i: usize = 1;
-                while (i < result_list.items.items.len) : (i += 1) {
-                    var j = i;
-                    while (j > 0) {
-                        const should_swap = if (reverse_order)
-                            !sort_ctx.lessThan(result_list.items.items[j - 1], result_list.items.items[j])
-                        else
-                            sort_ctx.lessThan(result_list.items.items[j], result_list.items.items[j - 1]);
-
-                        if (should_swap) {
-                            // Swap items
-                            const temp = result_list.items.items[j];
-                            result_list.items.items[j] = result_list.items.items[j - 1];
-                            result_list.items.items[j - 1] = temp;
-                            j -= 1;
-                        } else {
-                            break;
-                        }
-                    }
-                }
-
-                return Value{ .list = result_list };
-            },
-            else => val,
+            fn lessThan(sort_context: @This(), left: Entry, right: Entry) bool {
+                const order = std.mem.order(u8, left.key, right.key);
+                return if (sort_context.reverse) order == .gt else order == .lt;
+            }
         };
+        std.sort.block(Entry, entries.items, SortContext{ .reverse = reverse_order }, SortContext.lessThan);
+
+        const result = try allocator.create(value_mod.List);
+        result.* = value_mod.List.init(allocator);
+        errdefer result.deinit(allocator);
+        try result.items.ensureTotalCapacity(allocator, entries.items.len);
+        for (entries.items) |entry| result.items.appendAssumeCapacity(entry.value);
+        for (entries.items) |entry| allocator.free(entry.key);
+        return .{ .list = result };
     }
 
     /// Sum values
@@ -1683,11 +1523,11 @@ pub const BuiltinFilters = struct {
 
         return switch (val) {
             .list => |l| {
-                const result_list = try allocator.create(value_mod.List);
-                result_list.* = value_mod.List.init(allocator);
+                const result_list = try createList(allocator, l.items.items.len);
 
                 var seen = std.ArrayList(Value){};
                 defer seen.deinit(allocator);
+                try seen.ensureTotalCapacity(allocator, l.items.items.len);
 
                 for (l.items.items) |item| {
                     var is_duplicate = false;
@@ -1698,8 +1538,8 @@ pub const BuiltinFilters = struct {
                         }
                     }
                     if (!is_duplicate) {
-                        try seen.append(allocator, item);
-                        try result_list.append(item);
+                        seen.appendAssumeCapacity(item);
+                        result_list.items.appendAssumeCapacity(try item.deepCopy(allocator));
                     }
                 }
 
@@ -1771,42 +1611,26 @@ pub const BuiltinFilters = struct {
     }
 
     /// Minimum value
+    fn extreme(val: Value, find_minimum: bool) Value {
+        if (val != .list or val.list.items.items.len == 0) return if (val == .list) .{ .null = {} } else val;
+        var selected = val.list.items.items[0];
+        for (val.list.items.items[1..]) |item| {
+            const selected_number = selected.toFloat() orelse continue;
+            const item_number = item.toFloat() orelse continue;
+            if ((find_minimum and item_number < selected_number) or (!find_minimum and item_number > selected_number)) {
+                selected = item;
+            }
+        }
+        return selected;
+    }
+
+    /// Minimum value
     pub fn min(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
         _ = args;
         _ = kwargs;
         _ = ctx;
         _ = env;
-
-        return switch (val) {
-            .list => |l| {
-                if (l.items.items.len == 0) {
-                    return Value{ .null = {} };
-                }
-
-                var min_val = l.items.items[0];
-                for (l.items.items[1..]) |item| {
-                    const min_float = min_val.toFloat();
-                    const item_float = item.toFloat();
-                    if (min_float != null and item_float != null) {
-                        if (item_float.? < min_float.?) {
-                            min_val = item;
-                        }
-                    } else {
-                        // fallow-zig-ignore-next-line jinja-filter-arg-loop-bound: min converts list ITEMS for comparison; no template argument reaches a loop bound
-                        const min_int = min_val.toInteger();
-                        const item_int = item.toInteger();
-                        if (min_int != null and item_int != null) {
-                            if (item_int.? < min_int.?) {
-                                min_val = item;
-                            }
-                        }
-                    }
-                }
-
-                return min_val;
-            },
-            else => val,
-        };
+        return extreme(val, true);
     }
 
     /// Maximum value
@@ -1815,37 +1639,7 @@ pub const BuiltinFilters = struct {
         _ = kwargs;
         _ = ctx;
         _ = env;
-
-        return switch (val) {
-            .list => |l| {
-                if (l.items.items.len == 0) {
-                    return Value{ .null = {} };
-                }
-
-                var max_val = l.items.items[0];
-                for (l.items.items[1..]) |item| {
-                    const max_float = max_val.toFloat();
-                    const item_float = item.toFloat();
-                    if (max_float != null and item_float != null) {
-                        if (item_float.? > max_float.?) {
-                            max_val = item;
-                        }
-                    } else {
-                        // fallow-zig-ignore-next-line jinja-filter-arg-loop-bound: max converts list ITEMS for comparison; no template argument reaches a loop bound
-                        const max_int = max_val.toInteger();
-                        const item_int = item.toInteger();
-                        if (max_int != null and item_int != null) {
-                            if (item_int.? > max_int.?) {
-                                max_val = item;
-                            }
-                        }
-                    }
-                }
-
-                return max_val;
-            },
-            else => val,
-        };
+        return extreme(val, false);
     }
 
     // ============================================================================
@@ -1853,80 +1647,68 @@ pub const BuiltinFilters = struct {
     // ============================================================================
 
     /// Sort dictionary
+    /// Stable dictionary sort supporting key/value and case modes.
     pub fn dictsort(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
         _ = kwargs;
         _ = ctx;
         _ = env;
 
-        const case_sensitive = if (args.len > 0) (try args[0].toBoolean()) else true;
-        const by_str = if (args.len > 1) (try args[1].toString(allocator)) else "key";
-        defer if (args.len > 1) allocator.free(by_str);
-        const by = if (args.len > 1) by_str else "key";
+        if (val != .dict) return val;
+        const case_sensitive = args.len > 0 and try args[0].toBoolean();
+        const by = if (args.len > 1 and args[1] == .string) args[1].string else "key";
+        if (!std.mem.eql(u8, by, "key") and !std.mem.eql(u8, by, "value")) {
+            return exceptions.TemplateError.TypeError;
+        }
 
-        return switch (val) {
-            .dict => |d| {
-                const result_list = try allocator.create(value_mod.List);
-                result_list.* = value_mod.List.init(allocator);
-
-                // Collect entries
-                var entries = std.ArrayList(struct { key: []const u8, value: Value }){};
-                defer entries.deinit(allocator);
-
-                var iter = d.map.iterator();
-                while (iter.next()) |entry| {
-                    try entries.append(allocator, .{ .key = entry.key_ptr.*, .value = entry.value_ptr.* });
-                }
-
-                // Sort by key or value
-                if (std.mem.eql(u8, by, "key")) {
-                    // Sort by key
-                    var swapped = true;
-                    while (swapped) {
-                        swapped = false;
-                        for (0..entries.items.len - 1) |i| {
-                            var should_swap = false;
-                            if (case_sensitive) {
-                                should_swap = std.mem.order(u8, entries.items[i].key, entries.items[i + 1].key) == .gt;
-                            } else {
-                                var a_lower = std.ArrayList(u8){};
-                                defer a_lower.deinit(allocator);
-                                var b_lower = std.ArrayList(u8){};
-                                defer b_lower.deinit(allocator);
-
-                                for (entries.items[i].key) |c| {
-                                    a_lower.append(allocator, std.ascii.toLower(c)) catch break;
-                                }
-                                for (entries.items[i + 1].key) |c| {
-                                    b_lower.append(allocator, std.ascii.toLower(c)) catch break;
-                                }
-
-                                should_swap = std.mem.order(u8, a_lower.items, b_lower.items) == .gt;
-                            }
-
-                            if (should_swap) {
-                                const temp = entries.items[i];
-                                entries.items[i] = entries.items[i + 1];
-                                entries.items[i + 1] = temp;
-                                swapped = true;
-                            }
-                        }
-                    }
-                }
-
-                // Create list of dicts with key/value
-                for (entries.items) |entry| {
-                    // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: dictsort returns owned per-entry dictionaries required by the public filter result shape.
-                    const entry_dict = try createDict(allocator, 2);
-                    // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: dictsort result owns the key string stored under each returned entry dictionary.
-                    try entry_dict.set("key", Value{ .string = try allocator.dupe(u8, entry.key) });
-                    try entry_dict.set("value", entry.value);
-                    try result_list.append(Value{ .dict = entry_dict });
-                }
-
-                return Value{ .list = result_list };
-            },
-            else => val,
+        const Entry = struct {
+            key: []const u8,
+            value: Value,
+            sort_key: []u8,
         };
+        var entries = std.ArrayList(Entry){};
+        defer entries.deinit(allocator);
+        try entries.ensureTotalCapacity(allocator, val.dict.map.count());
+        defer for (entries.items) |entry| allocator.free(entry.sort_key);
+
+        var iterator = val.dict.map.iterator();
+        while (iterator.next()) |map_entry| {
+            const sort_value = if (std.mem.eql(u8, by, "key"))
+                Value{ .string = map_entry.key_ptr.* }
+            else
+                map_entry.value_ptr.*;
+            const sort_key = @constCast(try sort_value.toString(allocator));
+            if (!case_sensitive) {
+                for (sort_key) |*byte| byte.* = std.ascii.toLower(byte.*);
+            }
+            entries.appendAssumeCapacity(.{
+                .key = map_entry.key_ptr.*,
+                .value = map_entry.value_ptr.*,
+                .sort_key = sort_key,
+            });
+        }
+
+        const SortContext = struct {
+            fn lessThan(_: @This(), left: Entry, right: Entry) bool {
+                return std.mem.order(u8, left.sort_key, right.sort_key) == .lt;
+            }
+        };
+        std.sort.block(Entry, entries.items, SortContext{}, SortContext.lessThan);
+
+        const result = try allocator.create(value_mod.List);
+        result.* = value_mod.List.init(allocator);
+        errdefer result.deinit(allocator);
+        try result.items.ensureTotalCapacity(allocator, entries.items.len);
+
+        for (entries.items) |entry| {
+            // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: dictsort's public result owns one key/value dictionary per source entry.
+            const pair = try createDict(allocator, 2);
+            errdefer pair.deinit(allocator);
+            // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: each returned pair must own its key and value independently of the source mapping.
+            try pair.set("key", .{ .string = try allocator.dupe(u8, entry.key) });
+            try pair.set("value", try entry.value.deepCopy(allocator));
+            result.items.appendAssumeCapacity(.{ .dict = pair });
+        }
+        return .{ .list = result };
     }
 
     /// Get items as list of key-value pairs
@@ -1944,17 +1726,18 @@ pub const BuiltinFilters = struct {
                 while (iter.next()) |entry| {
                     // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: items returns owned key/value pair lists; nested list values must own their containers.
                     const entry_list = try createList(allocator, 2);
+                    errdefer entry_list.deinit(allocator);
                     // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: items result owns the copied key string in each returned pair.
-                    try entry_list.append(Value{ .string = try allocator.dupe(u8, entry.key_ptr.*) });
-                    try entry_list.append(entry.value_ptr.*);
-                    try result_list.append(Value{ .list = entry_list });
+                    entry_list.items.appendAssumeCapacity(Value{ .string = try allocator.dupe(u8, entry.key_ptr.*) });
+                    entry_list.items.appendAssumeCapacity(try entry.value_ptr.*.deepCopy(allocator));
+                    result_list.items.appendAssumeCapacity(Value{ .list = entry_list });
                 }
 
                 return Value{ .list = result_list };
             },
             else => {
                 const result_list = try createList(allocator, 1);
-                try result_list.append(val);
+                result_list.items.appendAssumeCapacity(try val.deepCopy(allocator));
                 return Value{ .list = result_list };
             },
         };
@@ -2024,16 +1807,8 @@ pub const BuiltinFilters = struct {
                 // Group items by attribute value
                 var groups = std.StringHashMap(*value_mod.List).init(allocator);
                 var groups_own_lists = true;
-                defer {
-                    var iter = groups.iterator();
-                    while (iter.next()) |entry| {
-                        allocator.free(entry.key_ptr.*);
-                        if (groups_own_lists) {
-                            entry.value_ptr.*.deinit(allocator);
-                        }
-                    }
-                    groups.deinit();
-                }
+                defer deinitGroups(allocator, &groups, groups_own_lists);
+                try groups.ensureTotalCapacity(@intCast(l.items.items.len));
 
                 for (l.items.items) |item| {
                     const group_key = switch (item) {
@@ -2045,11 +1820,12 @@ pub const BuiltinFilters = struct {
 
                     if (groups.get(group_key_str)) |group_list| {
                         allocator.free(group_key_str);
-                        try group_list.append(item);
+                        try appendOwnedCopy(allocator, group_list, item);
                     } else {
                         const new_group = try createList(allocator, 1);
-                        try new_group.append(item);
-                        try groups.put(group_key_str, new_group);
+                        errdefer new_group.deinit(allocator);
+                        try appendOwnedCopy(allocator, new_group, item);
+                        groups.putAssumeCapacity(group_key_str, new_group);
                     }
                 }
 
@@ -2057,7 +1833,7 @@ pub const BuiltinFilters = struct {
 
                 var iter = groups.iterator();
                 while (iter.next()) |entry| {
-                    try result_list.append(Value{ .list = entry.value_ptr.* });
+                    result_list.items.appendAssumeCapacity(Value{ .list = entry.value_ptr.* });
                 }
                 groups_own_lists = false;
 
@@ -2072,241 +1848,11 @@ pub const BuiltinFilters = struct {
         _ = kwargs;
         _ = ctx;
         _ = env;
-
-        // Parse arguments: pprint(width, indent_size)
-        var width: usize = 80;
         var indent_size: usize = 2;
-        var visited = std.AutoHashMap(*const anyopaque, void).init(allocator);
-        defer visited.deinit();
-
-        // Parse arguments
-        if (args.len > 0) {
-            if (args[0].toInteger()) |w| {
-                width = @as(usize, @intCast(w));
-            }
-        }
         if (args.len > 1) {
-            if (args[1].toInteger()) |i| {
-                indent_size = @as(usize, @intCast(i));
-            }
+            if (args[1].toInteger()) |size| indent_size = @intCast(@max(0, size));
         }
-
-        // Format value with indentation
-        const formatted = try formatPretty(allocator, val, 0, indent_size, width, &visited, 0);
-        defer allocator.free(formatted);
-
-        return Value{ .string = try allocator.dupe(u8, formatted) };
-    }
-
-    /// Helper function to format values with indentation
-    /// Value trees nest arbitrarily (data-driven); beyond this depth the pretty
-    /// printer truncates with an ellipsis instead of recursing further.
-    const max_pretty_depth: usize = 64;
-
-    fn formatPretty(
-        allocator: std.mem.Allocator,
-        val: Value,
-        current_indent: usize,
-        indent_size: usize,
-        width: usize,
-        visited: *std.AutoHashMap(*const anyopaque, void),
-        depth: usize,
-    ) ![]const u8 {
-        if (depth >= max_pretty_depth) {
-            return try allocator.dupe(u8, "...");
-        }
-        return switch (val) {
-            .list => |l| {
-                // Check for circular references
-                const ptr = @as(*const anyopaque, @ptrCast(l));
-                if (visited.get(ptr)) |_| {
-                    return try allocator.dupe(u8, "[...]");
-                }
-                try visited.put(ptr, {});
-                defer _ = visited.remove(ptr);
-
-                if (l.items.items.len == 0) {
-                    return try allocator.dupe(u8, "[]");
-                }
-
-                var result = std.ArrayList(u8).empty;
-                errdefer result.deinit(allocator);
-
-                try result.appendSlice(allocator, "[\n");
-
-                for (l.items.items, 0..) |item, i| {
-                    // Add indentation
-                    for (0..current_indent + indent_size) |_| {
-                        try result.append(allocator, ' ');
-                    }
-
-                    const item_str = try formatPretty(allocator, item, current_indent + indent_size, indent_size, width, visited, depth + 1);
-                    defer allocator.free(item_str);
-                    try result.appendSlice(allocator, item_str);
-
-                    if (i < l.items.items.len - 1) {
-                        try result.appendSlice(allocator, ",\n");
-                    } else {
-                        try result.append(allocator, '\n');
-                    }
-                }
-
-                // Add closing indentation
-                for (0..current_indent) |_| {
-                    try result.append(allocator, ' ');
-                }
-                try result.append(allocator, ']');
-
-                return try result.toOwnedSlice(allocator);
-            },
-            .dict => |d| {
-                // Check for circular references
-                const ptr = @as(*const anyopaque, @ptrCast(d));
-                if (visited.get(ptr)) |_| {
-                    return try allocator.dupe(u8, "{...}");
-                }
-                try visited.put(ptr, {});
-                defer _ = visited.remove(ptr);
-
-                if (d.map.count() == 0) {
-                    return try allocator.dupe(u8, "{}");
-                }
-
-                var result = std.ArrayList(u8).empty;
-                errdefer result.deinit(allocator);
-
-                try result.appendSlice(allocator, "{\n");
-
-                var iter = d.map.iterator();
-                var entry_count: usize = 0;
-                const total = d.map.count();
-
-                while (iter.next()) |entry| : (entry_count += 1) {
-                    // Add indentation
-                    for (0..current_indent + indent_size) |_| {
-                        try result.append(allocator, ' ');
-                    }
-
-                    // Format key
-                    const key_str = try formatPretty(allocator, Value{ .string = entry.key_ptr.* }, current_indent + indent_size, indent_size, width, visited, depth + 1);
-                    defer allocator.free(key_str);
-                    try result.appendSlice(allocator, key_str);
-                    try result.appendSlice(allocator, ": ");
-
-                    // Format value
-                    const val_str = try formatPretty(allocator, entry.value_ptr.*, current_indent + indent_size, indent_size, width, visited, depth + 1);
-                    defer allocator.free(val_str);
-                    try result.appendSlice(allocator, val_str);
-
-                    if (entry_count < total - 1) {
-                        try result.appendSlice(allocator, ",\n");
-                    } else {
-                        try result.append(allocator, '\n');
-                    }
-                }
-
-                // Add closing indentation
-                for (0..current_indent) |_| {
-                    try result.append(allocator, ' ');
-                }
-                try result.append(allocator, '}');
-
-                return try result.toOwnedSlice(allocator);
-            },
-            .string => |s| {
-                // Format string with quotes
-                var result = std.ArrayList(u8).empty;
-                errdefer result.deinit(allocator);
-
-                try result.append(allocator, '"');
-                for (s) |c| {
-                    switch (c) {
-                        '\n' => try result.appendSlice(allocator, "\\n"),
-                        '\r' => try result.appendSlice(allocator, "\\r"),
-                        '\t' => try result.appendSlice(allocator, "\\t"),
-                        '"' => try result.appendSlice(allocator, "\\\""),
-                        '\\' => try result.appendSlice(allocator, "\\\\"),
-                        else => try result.append(allocator, c),
-                    }
-                }
-                try result.append(allocator, '"');
-
-                return try result.toOwnedSlice(allocator);
-            },
-            .integer => |i| {
-                return try std.fmt.allocPrint(allocator, "{d}", .{i});
-            },
-            .float => |f| {
-                return try std.fmt.allocPrint(allocator, "{d}", .{f});
-            },
-            .boolean => |b| {
-                return try allocator.dupe(u8, if (b) "true" else "false");
-            },
-            .null => {
-                return try allocator.dupe(u8, "null");
-            },
-            .undefined => |u| {
-                var result = std.ArrayList(u8).empty;
-                errdefer result.deinit(allocator);
-                try result.appendSlice(allocator, "undefined(");
-                try result.appendSlice(allocator, u.name);
-                try result.append(allocator, ')');
-                return try result.toOwnedSlice(allocator);
-            },
-            .markup => |m| {
-                // Format markup similar to string
-                var result = std.ArrayList(u8).empty;
-                errdefer result.deinit(allocator);
-                try result.append(allocator, '"');
-                for (m.content) |c| {
-                    switch (c) {
-                        '\n' => try result.appendSlice(allocator, "\\n"),
-                        '\r' => try result.appendSlice(allocator, "\\r"),
-                        '\t' => try result.appendSlice(allocator, "\\t"),
-                        '"' => try result.appendSlice(allocator, "\\\""),
-                        '\\' => try result.appendSlice(allocator, "\\\\"),
-                        else => try result.append(allocator, c),
-                    }
-                }
-                try result.append(allocator, '"');
-                return try result.toOwnedSlice(allocator);
-            },
-            .async_result => |ar| {
-                if (ar.completed and ar.value != null) {
-                    return try formatPretty(allocator, ar.value.?, current_indent, indent_size, width, visited, depth + 1);
-                }
-                return try std.fmt.allocPrint(allocator, "<async pending:{d}>", .{ar.id});
-            },
-            .callable => |c| {
-                return try std.fmt.allocPrint(allocator, "<{s} {s}>", .{
-                    switch (c.callable_type) {
-                        .filter => "filter",
-                        .test_fn => "test",
-                        .macro => "macro",
-                        .function => "function",
-                        .method => "method",
-                    },
-                    c.name orelse "<anonymous>",
-                });
-            },
-            .custom => |custom| {
-                // Try custom toString first
-                if (custom.toString(allocator)) |maybe_str| {
-                    if (maybe_str) |str| {
-                        // Wrap in quotes like other values
-                        var result = std.ArrayList(u8).empty;
-                        errdefer result.deinit(allocator);
-                        defer allocator.free(str);
-                        try result.append(allocator, '"');
-                        try result.appendSlice(allocator, str);
-                        try result.append(allocator, '"');
-                        return try result.toOwnedSlice(allocator);
-                    }
-                } else |_| {}
-                // Default: return type name representation
-                return try std.fmt.allocPrint(allocator, "<{s} object>", .{custom.typeName()});
-            },
-        };
+        return .{ .string = try value_format.pretty(allocator, val, indent_size) };
     }
 
     /// Random item
@@ -2393,323 +1939,18 @@ pub const BuiltinFilters = struct {
     /// Convert to JSON with optional indentation
     /// Usage: {{ data | tojson }} or {{ data | tojson(indent=4) }}
     pub fn tojson(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
-        // Get indent_size from kwargs or args
+        _ = ctx;
+        _ = env;
         var indent_size: ?usize = null;
-        if (kwargs.get("indent")) |indent_val| {
-            if (indent_val.toInteger()) |i| {
-                indent_size = if (i > 0) @intCast(i) else null;
+        if (kwargs.get("indent")) |indent_value| {
+            if (indent_value.toInteger()) |size| {
+                if (size > 0) indent_size = @intCast(size);
             }
         } else if (args.len > 0) {
-            if (args[0].toInteger()) |i| {
-                indent_size = if (i > 0) @intCast(i) else null;
+            if (args[0].toInteger()) |size| {
+                if (size > 0) indent_size = @intCast(size);
             }
         }
-
-        // If indent_size is specified, use pretty printing
-        if (indent_size) |ind| {
-            return tojsonPretty(allocator, val, ind, 0, kwargs, ctx, env);
-        }
-
-        // Compact JSON (no indentation)
-        return tojsonCompact(allocator, val, kwargs, ctx, env, 0);
-    }
-
-    /// Value trees nest arbitrarily (data-driven); beyond this depth JSON
-    /// serialization fails instead of recursing further (truncated JSON would be
-    /// silently corrupt output).
-    const max_json_depth: usize = 64;
-
-    /// Compact JSON serialization (no whitespace)
-    fn tojsonCompact(allocator: std.mem.Allocator, val: Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque, depth: usize) !Value {
-        if (depth >= max_json_depth) {
-            return exceptions.TemplateError.RuntimeError;
-        }
-        return switch (val) {
-            .string => |s| {
-                // Escape JSON special characters
-                var result = std.ArrayList(u8){};
-                defer result.deinit(allocator);
-                try result.append(allocator, '"');
-                for (s) |c| {
-                    switch (c) {
-                        '"' => try result.appendSlice(allocator, "\\\""),
-                        '\\' => try result.appendSlice(allocator, "\\\\"),
-                        '\n' => try result.appendSlice(allocator, "\\n"),
-                        '\r' => try result.appendSlice(allocator, "\\r"),
-                        '\t' => try result.appendSlice(allocator, "\\t"),
-                        else => try result.append(allocator, c),
-                    }
-                }
-                try result.append(allocator, '"');
-                return Value{ .string = try result.toOwnedSlice(allocator) };
-            },
-            .integer => |i| {
-                const str = try std.fmt.allocPrint(allocator, "{}", .{i});
-                return Value{ .string = str };
-            },
-            .float => |f| {
-                const str = try std.fmt.allocPrint(allocator, "{}", .{f});
-                return Value{ .string = str };
-            },
-            .boolean => |b| {
-                const str = if (b) "true" else "false";
-                return Value{ .string = try allocator.dupe(u8, str) };
-            },
-            .null => {
-                return Value{ .string = try allocator.dupe(u8, "null") };
-            },
-            .list => |l| {
-                var result = std.ArrayList(u8){};
-                defer result.deinit(allocator);
-                try result.append(allocator, '[');
-                for (l.items.items, 0..) |item, i| {
-                    if (i > 0) {
-                        try result.appendSlice(allocator, ", ");
-                    }
-                    var item_json = try tojsonCompact(allocator, item, kwargs, ctx, env, depth + 1);
-                    defer item_json.deinit(allocator);
-                    const item_str = try item_json.toString(allocator);
-                    defer allocator.free(item_str);
-                    try result.appendSlice(allocator, item_str);
-                }
-                try result.append(allocator, ']');
-                return Value{ .string = try result.toOwnedSlice(allocator) };
-            },
-            .dict => |d| {
-                var result = std.ArrayList(u8){};
-                defer result.deinit(allocator);
-                try result.append(allocator, '{');
-                var iter = d.map.iterator();
-                var is_first_json = true;
-                while (iter.next()) |entry| {
-                    if (!is_first_json) {
-                        try result.appendSlice(allocator, ", ");
-                    }
-                    var key_json = try tojsonCompact(allocator, Value{ .string = entry.key_ptr.* }, kwargs, ctx, env, depth + 1);
-                    defer key_json.deinit(allocator);
-                    const key_str = try key_json.toString(allocator);
-                    defer allocator.free(key_str);
-                    try result.appendSlice(allocator, key_str);
-                    try result.appendSlice(allocator, ": ");
-                    var val_json = try tojsonCompact(allocator, entry.value_ptr.*, kwargs, ctx, env, depth + 1);
-                    defer val_json.deinit(allocator);
-                    const val_str = try val_json.toString(allocator);
-                    defer allocator.free(val_str);
-                    try result.appendSlice(allocator, val_str);
-                    is_first_json = false;
-                }
-                try result.append(allocator, '}');
-                return Value{ .string = try result.toOwnedSlice(allocator) };
-            },
-            .undefined => {
-                return Value{ .string = try allocator.dupe(u8, "null") };
-            },
-            .markup => |m| {
-                // Treat markup as string for JSON purposes
-                var result = std.ArrayList(u8){};
-                defer result.deinit(allocator);
-                try result.append(allocator, '"');
-                for (m.content) |c| {
-                    switch (c) {
-                        '"' => try result.appendSlice(allocator, "\\\""),
-                        '\\' => try result.appendSlice(allocator, "\\\\"),
-                        '\n' => try result.appendSlice(allocator, "\\n"),
-                        '\r' => try result.appendSlice(allocator, "\\r"),
-                        '\t' => try result.appendSlice(allocator, "\\t"),
-                        else => try result.append(allocator, c),
-                    }
-                }
-                try result.append(allocator, '"');
-                return Value{ .string = try result.toOwnedSlice(allocator) };
-            },
-            .async_result => |ar| {
-                // Serialize the resolved result if available
-                if (ar.value) |v| {
-                    return tojsonCompact(allocator, v, kwargs, ctx, env, depth + 1);
-                }
-                return Value{ .string = try allocator.dupe(u8, "null") };
-            },
-            .callable => {
-                return Value{ .string = try allocator.dupe(u8, "\"<callable>\"") };
-            },
-            .custom => |custom| {
-                // Try to convert custom object to string first, then wrap in quotes
-                if (custom.toString(allocator)) |maybe_str| {
-                    if (maybe_str) |str| {
-                        defer allocator.free(str);
-                        // Escape and wrap in quotes
-                        var result = std.ArrayList(u8){};
-                        defer result.deinit(allocator);
-                        try result.append(allocator, '"');
-                        for (str) |c| {
-                            switch (c) {
-                                '"' => try result.appendSlice(allocator, "\\\""),
-                                '\\' => try result.appendSlice(allocator, "\\\\"),
-                                '\n' => try result.appendSlice(allocator, "\\n"),
-                                '\r' => try result.appendSlice(allocator, "\\r"),
-                                '\t' => try result.appendSlice(allocator, "\\t"),
-                                else => try result.append(allocator, c),
-                            }
-                        }
-                        try result.append(allocator, '"');
-                        return Value{ .string = try result.toOwnedSlice(allocator) };
-                    }
-                } else |_| {}
-                // Default: return as quoted type name
-                return Value{ .string = try std.fmt.allocPrint(allocator, "\"<{s}>\"", .{custom.typeName()}) };
-            },
-        };
-    }
-
-    /// Pretty JSON serialization with indentation
-    fn tojsonPretty(allocator: std.mem.Allocator, val: Value, indent_size: usize, depth: usize, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
-        return switch (val) {
-            .string => |s| {
-                var result = std.ArrayList(u8){};
-                defer result.deinit(allocator);
-                try result.append(allocator, '"');
-                for (s) |c| {
-                    switch (c) {
-                        '"' => try result.appendSlice(allocator, "\\\""),
-                        '\\' => try result.appendSlice(allocator, "\\\\"),
-                        '\n' => try result.appendSlice(allocator, "\\n"),
-                        '\r' => try result.appendSlice(allocator, "\\r"),
-                        '\t' => try result.appendSlice(allocator, "\\t"),
-                        else => try result.append(allocator, c),
-                    }
-                }
-                try result.append(allocator, '"');
-                return Value{ .string = try result.toOwnedSlice(allocator) };
-            },
-            .integer => |i| {
-                return Value{ .string = try std.fmt.allocPrint(allocator, "{}", .{i}) };
-            },
-            .float => |f| {
-                return Value{ .string = try std.fmt.allocPrint(allocator, "{}", .{f}) };
-            },
-            .boolean => |b| {
-                return Value{ .string = try allocator.dupe(u8, if (b) "true" else "false") };
-            },
-            .null => {
-                return Value{ .string = try allocator.dupe(u8, "null") };
-            },
-            .list => |l| {
-                if (l.items.items.len == 0) {
-                    return Value{ .string = try allocator.dupe(u8, "[]") };
-                }
-                var result = std.ArrayList(u8){};
-                defer result.deinit(allocator);
-                try result.appendSlice(allocator, "[\n");
-                const inner_indent = depth + 1;
-                for (l.items.items, 0..) |item, i| {
-                    // Add indentation
-                    try result.appendNTimes(allocator, ' ', inner_indent * indent_size);
-                    var item_json = try tojsonPretty(allocator, item, indent_size, inner_indent, kwargs, ctx, env);
-                    defer item_json.deinit(allocator);
-                    const item_str = try item_json.toString(allocator);
-                    defer allocator.free(item_str);
-                    try result.appendSlice(allocator, item_str);
-                    if (i < l.items.items.len - 1) {
-                        try result.append(allocator, ',');
-                    }
-                    try result.append(allocator, '\n');
-                }
-                try result.appendNTimes(allocator, ' ', depth * indent_size);
-                try result.append(allocator, ']');
-                return Value{ .string = try result.toOwnedSlice(allocator) };
-            },
-            .dict => |d| {
-                if (d.map.count() == 0) {
-                    return Value{ .string = try allocator.dupe(u8, "{}") };
-                }
-                var result = std.ArrayList(u8){};
-                defer result.deinit(allocator);
-                try result.appendSlice(allocator, "{\n");
-                const inner_indent = depth + 1;
-                var iter = d.map.iterator();
-                var entry_count: usize = 0;
-                const total = d.map.count();
-                while (iter.next()) |entry| {
-                    // Add indentation
-                    try result.appendNTimes(allocator, ' ', inner_indent * indent_size);
-                    // Key (always a string in JSON)
-                    try result.append(allocator, '"');
-                    for (entry.key_ptr.*) |c| {
-                        switch (c) {
-                            '"' => try result.appendSlice(allocator, "\\\""),
-                            '\\' => try result.appendSlice(allocator, "\\\\"),
-                            else => try result.append(allocator, c),
-                        }
-                    }
-                    try result.appendSlice(allocator, "\": ");
-                    // Value
-                    var val_json = try tojsonPretty(allocator, entry.value_ptr.*, indent_size, inner_indent, kwargs, ctx, env);
-                    defer val_json.deinit(allocator);
-                    const val_str = try val_json.toString(allocator);
-                    defer allocator.free(val_str);
-                    try result.appendSlice(allocator, val_str);
-                    entry_count += 1;
-                    if (entry_count < total) {
-                        try result.append(allocator, ',');
-                    }
-                    try result.append(allocator, '\n');
-                }
-                try result.appendNTimes(allocator, ' ', depth * indent_size);
-                try result.append(allocator, '}');
-                return Value{ .string = try result.toOwnedSlice(allocator) };
-            },
-            .undefined => {
-                return Value{ .string = try allocator.dupe(u8, "null") };
-            },
-            .markup => |m| {
-                var result = std.ArrayList(u8){};
-                defer result.deinit(allocator);
-                try result.append(allocator, '"');
-                for (m.content) |c| {
-                    switch (c) {
-                        '"' => try result.appendSlice(allocator, "\\\""),
-                        '\\' => try result.appendSlice(allocator, "\\\\"),
-                        '\n' => try result.appendSlice(allocator, "\\n"),
-                        '\r' => try result.appendSlice(allocator, "\\r"),
-                        '\t' => try result.appendSlice(allocator, "\\t"),
-                        else => try result.append(allocator, c),
-                    }
-                }
-                try result.append(allocator, '"');
-                return Value{ .string = try result.toOwnedSlice(allocator) };
-            },
-            .async_result => |ar| {
-                if (ar.value) |v| {
-                    return tojsonPretty(allocator, v, indent_size, depth, kwargs, ctx, env);
-                }
-                return Value{ .string = try allocator.dupe(u8, "null") };
-            },
-            .callable => {
-                return Value{ .string = try allocator.dupe(u8, "\"<callable>\"") };
-            },
-            .custom => |custom| {
-                if (custom.toString(allocator)) |maybe_str| {
-                    if (maybe_str) |str| {
-                        defer allocator.free(str);
-                        var result = std.ArrayList(u8){};
-                        defer result.deinit(allocator);
-                        try result.append(allocator, '"');
-                        for (str) |c| {
-                            switch (c) {
-                                '"' => try result.appendSlice(allocator, "\\\""),
-                                '\\' => try result.appendSlice(allocator, "\\\\"),
-                                '\n' => try result.appendSlice(allocator, "\\n"),
-                                '\r' => try result.appendSlice(allocator, "\\r"),
-                                '\t' => try result.appendSlice(allocator, "\\t"),
-                                else => try result.append(allocator, c),
-                            }
-                        }
-                        try result.append(allocator, '"');
-                        return Value{ .string = try result.toOwnedSlice(allocator) };
-                    }
-                } else |_| {}
-                return Value{ .string = try std.fmt.allocPrint(allocator, "\"<{s}>\"", .{custom.typeName()}) };
-            },
-        };
+        return .{ .string = try value_format.json(allocator, val, indent_size) };
     }
 };

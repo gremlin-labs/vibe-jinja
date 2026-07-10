@@ -30,7 +30,7 @@ pub fn main() !void {
     var iter = root.iterator();
     while (iter.next()) |entry| {
         if (std.mem.eql(u8, entry.key_ptr.*, "template")) continue;
-        const value = try jsonToJinjaValue(allocator, entry.value_ptr.*);
+        const value = try jinja.json_value.toValue(allocator, entry.value_ptr.*);
         errdefer value.deinit(allocator);
         try vars.put(entry.key_ptr.*, value);
     }
@@ -53,42 +53,4 @@ fn deinitVars(allocator: std.mem.Allocator, vars: *std.StringHashMap(jinja.Value
         entry.value_ptr.deinit(allocator);
     }
     vars.deinit();
-}
-
-fn jsonToJinjaValue(allocator: std.mem.Allocator, input: std.json.Value) !jinja.Value {
-    return switch (input) {
-        .null => jinja.Value{ .null = {} },
-        .bool => |value| jinja.Value{ .boolean = value },
-        .integer => |value| jinja.Value{ .integer = value },
-        .float => |value| jinja.Value{ .float = value },
-        .number_string => |value| jinja.Value{ .string = try allocator.dupe(u8, value) },
-        .string => |value| jinja.Value{ .string = try allocator.dupe(u8, value) },
-        .array => |array| blk: {
-            const list = try allocator.create(jinja.value.List);
-            list.* = jinja.value.List.init(allocator);
-            errdefer list.deinit(allocator);
-
-            for (array.items) |item| {
-                const value = try jsonToJinjaValue(allocator, item);
-                errdefer value.deinit(allocator);
-                try list.append(value);
-            }
-
-            break :blk jinja.Value{ .list = list };
-        },
-        .object => |object| blk: {
-            const dict = try allocator.create(jinja.value.Dict);
-            dict.* = jinja.value.Dict.init(allocator);
-            errdefer dict.deinit(allocator);
-
-            var iter = object.iterator();
-            while (iter.next()) |entry| {
-                const value = try jsonToJinjaValue(allocator, entry.value_ptr.*);
-                errdefer value.deinit(allocator);
-                try dict.set(entry.key_ptr.*, value);
-            }
-
-            break :blk jinja.Value{ .dict = dict };
-        },
-    };
 }

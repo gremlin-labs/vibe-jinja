@@ -29,7 +29,6 @@ const value_mod = vibe_jinja.value;
 const compiler = vibe_jinja.compiler;
 const diagnostics = vibe_jinja.diagnostics;
 const CountingAllocator = vibe_jinja.counting_allocator.CountingAllocator;
-const bytecode_mod = vibe_jinja.bytecode;
 
 /// Benchmark scenario configuration
 const Scenario = struct {

@@ -75,6 +75,7 @@ const nodes = @import("nodes.zig");
 const parser = @import("parser.zig");
 const filters = @import("filters.zig");
 const tests = @import("tests.zig");
+const owned_registry = @import("owned_registry.zig");
 const lexer = @import("lexer.zig");
 
 /// Extension interface for custom tags, filters, and tests
@@ -188,40 +189,12 @@ pub const Extension = struct {
 
     /// Add a custom filter
     pub fn addFilter(self: *Self, name: []const u8, filter_func: filters.FilterFn) !void {
-        const name_copy = try self.allocator.dupe(u8, name);
-        errdefer self.allocator.free(name_copy);
-
-        const filter = try self.allocator.create(filters.Filter);
-        errdefer self.allocator.destroy(filter);
-
-        filter.* = filters.Filter.init(name_copy, filter_func);
-
-        // Remove old filter if exists
-        if (self.filters.fetchRemove(name_copy)) |old| {
-            self.allocator.free(old.key);
-            self.allocator.destroy(old.value);
-        }
-
-        try self.filters.put(name_copy, filter);
+        try owned_registry.putNamed(filters.Filter, self.allocator, &self.filters, name, filters.Filter.init("", filter_func));
     }
 
     /// Add a custom test
     pub fn addTest(self: *Self, name: []const u8, test_func: tests.TestFn) !void {
-        const name_copy = try self.allocator.dupe(u8, name);
-        errdefer self.allocator.free(name_copy);
-
-        const test_obj = try self.allocator.create(tests.Test);
-        errdefer self.allocator.destroy(test_obj);
-
-        test_obj.* = tests.Test.init(name_copy, test_func);
-
-        // Remove old test if exists
-        if (self.tests.fetchRemove(name_copy)) |old| {
-            self.allocator.free(old.key);
-            self.allocator.destroy(old.value);
-        }
-
-        try self.tests.put(name_copy, test_obj);
+        try owned_registry.putNamed(tests.Test, self.allocator, &self.tests, name, tests.Test.init("", test_func));
     }
 
     /// Parse a custom tag (to be implemented by extensions)

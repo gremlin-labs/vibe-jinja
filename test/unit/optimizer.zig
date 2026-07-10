@@ -4,127 +4,103 @@ const vibe_jinja = @import("vibe_jinja");
 const optimizer = vibe_jinja.optimizer;
 const nodes = vibe_jinja.nodes;
 
-test "optimizer init" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    var opt = optimizer.Optimizer.init(allocator);
-    defer opt.deinit();
-
-    try testing.expect(opt.allocator == allocator);
+fn integerExpression(allocator: std.mem.Allocator, number: i64) !nodes.Expression {
+    const literal = try allocator.create(nodes.IntegerLiteral);
+    literal.* = nodes.IntegerLiteral.init(1, "test.jinja", number);
+    return .{ .integer_literal = literal };
 }
 
-test "optimizer constant folding integer addition" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    var opt = optimizer.Optimizer.init(allocator);
-    defer opt.deinit();
-
-    // Create a binary expression with constant values
-    var left = try nodes.IntegerLiteral.init(allocator, 10, 1, "test.jinja");
-    defer left.deinit(allocator);
-    var right = try nodes.IntegerLiteral.init(allocator, 5, 1, "test.jinja");
-    defer right.deinit(allocator);
-
-    var bin_expr = try nodes.BinExpr.init(allocator, .add, &left.base, &right.base, 1, "test.jinja");
-    defer bin_expr.deinit(allocator);
-
-    // Optimize should fold constants
-    var optimized = try opt.optimizeExpression(&bin_expr.base);
-    defer optimized.deinit(allocator);
-
-    // Result should be a constant integer literal
-    try testing.expect(optimized == .integer_literal);
-    try testing.expect(optimized.integer_literal.value == 15);
+fn booleanExpression(allocator: std.mem.Allocator, boolean: bool) !nodes.Expression {
+    const literal = try allocator.create(nodes.BooleanLiteral);
+    literal.* = nodes.BooleanLiteral.init(1, "test.jinja", boolean);
+    return .{ .boolean_literal = literal };
 }
 
-test "optimizer constant folding string concatenation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    var opt = optimizer.Optimizer.init(allocator);
-    defer opt.deinit();
-
-    var left = try nodes.StringLiteral.init(allocator, "hello", 1, "test.jinja");
-    defer left.deinit(allocator);
-    var right = try nodes.StringLiteral.init(allocator, " world", 1, "test.jinja");
-    defer right.deinit(allocator);
-
-    var bin_expr = try nodes.BinExpr.init(allocator, .add, &left.base, &right.base, 1, "test.jinja");
-    defer bin_expr.deinit(allocator);
-
-    var optimized = try opt.optimizeExpression(&bin_expr.base);
-    defer optimized.deinit(allocator);
-
-    // Result should be a constant string literal
-    try testing.expect(optimized == .string_literal);
-    try testing.expectEqualStrings("hello world", optimized.string_literal.value);
+fn stringExpression(allocator: std.mem.Allocator, string: []const u8) !nodes.Expression {
+    const literal = try allocator.create(nodes.StringLiteral);
+    errdefer allocator.destroy(literal);
+    literal.* = try nodes.StringLiteral.init(allocator, string, 1, "test.jinja");
+    return .{ .string_literal = literal };
 }
 
-test "optimizer dead code elimination" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    var opt = optimizer.Optimizer.init(allocator);
-    defer opt.deinit();
-
-    // Create an if statement with false condition
-    var false_cond = try nodes.BooleanLiteral.init(allocator, false, 1, "test.jinja");
-    defer false_cond.deinit(allocator);
-
-    var if_stmt = try nodes.If.init(allocator, &false_cond.base, 1, "test.jinja");
-    defer if_stmt.deinit(allocator);
-
-    // Add some statements to the body
-    var output = try nodes.Output.init(allocator, 2, "test.jinja");
-    defer output.deinit(allocator);
-    try if_stmt.body.append(allocator, &output.base);
-
-    // Optimize should eliminate dead code
-    var optimized = try opt.optimizeStatement(&if_stmt.base);
-    defer optimized.deinit(allocator);
-
-    // Result should be empty or removed
-    try testing.expect(optimized == .if_stmt);
-    // Body should be empty after optimization
-    try testing.expect(optimized.if_stmt.body.items.len == 0);
+fn binaryExpression(allocator: std.mem.Allocator, left: nodes.Expression, right: nodes.Expression) !nodes.Expression {
+    const binary = try allocator.create(nodes.BinExpr);
+    binary.* = .{
+        .base = .{ .lineno = 1, .filename = "test.jinja", .environment = null },
+        .left = left,
+        .right = right,
+        .op = .ADD,
+    };
+    return .{ .bin_expr = binary };
 }
 
-test "optimizer output merging" {
+fn plainOutput(allocator: std.mem.Allocator, content: []const u8) !*nodes.Output {
+    const output = try allocator.create(nodes.Output);
+    errdefer allocator.destroy(output);
+    output.* = try nodes.Output.initPlainText(allocator, content, 1, "test.jinja");
+    return output;
+}
+
+test "optimizer constant folds integer and string addition" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-
     var opt = optimizer.Optimizer.init(allocator);
-    defer opt.deinit();
 
-    // Create consecutive output statements
-    var output1 = try nodes.Output.init(allocator, 1, "test.jinja");
-    defer output1.deinit(allocator);
-    
-    var str1 = try nodes.StringLiteral.init(allocator, "hello", 1, "test.jinja");
-    defer str1.deinit(allocator);
-    try output1.nodes.append(allocator, &str1.base);
+    var integer_expr = try binaryExpression(allocator, try integerExpression(allocator, 10), try integerExpression(allocator, 5));
+    defer integer_expr.deinit(allocator);
+    var integer_result = (try opt.optimizeExpression(&integer_expr)).?;
+    defer integer_result.deinit(allocator);
+    try testing.expectEqual(@as(i64, 15), integer_result.integer);
 
-    var output2 = try nodes.Output.init(allocator, 2, "test.jinja");
-    defer output2.deinit(allocator);
-    
-    var str2 = try nodes.StringLiteral.init(allocator, " world", 2, "test.jinja");
-    defer str2.deinit(allocator);
-    try output2.nodes.append(allocator, &str2.base);
+    var string_expr = try binaryExpression(allocator, try stringExpression(allocator, "hello"), try stringExpression(allocator, " world"));
+    defer string_expr.deinit(allocator);
+    var string_result = (try opt.optimizeExpression(&string_expr)).?;
+    defer string_result.deinit(allocator);
+    try testing.expectEqualStrings("hello world", string_result.string);
+}
 
-    // Optimize should merge consecutive outputs
-    // Note: This is a simplified test - actual merging happens at template level
-    var optimized1 = try opt.optimizeStatement(&output1.base);
-    defer optimized1.deinit(allocator);
-    var optimized2 = try opt.optimizeStatement(&output2.base);
-    defer optimized2.deinit(allocator);
+test "optimizer transfers constant branches before destroying the if node" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    var opt = optimizer.Optimizer.init(allocator);
 
-    try testing.expect(optimized1 == .output);
-    try testing.expect(optimized2 == .output);
+    var template = nodes.Template.init(allocator, 1, "test.jinja");
+    defer template.deinit(allocator);
+    const if_statement = try allocator.create(nodes.If);
+    if_statement.* = nodes.If.init(allocator, try booleanExpression(allocator, true), 1, "test.jinja");
+    const output = try plainOutput(allocator, "reachable");
+    try if_statement.body.append(allocator, &output.base);
+    try template.body.append(allocator, &if_statement.base);
+
+    try opt.optimize(&template);
+
+    try testing.expectEqual(@as(usize, 1), template.body.items.len);
+    try testing.expectEqual(nodes.StmtTag.output, template.body.items[0].tag);
+    const retained = @as(*nodes.Output, @ptrCast(@alignCast(template.body.items[0])));
+    try testing.expectEqualStrings("reachable", retained.content);
+}
+
+test "optimizer eliminates false branch and merges adjacent output" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    var opt = optimizer.Optimizer.init(allocator);
+
+    var template = nodes.Template.init(allocator, 1, "test.jinja");
+    defer template.deinit(allocator);
+    const if_statement = try allocator.create(nodes.If);
+    if_statement.* = nodes.If.init(allocator, try booleanExpression(allocator, false), 1, "test.jinja");
+    try template.body.append(allocator, &if_statement.base);
+    const first = try plainOutput(allocator, "hello");
+    const second = try plainOutput(allocator, " world");
+    try template.body.append(allocator, &first.base);
+    try template.body.append(allocator, &second.base);
+
+    try opt.optimize(&template);
+
+    try testing.expectEqual(@as(usize, 1), template.body.items.len);
+    const merged = @as(*nodes.Output, @ptrCast(@alignCast(template.body.items[0])));
+    try testing.expectEqualStrings("hello world", merged.content);
 }

@@ -70,7 +70,6 @@ const gemma_instruct = @embedFile("templates/gemma-instruct.jinja");
 const granite_instruct = @embedFile("templates/granite-instruct.jinja");
 const command_r = @embedFile("templates/command-r.jinja");
 const zephyr = @embedFile("templates/zephyr.jinja");
-const alpaca = @embedFile("templates/alpaca.jinja");
 const falcon_instruct = @embedFile("templates/falcon-instruct.jinja");
 const solar_instruct = @embedFile("templates/solar-instruct.jinja");
 const chatqa = @embedFile("templates/chatqa.jinja");

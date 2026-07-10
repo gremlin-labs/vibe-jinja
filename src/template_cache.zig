@@ -138,6 +138,12 @@ pub const LRUCache = struct {
 
     /// Put a value into the cache
     pub fn put(self: *Self, key: []const u8, value: *TemplateCacheEntry) !void {
+        if (self.capacity == 0) {
+            value.deinit(self.allocator);
+            self.allocator.destroy(value);
+            return;
+        }
+
         // Check if key already exists
         if (self.map.get(key)) |existing_node| {
             // Update value and move to front
@@ -157,12 +163,12 @@ pub const LRUCache = struct {
         const node = try self.allocator.create(LRUNode);
         errdefer self.allocator.destroy(node);
         node.* = try LRUNode.init(self.allocator, key, value);
+        errdefer node.deinit(self.allocator);
 
-        // Add to front
-        self.addToFront(node);
-
-        // Add to map
+        // Publish in the map before linking the node so allocation failure
+        // leaves the existing cache topology and caller-owned value untouched.
         try self.map.put(node.key, node);
+        self.addToFront(node);
     }
 
     /// Remove a value from the cache

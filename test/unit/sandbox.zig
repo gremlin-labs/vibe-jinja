@@ -86,7 +86,6 @@ test "sandbox safe range to list" {
     const list = try iter.toList(allocator);
     defer {
         list.deinit(allocator);
-        allocator.destroy(list);
     }
     
     try testing.expectEqual(@as(usize, 5), list.items.items.len);
@@ -110,7 +109,6 @@ test "sandbox modifies known mutable - list operations" {
     list.* = value.List.init(allocator);
     defer {
         list.deinit(allocator);
-        allocator.destroy(list);
     }
     
     const list_val = value.Value{ .list = list };
@@ -140,7 +138,6 @@ test "sandbox modifies known mutable - dict operations" {
     dict.* = value.Dict.init(allocator);
     defer {
         dict.deinit(allocator);
-        allocator.destroy(dict);
     }
     
     const dict_val = value.Value{ .dict = dict };
@@ -198,36 +195,36 @@ test "sandbox is internal attribute - double underscore" {
 test "sandbox callable safety flags" {
     // Test unsafe callable detection
     var safe_callable = value.Callable.init("safe_func", .function, false);
-    try testing.expect(!sandbox.hasUnsafeCallableMarker(value.Value{ .callable = safe_callable }));
+    try testing.expect(!sandbox.hasUnsafeCallableMarker(value.Value{ .callable = &safe_callable }));
     
     // Mark as unsafe
     safe_callable.markUnsafe();
-    try testing.expect(sandbox.hasUnsafeCallableMarker(value.Value{ .callable = safe_callable }));
+    try testing.expect(sandbox.hasUnsafeCallableMarker(value.Value{ .callable = &safe_callable }));
     
     // Test alters_data flag
     var data_callable = value.Callable.init("data_func", .function, false);
     data_callable.markAltersData();
-    try testing.expect(sandbox.hasUnsafeCallableMarker(value.Value{ .callable = data_callable }));
+    try testing.expect(sandbox.hasUnsafeCallableMarker(value.Value{ .callable = &data_callable }));
     
     // Test initUnsafe
-    const unsafe_callable = value.Callable.initUnsafe("danger_func", .function);
-    try testing.expect(sandbox.hasUnsafeCallableMarker(value.Value{ .callable = unsafe_callable }));
+    var unsafe_callable = value.Callable.initUnsafe("danger_func", .function);
+    try testing.expect(sandbox.hasUnsafeCallableMarker(value.Value{ .callable = &unsafe_callable }));
 }
 
 test "sandbox unsafe callable names" {
     // Known unsafe callable names should be blocked
     var eval_callable = value.Callable.init("eval", .function, false);
-    try testing.expect(!sandbox.isSafeCallableModule(value.Value{ .callable = eval_callable }));
+    try testing.expect(!sandbox.isSafeCallableModule(value.Value{ .callable = &eval_callable }));
     
     var exec_callable = value.Callable.init("exec", .function, false);
-    try testing.expect(!sandbox.isSafeCallableModule(value.Value{ .callable = exec_callable }));
+    try testing.expect(!sandbox.isSafeCallableModule(value.Value{ .callable = &exec_callable }));
     
     var open_callable = value.Callable.init("open", .function, false);
-    try testing.expect(!sandbox.isSafeCallableModule(value.Value{ .callable = open_callable }));
+    try testing.expect(!sandbox.isSafeCallableModule(value.Value{ .callable = &open_callable }));
     
     // Safe names should pass
     var safe_callable = value.Callable.init("upper", .function, false);
-    try testing.expect(sandbox.isSafeCallableModule(value.Value{ .callable = safe_callable }));
+    try testing.expect(sandbox.isSafeCallableModule(value.Value{ .callable = &safe_callable }));
 }
 
 // ============================================================================
@@ -304,12 +301,12 @@ test "sandbox safe callable check" {
     defer sandbox_env.deinit();
 
     // Safe callable
-    const safe_callable = value.Callable.init("safe_func", .function, false);
-    try testing.expect(sandbox_env.isSafeCallableCheck(value.Value{ .callable = safe_callable }));
+    var safe_callable = value.Callable.init("safe_func", .function, false);
+    try testing.expect(sandbox_env.isSafeCallableCheck(value.Value{ .callable = &safe_callable }));
     
     // Unsafe callable
-    const unsafe_callable = value.Callable.initUnsafe("danger_func", .function);
-    try testing.expect(!sandbox_env.isSafeCallableCheck(value.Value{ .callable = unsafe_callable }));
+    var unsafe_callable = value.Callable.initUnsafe("danger_func", .function);
+    try testing.expect(!sandbox_env.isSafeCallableCheck(value.Value{ .callable = &unsafe_callable }));
 }
 
 test "sandbox add safe attribute" {
@@ -338,8 +335,8 @@ test "sandbox add safe function" {
 
     try sandbox_env.addSafeFunction("custom_func");
 
-    const callable = value.Callable.init("custom_func", .function, false);
-    try testing.expect(sandbox_env.isSafeCallableCheck(value.Value{ .callable = callable }));
+    var callable = value.Callable.init("custom_func", .function, false);
+    try testing.expect(sandbox_env.isSafeCallableCheck(value.Value{ .callable = &callable }));
 }
 
 // ============================================================================
@@ -370,7 +367,6 @@ test "immutable sandbox blocks mutable list operations" {
     list.* = value.List.init(allocator);
     defer {
         list.deinit(allocator);
-        allocator.destroy(list);
     }
     
     const list_val = value.Value{ .list = list };
@@ -397,7 +393,6 @@ test "immutable sandbox blocks mutable dict operations" {
     dict.* = value.Dict.init(allocator);
     defer {
         dict.deinit(allocator);
-        allocator.destroy(dict);
     }
     
     const dict_val = value.Value{ .dict = dict };

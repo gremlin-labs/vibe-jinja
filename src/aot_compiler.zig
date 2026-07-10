@@ -338,78 +338,80 @@ pub const AotCompiler = struct {
 
     fn generateOutput(self: *Self, expr: nodes.Expression) Error!void {
         try self.writeIndent();
+        return switch (expr) {
+            .string_literal,
+            .integer_literal,
+            .float_literal,
+            .boolean_literal,
+            .null_literal,
+            .name,
+            => self.generateScalarOutput(expr),
+            .list_literal => |list| self.generateListOutput(list),
+            else => self.generateCompoundOutput(expr),
+        };
+    }
 
+    fn generateScalarOutput(self: *Self, expr: nodes.Expression) Error!void {
         switch (expr) {
-            .string_literal => |lit| {
+            .string_literal => |literal| {
                 try self.write("try writer.writeAll(\"");
-                try self.writeEscapedString(lit.value);
+                try self.writeEscapedString(literal.value);
                 try self.write("\");\n");
             },
-            .integer_literal => |lit| {
+            .integer_literal => |literal| {
                 try self.write("try writer.print(\"{d}\", .{");
-                try self.writeFmt("{d}", .{lit.value});
+                try self.writeFmt("{d}", .{literal.value});
                 try self.write("});\n");
             },
-            .float_literal => |lit| {
+            .float_literal => |literal| {
                 try self.write("try writer.print(\"{d}\", .{");
-                try self.writeFmt("{d}", .{lit.value});
+                try self.writeFmt("{d}", .{literal.value});
                 try self.write("});\n");
             },
-            .boolean_literal => |lit| {
+            .boolean_literal => |literal| {
                 try self.write("try writer.writeAll(\"");
-                try self.write(if (lit.value) "true" else "false");
+                try self.write(if (literal.value) "true" else "false");
                 try self.write("\");\n");
             },
-            .null_literal => {
-                try self.write("// null literal - no output\n");
-            },
+            .null_literal => try self.write("// null literal - no output\n"),
             .name => |name| {
                 try self.write("if (ctx.get(\"");
                 try self.write(name.name);
                 try self.write("\")) |v| try writer.writeAll(v);\n");
             },
-            .filter => |filter| {
-                try self.generateFilterOutput(filter);
-            },
-            .getattr => |attr| {
-                try self.generateGetAttrOutput(attr);
-            },
-            .bin_expr => |bin| {
-                try self.generateBinExprOutput(bin);
-            },
-            .unary_expr => |unary| {
-                try self.generateUnaryExprOutput(unary);
-            },
-            .cond_expr => |cond| {
-                try self.generateCondExprOutput(cond);
-            },
-            .call_expr => |call| {
-                try self.generateCallExprOutput(call);
-            },
-            .concat => |concat| {
-                try self.generateConcatOutput(concat);
-            },
-            .list_literal => |list| {
-                try self.write("try writer.writeAll(\"[\");\n");
-                for (list.elements.items, 0..) |elem, i| {
-                    if (i > 0) {
-                        try self.writeIndent();
-                        try self.write("try writer.writeAll(\", \");\n");
-                    }
-                    try self.generateOutput(elem);
-                }
+            else => unreachable,
+        }
+    }
+
+    fn generateListOutput(self: *Self, list: *nodes.ListLiteral) Error!void {
+        try self.write("try writer.writeAll(\"[\");\n");
+        for (list.elements.items, 0..) |element, index| {
+            if (index > 0) {
                 try self.writeIndent();
-                try self.write("try writer.writeAll(\"]\");\n");
-            },
-            .getitem => |item| {
-                try self.generateGetItemOutput(item);
-            },
+                try self.write("try writer.writeAll(\", \");\n");
+            }
+            try self.generateOutput(element);
+        }
+        try self.writeIndent();
+        try self.write("try writer.writeAll(\"]\");\n");
+    }
+
+    fn generateCompoundOutput(self: *Self, expr: nodes.Expression) Error!void {
+        return switch (expr) {
+            .filter => |filter| self.generateFilterOutput(filter),
+            .getattr => |attribute| self.generateGetAttrOutput(attribute),
+            .bin_expr => |binary| self.generateBinExprOutput(binary),
+            .unary_expr => |unary| self.generateUnaryExprOutput(unary),
+            .cond_expr => |conditional| self.generateCondExprOutput(conditional),
+            .call_expr => |call| self.generateCallExprOutput(call),
+            .concat => |concat| self.generateConcatOutput(concat),
+            .getitem => |item| self.generateGetItemOutput(item),
             else => {
                 try self.write("// Unsupported expression type: ");
                 try self.write(@tagName(expr));
                 try self.write("\n");
             },
-        }
+        };
     }
 
     /// Generate binary expression output (a + b, a - b, etc.)
@@ -610,64 +612,73 @@ pub const AotCompiler = struct {
 
     /// Generate expression as a value (for assignments)
     fn generateExpressionValue(self: *Self, expr: nodes.Expression) Error!void {
+        return switch (expr) {
+            .string_literal,
+            .integer_literal,
+            .float_literal,
+            .boolean_literal,
+            .null_literal,
+            .name,
+            => self.generateScalarValue(expr),
+            .bin_expr => |binary| self.generateBinaryValue(binary),
+            .unary_expr => |unary| self.generateUnaryValue(unary),
+            .cond_expr => |conditional| self.generateConditionalValue(conditional),
+            else => self.write("@as(i64, 0) // Complex expression"),
+        };
+    }
+
+    fn generateScalarValue(self: *Self, expr: nodes.Expression) Error!void {
         switch (expr) {
-            .string_literal => |lit| {
+            .string_literal => |literal| {
                 try self.write("\"");
-                try self.writeEscapedString(lit.value);
+                try self.writeEscapedString(literal.value);
                 try self.write("\"");
             },
-            .integer_literal => |lit| {
-                try self.writeFmt("{d}", .{lit.value});
-            },
-            .float_literal => |lit| {
-                try self.writeFmt("{d}", .{lit.value});
-            },
-            .boolean_literal => |lit| {
-                try self.write(if (lit.value) "true" else "false");
-            },
-            .null_literal => {
-                try self.write("null");
-            },
+            .integer_literal => |literal| try self.writeFmt("{d}", .{literal.value}),
+            .float_literal => |literal| try self.writeFmt("{d}", .{literal.value}),
+            .boolean_literal => |literal| try self.write(if (literal.value) "true" else "false"),
+            .null_literal => try self.write("null"),
             .name => |name| {
                 try self.write("ctx.get(\"");
                 try self.write(name.name);
                 try self.write("\") orelse \"\"");
             },
-            .bin_expr => |bin| {
-                try self.write("(");
-                try self.generateExpressionValue(bin.left);
-                switch (bin.op) {
-                    .ADD => try self.write(" + "),
-                    .SUB => try self.write(" - "),
-                    .MUL => try self.write(" * "),
-                    .DIV => try self.write(" / "),
-                    .MOD => try self.write(" % "),
-                    else => try self.write(" ??? "),
-                }
-                try self.generateExpressionValue(bin.right);
-                try self.write(")");
-            },
-            .unary_expr => |unary| {
-                switch (unary.op) {
-                    .SUB => try self.write("-"),
-                    .NOT => try self.write("!"),
-                    .ADD => try self.write("+"),
-                    else => {},
-                }
-                try self.generateExpressionValue(unary.node);
-            },
-            .cond_expr => |cond| {
-                try self.write("if (");
-                try self.generateCondition(cond.condition);
-                try self.write(") ");
-                try self.generateExpressionValue(cond.true_expr);
-                try self.write(" else ");
-                try self.generateExpressionValue(cond.false_expr);
-            },
-            else => {
-                try self.write("@as(i64, 0) // Complex expression");
-            },
+            else => unreachable,
         }
+    }
+
+    fn generateBinaryValue(self: *Self, binary: *nodes.BinExpr) Error!void {
+        try self.write("(");
+        try self.generateExpressionValue(binary.left);
+        try self.write(switch (binary.op) {
+            .ADD => " + ",
+            .SUB => " - ",
+            .MUL => " * ",
+            .DIV => " / ",
+            .MOD => " % ",
+            else => " ??? ",
+        });
+        try self.generateExpressionValue(binary.right);
+        try self.write(")");
+    }
+
+    fn generateUnaryValue(self: *Self, unary: *nodes.UnaryExpr) Error!void {
+        try self.write(switch (unary.op) {
+            .SUB => "-",
+            .NOT => "!",
+            .ADD => "+",
+            else => "",
+        });
+        try self.generateExpressionValue(unary.node);
+    }
+
+    fn generateConditionalValue(self: *Self, conditional: *nodes.CondExpr) Error!void {
+        try self.write("if (");
+        try self.generateCondition(conditional.condition);
+        try self.write(") ");
+        try self.generateExpressionValue(conditional.true_expr);
+        try self.write(" else ");
+        try self.generateExpressionValue(conditional.false_expr);
     }
 
     fn generateFilterOutput(self: *Self, filter: *nodes.FilterExpr) Error!void {
@@ -769,8 +780,13 @@ pub const AotCompiler = struct {
         defer filters.deinit(self.allocator);
 
         var current: nodes.Expression = nodes.Expression{ .filter = filter };
+        var filter_count: usize = 0;
+        while (current == .filter) : (current = current.filter.node) filter_count += 1;
+        try filters.ensureTotalCapacity(self.allocator, filter_count);
+
+        current = nodes.Expression{ .filter = filter };
         while (current == .filter) {
-            try filters.append(self.allocator, current.filter.name);
+            filters.appendAssumeCapacity(current.filter.name);
             current = current.filter.node;
         }
 
@@ -1121,82 +1137,75 @@ pub const AotCompiler = struct {
         try self.writeIndent();
         try self.write("}\n");
     }
-
     fn generateCondition(self: *Self, expr: nodes.Expression) Error!void {
+        return switch (expr) {
+            .name, .boolean_literal, .integer_literal, .string_literal => self.generateScalarCondition(expr),
+            .bin_expr => |binary| self.generateBinaryCondition(binary),
+            .unary_expr => |unary| self.generateUnaryCondition(unary),
+            .test_expr => |test_expression| self.generateTestCondition(test_expression),
+            else => self.write("true"),
+        };
+    }
+
+    fn generateScalarCondition(self: *Self, expr: nodes.Expression) Error!void {
         switch (expr) {
             .name => |name| {
                 try self.write("ctx.get(\"");
                 try self.write(name.name);
                 try self.write("\") != null");
             },
-            .boolean_literal => |lit| {
-                try self.write(if (lit.value) "true" else "false");
-            },
-            .integer_literal => |lit| {
-                try self.write(if (lit.value != 0) "true" else "false");
-            },
-            .string_literal => |lit| {
-                try self.write(if (lit.value.len > 0) "true" else "false");
-            },
-            .bin_expr => |bin| {
-                try self.write("(");
-                try self.generateCondition(bin.left);
-                switch (bin.op) {
-                    .EQ => try self.write(" == "),
-                    .NE => try self.write(" != "),
-                    .LT => try self.write(" < "),
-                    .LTEQ => try self.write(" <= "),
-                    .GT => try self.write(" > "),
-                    .GTEQ => try self.write(" >= "),
-                    .AND => try self.write(" and "),
-                    .OR => try self.write(" or "),
-                    else => try self.write(" == "),
-                }
-                try self.generateCondition(bin.right);
-                try self.write(")");
-            },
-            .unary_expr => |unary| {
-                if (unary.op == .NOT) {
-                    try self.write("!");
-                }
-                try self.generateCondition(unary.node);
-            },
-            .test_expr => |test_e| {
-                // Handle "is" tests
-                if (std.mem.eql(u8, test_e.name, "defined")) {
-                    try self.generateCondition(test_e.node);
-                } else if (std.mem.eql(u8, test_e.name, "undefined")) {
-                    try self.write("!");
-                    try self.generateCondition(test_e.node);
-                } else if (std.mem.eql(u8, test_e.name, "none")) {
-                    try self.write("(ctx.get(\"");
-                    if (test_e.node == .name) {
-                        try self.write(test_e.node.name.name);
-                    }
-                    try self.write("\") == null)");
-                } else if (std.mem.eql(u8, test_e.name, "true")) {
-                    try self.generateCondition(test_e.node);
-                } else if (std.mem.eql(u8, test_e.name, "false")) {
-                    try self.write("!");
-                    try self.generateCondition(test_e.node);
-                } else if (std.mem.eql(u8, test_e.name, "even")) {
-                    try self.write("(");
-                    try self.generateCondition(test_e.node);
-                    try self.write(" % 2 == 0)");
-                } else if (std.mem.eql(u8, test_e.name, "odd")) {
-                    try self.write("(");
-                    try self.generateCondition(test_e.node);
-                    try self.write(" % 2 == 1)");
-                } else {
-                    try self.write("true /* test: ");
-                    try self.write(test_e.name);
-                    try self.write(" */");
-                }
-            },
-            else => {
-                try self.write("true"); // Default fallback
-            },
+            .boolean_literal => |literal| try self.write(if (literal.value) "true" else "false"),
+            .integer_literal => |literal| try self.write(if (literal.value != 0) "true" else "false"),
+            .string_literal => |literal| try self.write(if (literal.value.len > 0) "true" else "false"),
+            else => unreachable,
         }
+    }
+
+    fn generateBinaryCondition(self: *Self, binary: *nodes.BinExpr) Error!void {
+        try self.write("(");
+        try self.generateCondition(binary.left);
+        try self.write(switch (binary.op) {
+            .EQ => " == ",
+            .NE => " != ",
+            .LT => " < ",
+            .LTEQ => " <= ",
+            .GT => " > ",
+            .GTEQ => " >= ",
+            .AND => " and ",
+            .OR => " or ",
+            else => " == ",
+        });
+        try self.generateCondition(binary.right);
+        try self.write(")");
+    }
+
+    fn generateUnaryCondition(self: *Self, unary: *nodes.UnaryExpr) Error!void {
+        if (unary.op == .NOT) try self.write("!");
+        try self.generateCondition(unary.node);
+    }
+
+    fn generateTestCondition(self: *Self, test_expression: *nodes.TestExpr) Error!void {
+        const name = test_expression.name;
+        if (std.mem.eql(u8, name, "defined") or std.mem.eql(u8, name, "true")) {
+            return self.generateCondition(test_expression.node);
+        }
+        if (std.mem.eql(u8, name, "undefined") or std.mem.eql(u8, name, "false")) {
+            try self.write("!");
+            return self.generateCondition(test_expression.node);
+        }
+        if (std.mem.eql(u8, name, "none")) {
+            try self.write("(ctx.get(\"");
+            if (test_expression.node == .name) try self.write(test_expression.node.name.name);
+            return self.write("\") == null)");
+        }
+        if (std.mem.eql(u8, name, "even") or std.mem.eql(u8, name, "odd")) {
+            try self.write("(");
+            try self.generateCondition(test_expression.node);
+            return self.write(if (std.mem.eql(u8, name, "even")) " % 2 == 0)" else " % 2 == 1)");
+        }
+        try self.write("true /* test: ");
+        try self.write(name);
+        try self.write(" */");
     }
 
     fn generateFor(self: *Self, for_stmt: *nodes.For) Error!void {

@@ -5,11 +5,16 @@ const Environment = jinja.Environment;
 const getSpontaneousEnvironment = jinja.getSpontaneousEnvironment;
 const clearSpontaneousCache = jinja.clearSpontaneousCache;
 
+fn destroyOverlay(allocator: std.mem.Allocator, overlay: *Environment) void {
+    overlay.deinit();
+    allocator.destroy(overlay);
+}
+
 // ============================================================================
 // 5.1 Overlay Environments Tests
 // ============================================================================
 
-test "environment overlay creates new environment with shared data" {
+test "environment overlay clones registries and uses ordinary cleanup" {
     const allocator = testing.allocator;
     
     var env = Environment.init(allocator);
@@ -20,22 +25,31 @@ test "environment overlay creates new environment with shared data" {
     
     // Create overlay
     const overlay_env = try env.overlay(.{});
-    defer {
-        // Clean up overlay cache
-        if (overlay_env.template_cache) |cache| {
-            cache.deinit();
-            allocator.destroy(cache);
-        }
-        // Don't clean up shared resources (filters, tests, globals)
-        allocator.destroy(overlay_env);
-    }
     
     // Overlay should be marked as overlayed and linked to parent
     try testing.expect(overlay_env.overlayed);
     try testing.expectEqual(&env, overlay_env.linked_to.?);
     
-    // Overlay should have access to parent's filter (shared reference)
+    // Overlay should have access to the parent's filter through its owned clone.
     try testing.expect(overlay_env.getFilter("custom_filter") != null);
+
+    destroyOverlay(allocator, overlay_env);
+    // Parent resources remain valid after overlay cleanup.
+    try testing.expect(env.getFilter("custom_filter") != null);
+}
+
+test "environment overlay remains valid when parent is destroyed first" {
+    const allocator = testing.allocator;
+    var env = Environment.init(allocator);
+    try env.addFilter("custom_filter", customTestFilter);
+    const overlay_env = try env.overlay(.{});
+
+    env.deinit();
+    defer destroyOverlay(allocator, overlay_env);
+
+    try testing.expect(overlay_env.getFilter("custom_filter") != null);
+    try overlay_env.addFilter("overlay_only", customTestFilter);
+    try testing.expect(overlay_env.getFilter("overlay_only") != null);
 }
 
 test "environment overlay can override settings" {
@@ -53,13 +67,7 @@ test "environment overlay can override settings" {
         .lstrip_blocks = true,
         .autoescape = .{ .bool = true },
     });
-    defer {
-        if (overlay_env.template_cache) |cache| {
-            cache.deinit();
-            allocator.destroy(cache);
-        }
-        allocator.destroy(overlay_env);
-    }
+    defer destroyOverlay(allocator, overlay_env);
     
     // Overlay should have overridden settings
     try testing.expect(overlay_env.trim_blocks);
@@ -79,13 +87,7 @@ test "environment overlay has its own cache" {
     
     // Create overlay
     const overlay_env = try env.overlay(.{});
-    defer {
-        if (overlay_env.template_cache) |cache| {
-            cache.deinit();
-            allocator.destroy(cache);
-        }
-        allocator.destroy(overlay_env);
-    }
+    defer destroyOverlay(allocator, overlay_env);
     
     // Both should have caches
     try testing.expect(env.template_cache != null);
@@ -105,10 +107,7 @@ test "environment overlay can override cache size" {
     const overlay_env = try env.overlay(.{
         .cache_size = 0,
     });
-    defer {
-        // overlay_env.template_cache should be null
-        allocator.destroy(overlay_env);
-    }
+    defer destroyOverlay(allocator, overlay_env);
     
     // Overlay should have no cache
     try testing.expect(overlay_env.template_cache == null);
@@ -128,13 +127,7 @@ test "environment overlay can override delimiters" {
         .variable_start_string = "<<",
         .variable_end_string = ">>",
     });
-    defer {
-        if (overlay_env.template_cache) |cache| {
-            cache.deinit();
-            allocator.destroy(cache);
-        }
-        allocator.destroy(overlay_env);
-    }
+    defer destroyOverlay(allocator, overlay_env);
     
     try testing.expectEqualStrings("<%", overlay_env.block_start_string);
     try testing.expectEqualStrings("%>", overlay_env.block_end_string);
@@ -228,13 +221,7 @@ test "environment overlay inherits finalize from parent" {
     
     // Create overlay without overriding finalize
     const overlay_env = try env.overlay(.{});
-    defer {
-        if (overlay_env.template_cache) |cache| {
-            cache.deinit();
-            allocator.destroy(cache);
-        }
-        allocator.destroy(overlay_env);
-    }
+    defer destroyOverlay(allocator, overlay_env);
     
     // Overlay should have same finalize callback
     try testing.expectEqual(env.finalize, overlay_env.finalize);
@@ -252,13 +239,7 @@ test "environment overlay can override finalize" {
     const overlay_env = try env.overlay(.{
         .finalize = uppercaseFinalize,
     });
-    defer {
-        if (overlay_env.template_cache) |cache| {
-            cache.deinit();
-            allocator.destroy(cache);
-        }
-        allocator.destroy(overlay_env);
-    }
+    defer destroyOverlay(allocator, overlay_env);
     
     // Overlay should have different finalize
     try testing.expectEqual(uppercaseFinalize, overlay_env.finalize.?);
@@ -336,6 +317,68 @@ test "clear spontaneous cache removes all cached environments" {
     
     // Clean up
     clearSpontaneousCache(allocator);
+}
+
+test "spontaneous cache destroys entries with their creating allocators" {
+    clearSpontaneousCache(testing.allocator);
+    var first_gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var second_gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
+    _ = try getSpontaneousEnvironment(first_gpa.allocator(), .{ .trim_blocks = true });
+    _ = try getSpontaneousEnvironment(second_gpa.allocator(), .{ .enable_async = true });
+    clearSpontaneousCache(testing.allocator);
+
+    try testing.expectEqual(.ok, first_gpa.deinit());
+    try testing.expectEqual(.ok, second_gpa.deinit());
+}
+
+test "spontaneous cache key includes behavior-bearing options" {
+    const allocator = testing.allocator;
+    defer clearSpontaneousCache(allocator);
+
+    const base = try getSpontaneousEnvironment(allocator, .{});
+    const newline = try getSpontaneousEnvironment(allocator, .{ .newline_sequence = "\r\n" });
+    const async_env = try getSpontaneousEnvironment(allocator, .{ .enable_async = true });
+    const no_cache = try getSpontaneousEnvironment(allocator, .{ .cache_size = 0 });
+    const no_reload = try getSpontaneousEnvironment(allocator, .{ .auto_reload = false });
+
+    try testing.expect(base != newline);
+    try testing.expect(base != async_env);
+    try testing.expect(base != no_cache);
+    try testing.expect(base != no_reload);
+    try testing.expectEqualStrings("\r\n", newline.newline_sequence);
+    try testing.expect(no_cache.template_cache == null);
+}
+
+test "dynamic spontaneous options bypass the shared cache" {
+    const allocator = testing.allocator;
+    const first = try getSpontaneousEnvironment(allocator, .{ .finalize = uppercaseFinalize });
+    const second = try getSpontaneousEnvironment(allocator, .{ .finalize = uppercaseFinalize });
+    defer destroyOverlay(allocator, first);
+    defer destroyOverlay(allocator, second);
+
+    try testing.expect(first != second);
+    try testing.expect(!first.shared);
+    try testing.expect(!second.shared);
+}
+
+test "spontaneous environments own custom configuration strings" {
+    const allocator = testing.allocator;
+    defer clearSpontaneousCache(allocator);
+    const delimiter = try allocator.dupe(u8, "<%");
+    const env = try getSpontaneousEnvironment(allocator, .{ .block_start_string = delimiter });
+    allocator.free(delimiter);
+
+    try testing.expectEqualStrings("<%", env.block_start_string);
+}
+
+test "spontaneous cache eviction cleans all recorded entries" {
+    const allocator = testing.allocator;
+    defer clearSpontaneousCache(allocator);
+    const delimiters = [_][]const u8{ "<%0", "<%1", "<%2", "<%3", "<%4", "<%5", "<%6", "<%7", "<%8", "<%9", "<%10" };
+    for (delimiters) |delimiter| {
+        _ = try getSpontaneousEnvironment(allocator, .{ .block_start_string = delimiter });
+    }
 }
 
 // ============================================================================

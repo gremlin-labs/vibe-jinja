@@ -43,7 +43,6 @@ const testing = std.testing;
 const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
 const parse = @import("parser.zig").parse;
-const Token = @import("lexer.zig").Token;
 const environment_mod = @import("environment.zig");
 const nodes_mod = @import("nodes.zig");
 
@@ -57,6 +56,10 @@ pub const compiler = @import("compiler.zig");
 pub const CompiledTemplate = compiler.CompiledTemplate;
 /// Runtime module - runtime utilities and helpers
 pub const runtime = @import("runtime.zig");
+/// Bounded dynamic-JSON conversion used by the chat-template CLI.
+pub const json_value = @import("json_value.zig");
+/// Sandbox module - restricted range, attribute, and callable helpers
+pub const sandbox = @import("sandbox.zig");
 /// Environment module - core environment configuration
 pub const environment = environment_mod;
 /// Nodes module - AST node definitions
@@ -101,6 +104,10 @@ pub const visitor = @import("visitor.zig");
 pub const extensions = @import("extensions.zig");
 /// Cache module - template caching system
 pub const cache = @import("cache.zig");
+/// Canonical template-cache implementation used by Environment and cache aliases.
+pub const template_cache = @import("template_cache.zig");
+/// Pass-argument metadata shared by filters, tests, and extensions.
+pub const pass_arg = @import("pass_arg.zig");
 /// Optimizer module - AST optimization passes
 pub const optimizer = @import("optimizer.zig");
 /// Bytecode module - bytecode compilation and VM
