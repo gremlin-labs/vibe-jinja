@@ -1,209 +1,76 @@
 # Changelog
 
-All notable changes to vibe-jinja will be documented in this file.
+All notable changes to Vibe Jinja are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
-
-- Bound deeply nested CLI JSON, context, and value traversal so hostile inputs return defined errors instead of exhausting the native stack.
-- Correct overlay and spontaneous-environment cache ownership across allocators and option sets.
-- Unify AST, bytecode, optimizer, macro/caller, attribute, item, hashing, and formatting semantics.
-- Make `sort`/`dictsort` stable and correct `rejectattr`, list-producing filter ownership, recursive JSON formatting, and mixed numeric equality.
-- Run every existing unit/integration test root from the default build graph.
-
-### Changed
-
-- Split bytecode schema, generation, synchronous VM, and async-specialized execution behind the existing public facade.
-- CLI JSON conversion now rejects inputs nested beyond 256 containers with `InputTooDeep`.
-
-## [1.0.0] - 2025-12-29
-
-### 🎉 Initial Release
-
-First stable release of vibe-jinja, a high-performance Jinja2-compatible templating engine for Zig.
+## [1.2.0] - 2026-07-14
 
 ### Added
 
-#### Core Features
-- Full Jinja2 template syntax support
-- Plain HTML/text output
-- Comments (single-line and multi-line)
-- Line statements and line comments
-- Raw blocks (`{% raw %}...{% endraw %}`)
+- Add a Python-compatible `split` filter and method-style filter calls such as `'a,b'.split(',')`.
+- Support postfix attribute, item, slice, and call trailers after literals, parenthesized expressions, and call results.
+- Support negated tests such as `value is not none`.
+- Add chat-template regressions for method calls, indexing call results, negated tests, and malformed-template parser progress.
+- Add retained public-API coverage for the 1.1 package surface.
+- Add `zig build bench-check`, which requires all four Python render references and fails on average or median regressions.
 
-#### Statements
-- `{% for %}` loops with `else`, `continue`, `break` support
-- `{% if %}` statements with `elif`, `else`
-- `{% macro %}` definitions with arguments, defaults, keyword arguments
-- `{% call %}` statements and call blocks with `caller()` support
-- `{% set %}` statements (direct and block variants)
-- `{% with %}` statements for scoped variables
-- `{% filter %}` blocks
-- `{% extends %}` for template inheritance
-- `{% block %}` with `super()` support
-- `{% include %}` with `with context` and `ignore missing` options
-- `{% import %}` and `{% from import %}` for template modules
-- `{% autoescape %}` for HTML/XML safety
-- `{% do %}` for expression statements (extension)
-- `{% debug %}` for debugging (extension)
+### Changed
 
-#### Expressions
-- Variables with scoped name resolution
-- Literals: string, integer, float, boolean, list, dict
-- Math operations: `+`, `-`, `*`, `/`, `%`, `**`, `//`
-- Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=`
-- Logic operations: `and`, `or`, `not`
-- `in` operator
-- `is` test operator
-- Filter expressions (`|`)
-- Attribute access (`.attr`)
-- Item access (`[index]`)
-- Conditional expressions (inline `if`)
-- Function calls
+- Split bytecode types, generation, synchronous execution, and async-specialized execution into focused modules behind the existing public facade.
+- Use a reusable thread-local render arena, retained up to 1 MiB, with a fresh arena for reentrant renders.
+- Switch the comparison harness to nanosecond-resolution timers, median/p95 reporting, backing-allocation counts, and a generated Python reference file.
+- Make the default test graph run every registered unit, integration, fixture, and public-API test root.
+- Bound CLI JSON conversion to 256 nested containers and return `InputTooDeep` for deeper input.
 
-#### Filters (40+)
-- **String**: `upper`, `lower`, `capitalize`, `title`, `trim`, `replace`, `escape`, `format`, `truncate`, `wordcount`, `wordwrap`, `urlencode`, `urlize`, `striptags`, `xmlattr`, `indent`, `center`, `lstrip`, `rstrip`, `join`, `attr`, `forceescape`
-- **List**: `first`, `last`, `length`, `reverse`, `sort`, `unique`, `batch`, `slice`, `map`, `select`, `reject`, `selectattr`, `rejectattr`, `sum`, `list`
-- **Number**: `abs`, `int`, `float`, `round`, `min`, `max`
-- **Dict**: `dictsort`, `items`
-- **Other**: `default`, `count`, `filesizeformat`, `groupby`, `pprint`, `random`, `safe`, `string`, `tojson`
+### Fixed
 
-#### Tests (25+)
-- **Type**: `defined`, `undefined`, `string`, `number`, `integer`, `float`, `boolean`, `mapping`, `sequence`, `iterable`, `callable`
-- **Value**: `empty`, `none`, `true`, `false`, `equalto`, `sameas`, `ne`, `lt`, `le`, `gt`, `ge`
-- **Number**: `even`, `odd`, `divisibleby`
-- **String**: `lower`, `upper`, `escaped`
-- **Other**: `in`, `filter`, `test`
+- Guarantee parser progress for stray delimiters, unknown block statements, and malformed templates instead of repeatedly visiting the same token.
+- Correct overlay and spontaneous-environment cache ownership across allocators and option sets.
+- Align AST, bytecode, optimizer, macro/caller, attribute, item, hashing, and formatting semantics.
+- Make `sort` and `dictsort` stable; correct `rejectattr`, list-producing filter ownership, recursive JSON formatting, and mixed numeric equality.
+- Remove the unused eager 4 KiB render-arena output buffer.
 
-#### Template Loaders
-- `FileSystemLoader` - Load from filesystem directories
-- `DictLoader` - Load from in-memory dictionary
-- `FunctionLoader` - Load using custom function with uptodate support
-- `PackageLoader` - Load from package/module path
-- `PrefixLoader` - Route to sub-loaders based on prefix
-- `ChoiceLoader` - Try multiple loaders in order
-- `ModuleLoader` - Load precompiled template modules
+### Performance
 
-#### Performance & Optimization
-- LRU template cache with configurable size (default: 400)
-- AST optimizer with constant folding
-- Dead code elimination
-- Output merging optimization
-- Bytecode compilation and VM
-- Arena allocators for rendering
-- Small string optimization
-- String interning pool
-- Specialized inline functions for hot paths
-
-#### Advanced Features
-- Extension system for custom tags, filters, and tests
-- Auto-reload for template changes
-- Autoescaping with `Markup` type
-- Template inheritance (`extends`/`block`/`super()`)
-- Template includes with context options
-- Template imports with namespaces
-- Undefined handling (strict, lenient, debug, chainable)
-- Comprehensive error context with template stack traces
-- Sandboxed environment for secure execution
-- Async support foundation (async rendering, filters, tests)
-- Runtime utilities (`Cycler`, `Joiner`, `Namespace`, `generateLoremIpsum`)
-- Custom object support via vtable pattern
-
-#### Bytecode Cache Backends
-- `FileSystemBytecodeCache` - Store bytecode in filesystem
-- `MemcachedBytecodeCache` - Store bytecode in Memcached
-
-#### Documentation
-- Comprehensive module-level documentation
-- Doc comments on all public APIs
-- Usage examples in documentation
-- Architecture documentation in code
-
-### Technical Details
-
-- **Zig Version**: 0.15.2+
-- **Dependencies**: None (Zig standard library only)
-- **Test Coverage**: 23 unit test files, 13 integration test files
-- **Benchmarks**: Simple template, loops, conditionals, caching, filters, nested templates
-
-### Compatibility
-
-- Full Jinja2 template syntax compatibility
-- Matches Jinja2 filter and test behavior
-- Compatible with standard Jinja2 templates
-
----
+- The 2026-07-14 Apple Silicon comparison passed all four cross-language gates: 3.93x simple-template, 6.88x loop, 24.56x conditional, and 18.05x filter-chain average speedups over Python 3.13.3 with Jinja2 3.1.6.
+- Steady-state comparison renders make one backing-allocator allocation for the returned string.
 
 ## [1.1.0] - 2026-01-15
 
 ### Added
 
-#### HuggingFace Compatibility
-- **HuggingFace chat template support** - Full compatibility with HuggingFace transformer chat templates
-- **Production template test suite** - Real-world template tests using actual HuggingFace model templates
-- **16 chat template fixtures** - Templates for popular models:
-  - Llama 3 Instruct, Llama 2 Chat
-  - ChatML, Mistral Instruct
-  - Gemma Instruct, Phi-3
-  - Qwen2 Instruct, Command-R
-  - Falcon Instruct, Vicuna
-  - Zephyr, OpenChat
-  - ChatQA, Solar Instruct
-  - Granite Instruct, Alpaca
-
-#### Slice and Globals Features
-- **Slice expressions** - Full support for Python-style slice notation (`list[start:end:step]`)
-- **Global functions** - `range()`, `lipsum()`, `dict()`, `cycler()`, `joiner()`, `namespace()`
-- **Loop utilities** - Enhanced `loop.cycle()` support
-
-#### Enhanced Filters
-- **Additional filter implementations** - Extended filter coverage for better Jinja2 compatibility
-- **Filter integration tests** - Comprehensive test suite for all filters (885+ test lines)
-
-#### Test Infrastructure
-- **Test README** - Comprehensive testing and benchmarking documentation (`test/README.md`)
-- **Reference setup guide** - Instructions for cloning Python Jinja2 for comparison testing
-- **Integration test expansion** - Control flow, set/with, and slice/globals test suites
+- Add production-oriented Hugging Face chat-template support and 16 representative model fixtures, including Llama, ChatML, Mistral, Gemma, Phi, Qwen, Command-R, Falcon, Vicuna, Zephyr, OpenChat, ChatQA, Solar, Granite, and Alpaca formats.
+- Add Python-style slice expressions and the `range`, `lipsum`, `dict`, `cycler`, `joiner`, and `namespace` globals.
+- Add broader filter integration coverage and the testing/benchmarking guide.
 
 ### Changed
 
-#### Bytecode Compiler Enhancements
-- Major bytecode compiler improvements for better template coverage
-- Enhanced instruction set for complex template patterns
-- Improved loop context handling in bytecode VM
+- Expand bytecode instructions and compiler handling for complex template patterns.
+- Improve loop-context, parser, macro, call-block, and slice handling.
 
-#### Parser Improvements
-- Extended parser support for slice expressions
-- Better handling of complex expression patterns
-- Enhanced macro and call block parsing
+### Known limitations
 
-### Fixed
+- Python-style async execution remains a foundation rather than equivalent `async`/`await` behavior.
+- Compatibility is validated by the included suites and production fixtures, not claimed for every Jinja2 extension or edge case.
 
-#### Known Issues
-- Temporarily disabled macro caller variable test pending investigation
-- Macro `caller()` variable access needs further work
+## [1.0.0] - 2025-12-29
 
-### Technical Details
+### Added
 
-- **New test files**: `huggingface_compat.zig`, `production_templates.zig`, `filters.zig` (integration)
-- **Enhanced modules**: `bytecode.zig` (+1900 lines), `compiler.zig` (+600 lines), `parser.zig` (+275 lines), `filters.zig` (+366 lines)
-- **Test coverage**: Added 16 HuggingFace template fixtures, 3 new integration test suites
+- Add core Jinja syntax: text, comments, raw blocks, expressions, loops, conditionals, macros, calls, assignments, scoped `with` blocks, filter blocks, inheritance, includes, imports, autoescape blocks, and loop-control extensions.
+- Add variables, scalar/list/dictionary literals, arithmetic, comparisons, boolean logic, membership and test operators, filters, attribute/item access, inline conditionals, and function calls.
+- Add built-in string, sequence, numeric, dictionary, escaping, formatting, selection, grouping, serialization, and utility filters.
+- Add built-in type, value, numeric, string, comparison, membership, filter, and test predicates.
+- Add filesystem, dictionary, function, package, prefix, choice, and module loaders.
+- Add template caching, AST optimization, bytecode compilation, arena-backed rendering, string interning, and buffered output utilities.
+- Add custom extension, filter, test, global, loader, undefined-behavior, sandbox, and runtime utility APIs.
+- Add filesystem and memcached bytecode-cache backends.
 
----
+### Technical baseline
 
-## [Unreleased]
-
-### Performance
-- **Reusable thread-local render arena**: `render()` no longer creates (and immediately grows) a fresh arena per call — the arena is cached per thread, reset with retained capacity (capped at 1MB) between renders, and backed by `page_allocator`. Steady-state renders make exactly one backing-allocator allocation: the returned result string. Reentrant renders fall back to a fresh arena. Result: all four render benchmarks now beat Python Jinja2 by 4.5x-31x (previously 1.4x-1.9x slower); cache-hit render dropped from ~3.4us to ~0.8us.
-- Removed `RenderArena`'s eager 4KB output-buffer preallocation (it was unused by the bytecode VM, which keeps its own result buffer).
-- Benchmark harness overhaul: `comparison_bench.zig` now uses `std.time.Timer` (the previous `nanoTimestamp` quantizes to ~1us on macOS), reports median/p95 and backing-allocator allocations per render, and compares against a live Python reference (`test/benchmarks/python_reference.json`, written by `benchmark_python.py`) instead of hardcoded stale numbers. New `zig build bench-check` step fails when any render benchmark is not faster than Python.
-
-### Planned
-- Fix macro caller variable test
-- Additional async features
-- More filter optimizations
-- Extended bytecode caching options
+- Minimum Zig version: 0.15.2.
+- Runtime dependencies: Zig standard library only.
+- License: MIT.

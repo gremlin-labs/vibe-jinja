@@ -1,366 +1,172 @@
-# Testing & Benchmarking Guide
+# Testing and benchmarking
 
-This directory contains the complete test suite and benchmarking infrastructure for vibe-jinja, a high-performance Jinja2-compatible templating engine written in Zig.
+This directory contains Vibe Jinja's unit, integration, public-API, fixture, and benchmark coverage.
 
-## Table of Contents
+## Quick start
 
-- [Quick Start](#quick-start)
-- [Test Structure](#test-structure)
-- [Running Tests](#running-tests)
-- [Benchmarking](#benchmarking)
-- [Reference Setup](#reference-setup)
-- [Writing Tests](#writing-tests)
-
----
-
-## Quick Start
-
-```bash
-# Run all tests
+```sh
 zig build test
-
-# Run benchmarks (optimized)
 zig build benchmark -Doptimize=ReleaseFast
-
-# Run comparison benchmarks vs Python Jinja2
-zig build bench-compare -Doptimize=ReleaseFast
 ```
 
----
+## Test layout
 
-## Test Structure
-
-```
+```text
 test/
-├── unit/                    # Unit tests for individual components
-│   ├── parser.zig          # Parser tests
-│   ├── compiler.zig        # Compiler tests
-│   ├── filters.zig         # Filter function tests
-│   ├── value.zig           # Value type tests
-│   ├── value_comparison.zig # Value comparison tests
-│   ├── control_flow.zig    # Control flow tests
-│   └── ...
-├── integration/             # Integration tests for complete features
-│   ├── control_flow.zig    # For loops, conditionals
-│   ├── macros.zig          # Macro definitions and calls
-│   ├── filters.zig         # Filter chain integration
-│   ├── inheritance.zig     # Template inheritance
-│   ├── includes.zig        # Template includes
-│   ├── imports.zig         # Template imports
-│   ├── huggingface_compat.zig  # HuggingFace template compatibility
-│   ├── production_templates.zig # Real-world template tests
-│   ├── templates/          # Test template fixtures
-│   │   ├── llama3-instruct.jinja
-│   │   ├── chatml.jinja
-│   │   └── ...
-│   └── fixtures/           # Additional test fixtures
-├── benchmarks/              # Performance benchmarking suite
-│   ├── benchmark.zig       # Main performance benchmarks
-│   ├── benchmark_python.py # Python Jinja2 comparison benchmarks
-│   ├── comparison_bench.zig # Head-to-head Zig vs Python comparison
-│   ├── diagnostic_bench.zig # Detailed diagnostic profiling
-│   └── aot_bench.zig       # AOT vs JIT compilation benchmarks
-├── comment_*/               # Comment parsing tests
-├── expression_*/            # Expression parsing tests
-└── plaintext/               # Plaintext output tests
+├── unit/                     component-level tests
+├── integration/              end-to-end template behavior
+├── benchmarks/               Zig and Python benchmark harnesses
+├── public_api.zig            retained package-root declarations
+├── comment_*/                source-to-output fixtures
+├── expression_*/             literal-expression fixtures
+└── plaintext/                plain-text fixture
 ```
 
----
+The current build graph registers 24 files under `test/unit/`, 17 files under `test/integration/`, the public-API test, and the source-to-output fixtures. `zig build test` is the authoritative complete test command; file counts are descriptive and may change.
 
-## Running Tests
+## Test commands
 
-### Run All Tests
-
-```bash
+```sh
+# Complete graph
 zig build test
-```
 
-### Run Unit Tests Only
-
-```bash
+# Broad groups
 zig build test:unit
-```
-
-### Run Integration Tests Only
-
-```bash
 zig build test:integration
-```
 
-### Run Specific Test Suites
+# Focused integration suites
+zig build test:control_flow
+zig build test:macros
+zig build test:set_with
+zig build test:filter_block
+zig build test:raw_blocks
+zig build test:autoescape
+zig build test:regression
+zig build test:filters
+zig build test:huggingface
+zig build test:production
+zig build test:slice
+zig build test:async
 
-```bash
-# Individual test suites
-zig build test:control_flow     # Control flow tests
-zig build test:macros           # Macro tests
-zig build test:filters          # Filter tests
-zig build test:autoescape       # Autoescape tests
-zig build test:regression       # Regression tests
-zig build test:set_with         # Set/with statement tests
-zig build test:filter_block     # Filter block tests
-zig build test:raw_blocks       # Raw block tests
-zig build test:huggingface      # HuggingFace compatibility tests
-zig build test:production       # Production template tests
-zig build test:slice            # Slice and globals tests
-zig build test:async            # Async rendering tests
-```
-
-### Test Output Verbosity
-
-For verbose test output, use the `--summary` flag:
-
-```bash
+# Show every executed/cached step
 zig build test --summary all
 ```
 
----
+The exact available step list comes from `zig build --help` and `build.zig`.
 
-## Benchmarking
+## Benchmark commands
 
-vibe-jinja includes a comprehensive benchmarking suite to measure and compare performance against Python Jinja2.
+Always use `ReleaseFast` for performance measurements:
 
-### Main Benchmark Suite
-
-```bash
-# Run all performance benchmarks (use ReleaseFast for accurate results)
+```sh
+# General engine benchmarks
 zig build benchmark -Doptimize=ReleaseFast
-```
 
-**Benchmarks include:**
-- Template rendering (simple, loop, conditional, nested)
-- Filter performance and filter chain evaluation
-- Value operations (comparison, conversion, truthiness)
-- Caching (cache hits vs misses)
-- Memory allocation patterns
-
-### Comparison Benchmark (vs Python)
-
-```bash
-# Run head-to-head comparison with Python Jinja2
-zig build bench-compare -Doptimize=ReleaseFast
-```
-
-This runs identical benchmark scenarios to `benchmark_python.py` for fair comparison:
-- Simple template: `Hello {{ name }}!`
-- Loop template: `{% for item in items %}{{ item }}{% endfor %}`
-- Conditional: `{% if condition %}True{% else %}False{% endif %}`
-- Filter chain: `{{ text|upper|lower|trim|length }}`
-
-### Python Benchmarks
-
-To run the Python reference benchmarks (requires Python 3 and Jinja2):
-
-```bash
-# Install Jinja2 if needed
-pip install jinja2
-
-# Run Python benchmarks
-python3 test/benchmarks/benchmark_python.py
-```
-
-### Diagnostic Benchmarks
-
-For detailed performance profiling to identify bottlenecks:
-
-```bash
+# Detailed scenario diagnostics
 zig build bench-diagnostic -Doptimize=ReleaseFast
-```
 
-**Diagnostic scenarios include:**
-- Empty template (baseline overhead)
-- Single variable lookup
-- Loop scaling (1, 10, 100 iterations)
-- Filter application (single and chained)
-- Nested conditionals
-- Attribute access
-- Realistic combined templates
-
-### AOT vs JIT Benchmark
-
-Compare ahead-of-time compiled templates vs runtime interpreted:
-
-```bash
+# AOT versus runtime compilation
 zig build bench-aot -Doptimize=ReleaseFast
 ```
 
----
+The general suite covers full-pipeline and precompiled rendering, loops, conditionals, nested templates, filters, value operations, caching, and allocation behavior.
 
-## Reference Setup
+## Python comparison
 
-For development and compatibility testing, you may want to clone the original Python Jinja2 repository as a reference.
+`benchmark_python.py` measures the four render scenarios shared with `comparison_bench.zig` and writes their timing metadata to `python_reference.json`. Run it before the Zig comparison so both engines are measured on the same machine under similar load.
 
-### Clone Jinja2 Reference
+With Jinja2 installed in the active Python environment:
 
-```bash
-# From the project root
-mkdir -p references
-cd references
-
-# Clone the official Jinja2 repository
-git clone https://github.com/pallets/jinja.git
-
-# Or clone a specific version for compatibility testing
-git clone --branch 3.1.x https://github.com/pallets/jinja.git jinja-3.1
+```sh
+python3 test/benchmarks/benchmark_python.py
+zig build bench-compare -Doptimize=ReleaseFast
+zig build bench-check -Doptimize=ReleaseFast
 ```
 
-### Reference Directory Structure
+In the Vibe Workspace, the canonical Jinja checkout lives at workspace-root `references/jinja`, not inside this child repository:
 
-```
-vibe-jinja/
-├── references/              # Git-ignored reference implementations
-│   └── jinja/              # Official Python Jinja2 repository
-│       ├── src/jinja2/     # Jinja2 source code
-│       ├── tests/          # Jinja2 test suite
-│       └── docs/           # Jinja2 documentation
-├── src/                     # vibe-jinja source
-└── test/                    # vibe-jinja tests
+```sh
+PYTHONPATH=../references/jinja/src python3 test/benchmarks/benchmark_python.py
+zig build bench-compare -Doptimize=ReleaseFast
+zig build bench-check -Doptimize=ReleaseFast
 ```
 
-The `references/` directory is included in `.gitignore` and won't be committed to version control.
+The steps must run sequentially because the Python command rewrites `test/benchmarks/python_reference.json`.
 
-### Using the Reference
+`bench-compare` reports averages, medians, p95 values, minimums, throughput, and backing allocations. `bench-check` additionally requires all four Python reference records and fails unless Vibe Jinja's average and median are both strictly faster for every scenario.
 
-The reference repository is useful for:
+The checked-in JSON is a reproducibility aid, not a universal performance guarantee. Refresh it when publishing benchmark claims or evaluating performance-sensitive changes.
 
-1. **Comparing behavior**: Check how Python Jinja2 handles edge cases
-2. **Template compatibility**: Validate templates against the reference implementation
-3. **Test porting**: Port test cases from Jinja2's test suite
-4. **Documentation reference**: Understand expected behavior from official docs
+## Current comparison snapshot
 
-### Running Reference Tests
+Measured on 2026-07-14 on Apple Silicon with Zig 0.15.2 ReleaseFast, Python 3.13.3, and Jinja2 3.1.6:
 
-```bash
-cd references/jinja
+| Benchmark | Python avg | Vibe Jinja avg | Speedup |
+| --- | ---: | ---: | ---: |
+| Simple template | 3,450 ns | 877 ns | 3.93x |
+| Loop template | 4,485 ns | 652 ns | 6.88x |
+| Conditional | 3,414 ns | 139 ns | 24.56x |
+| Filter chain | 4,006 ns | 222 ns | 18.05x |
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+All four scenarios passed `bench-check`, and each Vibe Jinja render made one backing-allocator allocation for its returned string.
 
-# Install dependencies
-pip install -e ".[dev]"
+## Updating benchmarks safely
 
-# Run Jinja2 tests
-pytest tests/
-```
+When changing a render hot path:
 
----
+1. Regenerate the Python reference and run `bench-compare` before the change.
+2. Record the average, median, p95, and allocation count for all four scenarios.
+3. Apply the change without altering the scenarios or iteration counts.
+4. Rerun the same commands under similar machine load.
+5. Run `bench-check` and the complete test suite.
 
-## Writing Tests
+Do not compare a new Zig run with a Python JSON file produced on another machine or by a materially different environment.
 
-### Unit Test Template
+## Adding tests
 
-Unit tests focus on individual components in isolation:
+- Put isolated parser, compiler, value, filter, cache, and environment behavior in `test/unit/`.
+- Put complete render flows and cross-component behavior in `test/integration/`.
+- Put real templates or source-to-output pairs in the relevant fixture directory.
+- Register every new Zig test root in both the appropriate grouped step and the complete `test` step in `build.zig`.
+- Prefer `std.testing.allocator` unless a test specifically exercises allocator behavior.
 
-```zig
-const std = @import("std");
-const vibe_jinja = @import("vibe_jinja");
-
-test "my feature test" {
-    const allocator = std.testing.allocator;
-    
-    var env = vibe_jinja.Environment.init(allocator);
-    defer env.deinit();
-    
-    // Your test logic here
-    const template = try env.fromString("{{ name }}", "test");
-    // ...
-    
-    try std.testing.expectEqualStrings("expected", actual);
-}
-```
-
-### Integration Test Template
-
-Integration tests verify complete template rendering:
-
-```zig
-const std = @import("std");
-const vibe_jinja = @import("vibe_jinja");
-
-test "complete rendering test" {
-    const allocator = std.testing.allocator;
-    
-    var env = vibe_jinja.Environment.init(allocator);
-    defer env.deinit();
-    
-    const source = "{% for item in items %}{{ item }}{% endfor %}";
-    
-    var rt = vibe_jinja.runtime.Runtime.init(&env, allocator);
-    defer rt.deinit();
-    
-    var vars = std.StringHashMap(vibe_jinja.context.Value).init(allocator);
-    defer vars.deinit();
-    
-    // Setup context variables
-    // ...
-    
-    const result = try rt.renderString(source, vars, "test");
-    defer allocator.free(result);
-    
-    try std.testing.expectEqualStrings("expected output", result);
-}
-```
-
-### Test Fixtures
-
-Place test templates in:
-- `test/integration/templates/` - Template files for integration tests
-- `test/integration/fixtures/` - Other test fixtures (JSON data, etc.)
-
----
-
-## Performance Results
-
-Current benchmarks show vibe-jinja achieving **performance parity with Python Jinja2**:
-
-| Benchmark | Python Jinja2 | vibe-jinja | Result |
-|-----------|---------------|------------|--------|
-| Simple Template | 3,427 ns | 3,468 ns | **PARITY** (0.99x) |
-| Loop Template | 3,800 ns | 3,580 ns | **ZIG WINS** (1.06x) |
-| Conditional | 3,211 ns | 3,767 ns | Python 1.17x faster |
-| Filter Chain | 3,771 ns | 3,810 ns | **PARITY** (0.99x) |
-| Filter Lookup | 138 ns | 14 ns | **ZIG 9.9x FASTER** |
-| Cache Hit | 8,709 ns | 3,667 ns | **ZIG 2.4x FASTER** |
-
-*Benchmarks run on Apple Silicon (arm64), Zig 0.15.2 ReleaseFast, Python 3.13*
-
----
-
-## CI Integration
-
-For continuous integration, use:
-
-```yaml
-# Example GitHub Actions workflow
-- name: Run Tests
-  run: zig build test
-
-- name: Run Benchmarks
-  run: zig build benchmark -Doptimize=ReleaseFast
-```
-
----
-
-## Troubleshooting
-
-### Tests Fail with Memory Errors
-
-Ensure proper cleanup with `defer` statements:
+Minimal render shape:
 
 ```zig
 var env = vibe_jinja.Environment.init(allocator);
-defer env.deinit();  // Always defer deinit
+defer env.deinit();
+
+const template = try env.fromString("Hello, {{ name }}!", "test");
+// With the default cache enabled, Environment owns the template.
+
+var vars = std.StringHashMap(vibe_jinja.Value).init(allocator);
+defer vars.deinit();
+try vars.put("name", .{ .string = "World" });
+
+var ctx = try vibe_jinja.context.Context.init(&env, vars, "test", allocator);
+defer ctx.deinit();
+
+var compiled = try vibe_jinja.compiler.compile(&env, template, "test", allocator);
+defer compiled.deinit();
+
+const output = try compiled.render(&ctx, allocator);
+defer allocator.free(output);
+try std.testing.expectEqualStrings("Hello, World!", output);
 ```
 
-### Benchmark Results Vary
+## CI guidance
 
-- Always use `-Doptimize=ReleaseFast` for benchmarks
-- Run multiple times and look at median/P95 values
-- Ensure system is idle during benchmarking
-- Use `doNotOptimizeAway` to prevent compiler optimizations from skipping work
+The deterministic default gate is:
 
-### Python Benchmark Comparison Differs
+```sh
+zig build test
+```
 
-- Ensure Python Jinja2 is version 3.x
-- Both benchmarks should use pre-compiled templates
-- Compare median values, not averages (reduces outlier impact)
+Run `bench-check` only on a controlled performance runner after regenerating the Python reference. Shared CI hosts are usually too noisy for a strict cross-language timing gate.
+
+## Troubleshooting
+
+- If comparison numbers look stale, inspect `_meta` in `python_reference.json` and regenerate it.
+- If `bench-check` reports missing references, rerun `benchmark_python.py` and wait for it to finish before starting Zig.
+- If timings vary, close competing workloads and compare medians and p95 values as well as averages.
+- If a new test file does not run, verify that `build.zig` adds its run artifact to the expected grouped and complete steps.
