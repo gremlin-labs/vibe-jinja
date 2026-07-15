@@ -1494,13 +1494,55 @@ pub const Compiler = struct {
             if (std.mem.eql(u8, attribute.attr, "cycle")) return try self.evaluateLoopCycle(node, frame, ctx);
             if (std.mem.eql(u8, attribute.attr, "changed")) return try self.evaluateLoopChanged(node, frame, ctx);
         }
-        if (attribute.node != .name) return null;
+        if (attribute.node == .name) {
+            if (ctx.getImportedModule(attribute.node.name.name)) |module_handle| {
+                const module = @as(*runtime_types.TemplateModule, @ptrCast(@alignCast(module_handle)));
+                if (module.getMacro(attribute.attr)) |macro_handle| {
+                    const macro = @as(*nodes.Macro, @ptrCast(@alignCast(macro_handle)));
+                    return .{ .string = try self.callMacro(macro, node.args.items, node.kwargs, frame, ctx, null) };
+                }
+            }
+        }
 
-        const module_handle = ctx.getImportedModule(attribute.node.name.name) orelse return null;
-        const module = @as(*runtime_types.TemplateModule, @ptrCast(@alignCast(module_handle)));
-        const macro_handle = module.getMacro(attribute.attr) orelse return null;
-        const macro = @as(*nodes.Macro, @ptrCast(@alignCast(macro_handle)));
-        return .{ .string = try self.callMacro(macro, node.args.items, node.kwargs, frame, ctx, null) };
+        return try self.callMethodAsFilter(node, attribute, frame, ctx);
+    }
+
+    /// Method calls on plain values behave like filter application:
+    /// 'a,b'.split(',') is 'a,b'|split(','). This mirrors the bytecode VM,
+    /// which compiles attribute calls to APPLY_FILTER. Dicts and custom
+    /// objects are excluded — they may carry real callable attributes that
+    /// the regular call path resolves.
+    fn callMethodAsFilter(self: *Self, node: *nodes.CallExpr, attribute: *nodes.Getattr, frame: *Frame, ctx: *context.Context) !?value_mod.Value {
+        const filter = self.environment.getFilter(attribute.attr) orelse return null;
+
+        var object = try self.visitExpression(&attribute.node, frame, ctx);
+        defer object.deinit(self.allocator);
+        if (object == .dict or object == .custom) return null;
+
+        var args = std.ArrayList(value_mod.Value){};
+        defer {
+            for (args.items) |*argument| argument.deinit(self.allocator);
+            args.deinit(self.allocator);
+        }
+        try args.ensureTotalCapacity(self.allocator, node.args.items.len);
+        for (node.args.items) |*argument| {
+            args.appendAssumeCapacity(try self.visitExpression(argument, frame, ctx));
+        }
+
+        var kwargs = std.StringHashMap(value_mod.Value).init(self.allocator);
+        defer {
+            var iterator = kwargs.iterator();
+            while (iterator.next()) |entry| entry.value_ptr.*.deinit(self.allocator);
+            kwargs.deinit();
+        }
+        try kwargs.ensureTotalCapacity(@intCast(node.kwargs.count()));
+        var iterator = node.kwargs.iterator();
+        while (iterator.next()) |entry| {
+            var expression = entry.value_ptr.*;
+            kwargs.putAssumeCapacity(entry.key_ptr.*, try self.visitExpression(&expression, frame, ctx));
+        }
+
+        return try filter.func(self.allocator, object, args.items, &kwargs, ctx, self.environment);
     }
 
     fn callNamedSpecial(self: *Self, name: []const u8, node: *nodes.CallExpr, frame: *Frame, ctx: *context.Context) !?value_mod.Value {

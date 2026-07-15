@@ -124,7 +124,18 @@ pub fn build(b: *std.Build) void {
         .root_module = attribute_subscript_test_module,
     });
     const run_attribute_subscript_tests = b.addRunArtifact(attribute_subscript_tests);
-    
+
+    const chat_template_regressions_test_module = b.addModule("chat_template_regressions_test", .{
+        .root_source_file = b.path("test/unit/chat_template_regressions.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    chat_template_regressions_test_module.addImport("vibe_jinja", root_module);
+    const chat_template_regressions_tests = b.addTest(.{
+        .root_module = chat_template_regressions_test_module,
+    });
+    const run_chat_template_regressions_tests = b.addRunArtifact(chat_template_regressions_tests);
+
     const binary_expressions_test_module = b.addModule("binary_expressions_test", .{
         .root_source_file = b.path("test/unit/binary_expressions.zig"),
         .target = target,
@@ -374,6 +385,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_float_literal_tests.step);
     test_step.dependOn(&run_variable_resolution_tests.step);
     test_step.dependOn(&run_attribute_subscript_tests.step);
+    test_step.dependOn(&run_chat_template_regressions_tests.step);
     test_step.dependOn(&run_binary_expressions_tests.step);
     test_step.dependOn(&run_unary_expressions_tests.step);
     test_step.dependOn(&run_comparison_expressions_tests.step);
@@ -414,6 +426,7 @@ pub fn build(b: *std.Build) void {
     unit_test_step.dependOn(&run_float_literal_tests.step);
     unit_test_step.dependOn(&run_variable_resolution_tests.step);
     unit_test_step.dependOn(&run_attribute_subscript_tests.step);
+    unit_test_step.dependOn(&run_chat_template_regressions_tests.step);
     unit_test_step.dependOn(&run_binary_expressions_tests.step);
     unit_test_step.dependOn(&run_unary_expressions_tests.step);
     unit_test_step.dependOn(&run_comparison_expressions_tests.step);

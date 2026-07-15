@@ -222,6 +222,7 @@ pub const BuiltinFilterMap = std.StaticStringMap(FilterFn).initComptime(.{
     .{ "length", BuiltinFilters.length },
     .{ "reverse", BuiltinFilters.reverse },
     .{ "replace", BuiltinFilters.replace },
+    .{ "split", BuiltinFilters.split },
     .{ "trim", BuiltinFilters.trim },
     .{ "lstrip", BuiltinFilters.lstrip },
     .{ "rstrip", BuiltinFilters.rstrip },
@@ -490,6 +491,67 @@ pub const BuiltinFilters = struct {
             result.appendSliceAssumeCapacity(new_str_val);
         }
         return Value{ .string = try result.toOwnedSlice(allocator) };
+    }
+
+    /// Split a string into a list, following Python str.split semantics:
+    /// with a separator, split on every occurrence and keep empty segments;
+    /// with no separator (or none), split on whitespace runs and drop empties.
+    /// Optional second argument is maxsplit (negative means unlimited).
+    pub fn split(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
+        _ = kwargs;
+        _ = ctx;
+        _ = env;
+
+        const str = try val.toString(allocator);
+        defer allocator.free(str);
+
+        const maxsplit: i64 = if (args.len >= 2) (args[1].toInteger() orelse -1) else -1;
+
+        const has_sep = args.len >= 1 and args[0] != .null and args[0] != .undefined;
+        if (has_sep) {
+            const sep = try args[0].toString(allocator);
+            defer allocator.free(sep);
+
+            if (sep.len == 0) return exceptions.TemplateError.TypeError;
+
+            const result_list = try createList(allocator, std.mem.count(u8, str, sep) + 1);
+            errdefer {
+                result_list.deinit(allocator);
+                allocator.destroy(result_list);
+            }
+
+            var splits: i64 = 0;
+            var start: usize = 0;
+            while (std.mem.indexOfPos(u8, str, start, sep)) |idx| {
+                if (maxsplit >= 0 and splits >= maxsplit) break;
+                try result_list.items.append(allocator, Value{ .string = try allocator.dupe(u8, str[start..idx]) });
+                start = idx + sep.len;
+                splits += 1;
+            }
+            try result_list.items.append(allocator, Value{ .string = try allocator.dupe(u8, str[start..]) });
+            return Value{ .list = result_list };
+        }
+
+        // No separator: split on runs of whitespace, dropping empty segments
+        const result_list = try createList(allocator, 0);
+        errdefer {
+            result_list.deinit(allocator);
+            allocator.destroy(result_list);
+        }
+
+        var splits: i64 = 0;
+        var iter = std.mem.tokenizeAny(u8, str, " \t\n\r");
+        while (iter.next()) |token| {
+            if (maxsplit >= 0 and splits >= maxsplit) {
+                const rest = std.mem.trimLeft(u8, str[iter.index - token.len ..], " \t\n\r");
+                const trimmed = std.mem.trimRight(u8, rest, " \t\n\r");
+                try result_list.items.append(allocator, Value{ .string = try allocator.dupe(u8, trimmed) });
+                break;
+            }
+            try result_list.items.append(allocator, Value{ .string = try allocator.dupe(u8, token) });
+            splits += 1;
+        }
+        return Value{ .list = result_list };
     }
 
     /// Strip whitespace from both ends

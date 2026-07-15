@@ -1,27 +1,27 @@
 {
   "_meta": {
-    "generated_at": "2026-07-03T17:45:54+00:00",
+    "generated_at": "2026-07-15T01:27:42+00:00",
     "machine": "arm64",
     "python": "3.13.3"
   },
   "conditional": {
-    "avg_ns": 3109,
-    "median_ns": 3084,
-    "min_ns": 2958
+    "avg_ns": 3414,
+    "median_ns": 3334,
+    "min_ns": 3208
   },
   "filter_chain": {
-    "avg_ns": 3514,
-    "median_ns": 3500,
-    "min_ns": 3292
+    "avg_ns": 4006,
+    "median_ns": 3709,
+    "min_ns": 3458
   },
   "loop_template": {
-    "avg_ns": 3766,
-    "median_ns": 3750,
-    "min_ns": 3625
+    "avg_ns": 4485,
+    "median_ns": 4042,
+    "min_ns": 3875
   },
   "simple_template": {
-    "avg_ns": 3335,
-    "median_ns": 3333,
-    "min_ns": 3083
+    "avg_ns": 3450,
+    "median_ns": 3417,
+    "min_ns": 3250
   }
 }

@@ -62,6 +62,8 @@ pub const Parser = struct {
 
         // Parse all statements until EOF
         while (self.stream.hasNext()) {
+            const cursor_before = self.stream.cursor;
+
             // Try to parse statement with error recovery
             if (self.parseStatement()) |stmt_opt| {
                 if (stmt_opt) |stmt| {
@@ -75,6 +77,13 @@ pub const Parser = struct {
                     },
                     else => return err,
                 }
+            }
+
+            // Guarantee forward progress: if neither the statement parse nor
+            // error recovery consumed anything, drop one token instead of
+            // spinning on it forever
+            if (self.stream.cursor == cursor_before and self.stream.hasNext()) {
+                _ = self.stream.next();
             }
 
             // Check if we're at EOF
@@ -111,6 +120,29 @@ pub const Parser = struct {
         }
     }
 
+    /// Skip the remainder of a block statement, up to and including its BLOCK_END
+    /// Stops early (without consuming) at the start of another statement or EOF
+    fn skipToBlockEnd(self: *Self) void {
+        while (self.stream.hasNext()) {
+            const token = self.stream.current() orelse return;
+
+            if (token.kind == .BLOCK_END) {
+                _ = self.stream.next();
+                return;
+            }
+
+            if (token.kind == .BLOCK_BEGIN or
+                token.kind == .VARIABLE_BEGIN or
+                token.kind == .COMMENT_BEGIN or
+                token.kind == .EOF)
+            {
+                return;
+            }
+
+            _ = self.stream.next();
+        }
+    }
+
     /// Parse a statement
     /// Returns null on EOF or when no statement can be parsed
     /// Returns error on syntax errors (caller should use error recovery)
@@ -123,6 +155,16 @@ pub const Parser = struct {
         }
 
         const token = self.stream.current() orelse return null;
+
+        // Stray closing delimiters can never start a statement; consume them so
+        // callers looping on parseStatement always make forward progress
+        // (parsePlainText stops at them without consuming, which would spin forever)
+        if (token.kind == .BLOCK_END or token.kind == .VARIABLE_END or
+            token.kind == .COMMENT_END or token.kind == .RAW_END)
+        {
+            _ = self.stream.next();
+            return null;
+        }
 
         // Check for line comment
         if (token.kind == .LINECOMMENT) {
@@ -253,10 +295,17 @@ pub const Parser = struct {
                         }
                     }
 
-                    // Unknown block statement
+                    // Unknown block statement — skip the whole {% ... %} block so
+                    // the caller's parse loop makes forward progress
+                    self.skipToBlockEnd();
                     return null;
                 }
             }
+
+            // Orphaned or unrecognized block tag (e.g. a stray {% endif %} left
+            // behind by error recovery) — skip it rather than spinning on it
+            self.skipToBlockEnd();
+            return null;
         }
 
         // Check for variable output
@@ -681,6 +730,16 @@ pub const Parser = struct {
         _ = self.stream.next();
         self.skipWhitespace();
 
+        // Negated test: x is not none / x is not defined
+        var negated = false;
+        if (self.stream.current()) |maybe_not| {
+            if (maybe_not.kind == .NOT) {
+                negated = true;
+                _ = self.stream.next();
+                self.skipWhitespace();
+            }
+        }
+
         const name = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
         if (name.kind != .NAME and name.kind != .IN) return exceptions.TemplateError.SyntaxError;
         _ = self.stream.next();
@@ -704,7 +763,9 @@ pub const Parser = struct {
         };
         test_expression.args = args;
         args = std.ArrayList(nodes.Expression){};
-        return .{ .test_expr = test_expression };
+        const test_expr = nodes.Expression{ .test_expr = test_expression };
+        if (negated) return try self.negateExpression(test_expr, is_token);
+        return test_expr;
     }
 
     /// Parse comparison expression
@@ -914,75 +975,37 @@ pub const Parser = struct {
 
         const token = self.stream.current() orelse return null;
 
-        // Parse literals
-        if (token.kind == .STRING) {
-            return try self.parseStringLiteral();
-        }
+        // Parse the base expression, then apply postfix trailers
+        // (.attr, [index], (args)) uniformly — trailers are valid after
+        // names, literals, and parenthesized expressions alike
+        const base: ?nodes.Expression = switch (token.kind) {
+            .STRING => try self.parseStringLiteral(),
+            .INTEGER => try self.parseIntegerLiteral(),
+            .FLOAT => try self.parseFloatLiteral(),
+            .BOOLEAN => try self.parseBooleanLiteral(),
+            .NULL => try self.parseNullLiteral(),
+            .LBRACKET => try self.parseListLiteral(),
+            .NAME => try self.parseName(),
+            .LPAREN => blk: {
+                _ = self.stream.next();
+                self.skipWhitespace();
+                const expr_opt = try self.parseExpression();
+                const expr = expr_opt orelse return exceptions.TemplateError.SyntaxError;
+                self.skipWhitespace();
 
-        if (token.kind == .INTEGER) {
-            return try self.parseIntegerLiteral();
-        }
-
-        if (token.kind == .FLOAT) {
-            return try self.parseFloatLiteral();
-        }
-
-        if (token.kind == .BOOLEAN) {
-            return try self.parseBooleanLiteral();
-        }
-
-        if (token.kind == .NULL) {
-            return try self.parseNullLiteral();
-        }
-
-        // Parse list literal [a, b, c]
-        if (token.kind == .LBRACKET) {
-            return try self.parseListLiteral();
-        }
-
-        // Parse name (variable reference) - may be followed by function call
-        if (token.kind == .NAME) {
-            const name_expr = try self.parseName();
-            // Check if this is a function call (name followed by LPAREN)
-            self.skipWhitespace();
-            const next_token = self.stream.current();
-            if (next_token) |nt| {
-                if (nt.kind == .LPAREN) {
-                    // Parse function call
-                    if (name_expr) |expr| {
-                        return try self.parseCallExpr(expr);
-                    }
+                const end_token = self.stream.current();
+                if (end_token == null or end_token.?.kind != .RPAREN) {
+                    return exceptions.TemplateError.SyntaxError;
                 }
-            }
-            return name_expr orelse return null;
+                _ = self.stream.next();
+                break :blk expr;
+            },
+            else => null,
+        };
+
+        if (base) |b| {
+            return try self.parsePostfix(b);
         }
-
-        // Parse parenthesized expression
-        if (token.kind == .LPAREN) {
-            _ = self.stream.next();
-            self.skipWhitespace();
-            const expr_opt = try self.parseExpression();
-            const expr = expr_opt orelse return exceptions.TemplateError.SyntaxError;
-            self.skipWhitespace();
-
-            const end_token = self.stream.current();
-            if (end_token == null or end_token.?.kind != .RPAREN) {
-                return exceptions.TemplateError.SyntaxError;
-            }
-            _ = self.stream.next();
-
-            // Check if this is a function call (parenthesized expr followed by LPAREN)
-            self.skipWhitespace();
-            const next_token = self.stream.current();
-            if (next_token) |nt| {
-                if (nt.kind == .LPAREN) {
-                    // Parse function call
-                    return try self.parseCallExpr(expr);
-                }
-            }
-            return expr;
-        }
-
         return null;
     }
 
@@ -1433,8 +1456,6 @@ pub const Parser = struct {
     }
 
     /// Parse name (variable reference)
-    /// Parse name expression, including attribute and subscript access
-    /// Handles: name, name.attr, name[index], name.attr[index], etc.
     fn parseName(self: *Self) (exceptions.TemplateError || std.mem.Allocator.Error)!?nodes.Expression {
         const token = self.stream.current() orelse return null;
 
@@ -1444,19 +1465,29 @@ pub const Parser = struct {
 
         _ = self.stream.next();
 
-        // Create initial name node
         const name_node = try self.allocator.create(nodes.Name);
         name_node.* = try nodes.Name.init(self.allocator, token.value, .load, token.lineno, token.filename);
 
-        var current_expr: nodes.Expression = nodes.Expression{ .name = name_node };
+        return nodes.Expression{ .name = name_node };
+    }
 
-        // Parse attribute access (.attr) and subscript access ([index])
+    /// Parse postfix trailers after any primary expression
+    /// Handles chains of attribute access (.attr), subscript/slice ([i], [a:b]),
+    /// and calls ((args)) on any base: names, literals, and call results alike,
+    /// e.g. 'a b'.split(' ')[-1] or [1,2][0]
+    fn parsePostfix(self: *Self, base: nodes.Expression) (exceptions.TemplateError || std.mem.Allocator.Error)!nodes.Expression {
+        var current_expr: nodes.Expression = base;
+
         while (self.stream.hasNext()) {
             self.skipWhitespace();
             const next_token = self.stream.current() orelse break;
 
+            // Call: (args)
+            if (next_token.kind == .LPAREN) {
+                current_expr = try self.parseCallExpr(current_expr);
+            }
             // Attribute access: .attr
-            if (next_token.kind == .DOT) {
+            else if (next_token.kind == .DOT) {
                 _ = self.stream.next();
                 self.skipWhitespace();
 
@@ -1512,7 +1543,7 @@ pub const Parser = struct {
                     }
                 }
             } else {
-                // Not an attribute or subscript access, stop parsing
+                // Not a call, attribute, or subscript access, stop parsing
                 break;
             }
         }
