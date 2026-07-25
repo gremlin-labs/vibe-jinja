@@ -578,270 +578,290 @@ pub const BytecodeVM = struct {
         }
     }
 
+    inline fn executeFilterUpper(self: *Self) anyerror!void {
+        const val = self.stack.pop() orelse Value{ .null = {} };
+        const str = val.toString(self.allocator) catch {
+            val.deinit(self.allocator);
+            try self.stack.append(self.allocator, Value{ .string = try self.allocator.dupe(u8, "") });
+            return;
+        };
+        val.deinit(self.allocator);
+
+        // Fast path: check if already uppercase
+        var needs_change = false;
+        for (str) |c| {
+            if (std.ascii.isLower(c)) {
+                needs_change = true;
+                break;
+            }
+        }
+        if (!needs_change) {
+            try self.stack.append(self.allocator, Value{ .string = str });
+            return;
+        }
+
+        // Convert to uppercase in place; toString returned an owned buffer.
+        const result = @constCast(str);
+        for (result) |*c| {
+            c.* = std.ascii.toUpper(c.*);
+        }
+        try self.stack.append(self.allocator, Value{ .string = result });
+    }
+
+    inline fn executeFilterLower(self: *Self) anyerror!void {
+        const val = self.stack.pop() orelse Value{ .null = {} };
+        const str = val.toString(self.allocator) catch {
+            val.deinit(self.allocator);
+            try self.stack.append(self.allocator, Value{ .string = try self.allocator.dupe(u8, "") });
+            return;
+        };
+        val.deinit(self.allocator);
+
+        // Fast path: check if already lowercase
+        var needs_change = false;
+        for (str) |c| {
+            if (std.ascii.isUpper(c)) {
+                needs_change = true;
+                break;
+            }
+        }
+        if (!needs_change) {
+            try self.stack.append(self.allocator, Value{ .string = str });
+            return;
+        }
+
+        // Convert to lowercase in place; toString returned an owned buffer.
+        const result = @constCast(str);
+        for (result) |*c| {
+            c.* = std.ascii.toLower(c.*);
+        }
+        try self.stack.append(self.allocator, Value{ .string = result });
+    }
+
+    inline fn executeFilterEscape(self: *Self) anyerror!void {
+        const val = self.stack.pop() orelse Value{ .null = {} };
+        const str = val.toString(self.allocator) catch {
+            val.deinit(self.allocator);
+            try self.stack.append(self.allocator, Value{ .string = try self.allocator.dupe(u8, "") });
+            return;
+        };
+        val.deinit(self.allocator);
+
+        // Fast path: check if any escaping needed
+        var needs_escape = false;
+        for (str) |c| {
+            if (c == '&' or c == '<' or c == '>' or c == '"' or c == '\'') {
+                needs_escape = true;
+                break;
+            }
+        }
+        if (!needs_escape) {
+            try self.stack.append(self.allocator, Value{ .string = str });
+            return;
+        }
+
+        // Slow path: actual escaping
+        var result = try std.ArrayList(u8).initCapacity(self.allocator, str.len + str.len / 2);
+        for (str) |c| {
+            switch (c) {
+                '&' => try result.appendSlice(self.allocator, "&amp;"),
+                '<' => try result.appendSlice(self.allocator, "&lt;"),
+                '>' => try result.appendSlice(self.allocator, "&gt;"),
+                '"' => try result.appendSlice(self.allocator, "&quot;"),
+                '\'' => try result.appendSlice(self.allocator, "&#x27;"),
+                else => try result.append(self.allocator, c),
+            }
+        }
+        self.allocator.free(str);
+        try self.stack.append(self.allocator, Value{ .string = try result.toOwnedSlice(self.allocator) });
+    }
+
+    inline fn executeFilterLength(self: *Self) anyerror!void {
+        const val = self.stack.pop() orelse Value{ .null = {} };
+        const len: i64 = switch (val) {
+            .string => |s| @intCast(s.len),
+            .list => |l| @intCast(l.items.items.len),
+            .dict => |d| @intCast(d.map.count()),
+            else => 0,
+        };
+        val.deinit(self.allocator);
+        try self.stack.append(self.allocator, Value{ .integer = len });
+    }
+
+    inline fn executeFilterDefault(self: *Self, operand: u32) anyerror!void {
+        // Phase 6: Optimized default filter with pre-compiled default value
+        // Operand encoding:
+        //   bits 16-17: type (1=string, 2=int, 3=bool)
+        //   bits 0-15: value (string index, int value, or bool 0/1)
+        const val = self.stack.pop() orelse Value{ .null = {} };
+
+        // Fast inline truthiness check - avoid function call overhead
+        const is_truthy = switch (val) {
+            .null => false,
+            .undefined => false,
+            .boolean => |b| b,
+            .integer => |i| i != 0,
+            .float => |f| f != 0.0,
+            .string => |s| s.len > 0,
+            .list => |l| l.items.items.len > 0,
+            .dict => |d| d.map.count() > 0,
+            else => true,
+        };
+
+        if (is_truthy) {
+            // Value is truthy - return it as-is (already on stack conceptually)
+            try self.stack.append(self.allocator, val);
+        } else {
+            // Value is falsy - use pre-compiled default
+            val.deinit(self.allocator);
+
+            const value_type = (operand >> 16) & 0x3;
+            const value_data = operand & 0xFFFF;
+
+            const default_val: Value = switch (value_type) {
+                1 => blk: {
+                    // String default
+                    const default_str = self.bytecode.strings.items[@as(usize, @intCast(value_data))];
+                    break :blk Value{ .string = try self.allocator.dupe(u8, default_str) };
+                },
+                2 => blk: {
+                    // Integer default
+                    break :blk Value{ .integer = @as(i64, @intCast(value_data)) };
+                },
+                3 => blk: {
+                    // Boolean default
+                    break :blk Value{ .boolean = value_data != 0 };
+                },
+                else => blk: {
+                    // Fallback - empty string
+                    break :blk Value{ .string = try self.allocator.dupe(u8, "") };
+                },
+            };
+            try self.stack.append(self.allocator, default_val);
+        }
+    }
+
     inline fn executeFastFilterOne(self: *Self, instr: Instruction) anyerror!void {
         switch (instr.opcode) {
-            .FILTER_UPPER => {
-                const val = self.stack.pop() orelse Value{ .null = {} };
-                const str = val.toString(self.allocator) catch {
-                    val.deinit(self.allocator);
-                    try self.stack.append(self.allocator, Value{ .string = try self.allocator.dupe(u8, "") });
-                    return;
-                };
-                val.deinit(self.allocator);
-
-                // Fast path: check if already uppercase
-                var needs_change = false;
-                for (str) |c| {
-                    if (std.ascii.isLower(c)) {
-                        needs_change = true;
-                        break;
-                    }
-                }
-                if (!needs_change) {
-                    try self.stack.append(self.allocator, Value{ .string = str });
-                    return;
-                }
-
-                // Convert to uppercase in place; toString returned an owned buffer.
-                const result = @constCast(str);
-                for (result) |*c| {
-                    c.* = std.ascii.toUpper(c.*);
-                }
-                try self.stack.append(self.allocator, Value{ .string = result });
-            },
-            .FILTER_LOWER => {
-                const val = self.stack.pop() orelse Value{ .null = {} };
-                const str = val.toString(self.allocator) catch {
-                    val.deinit(self.allocator);
-                    try self.stack.append(self.allocator, Value{ .string = try self.allocator.dupe(u8, "") });
-                    return;
-                };
-                val.deinit(self.allocator);
-
-                // Fast path: check if already lowercase
-                var needs_change = false;
-                for (str) |c| {
-                    if (std.ascii.isUpper(c)) {
-                        needs_change = true;
-                        break;
-                    }
-                }
-                if (!needs_change) {
-                    try self.stack.append(self.allocator, Value{ .string = str });
-                    return;
-                }
-
-                // Convert to lowercase in place; toString returned an owned buffer.
-                const result = @constCast(str);
-                for (result) |*c| {
-                    c.* = std.ascii.toLower(c.*);
-                }
-                try self.stack.append(self.allocator, Value{ .string = result });
-            },
-            .FILTER_ESCAPE => {
-                const val = self.stack.pop() orelse Value{ .null = {} };
-                const str = val.toString(self.allocator) catch {
-                    val.deinit(self.allocator);
-                    try self.stack.append(self.allocator, Value{ .string = try self.allocator.dupe(u8, "") });
-                    return;
-                };
-                val.deinit(self.allocator);
-
-                // Fast path: check if any escaping needed
-                var needs_escape = false;
-                for (str) |c| {
-                    if (c == '&' or c == '<' or c == '>' or c == '"' or c == '\'') {
-                        needs_escape = true;
-                        break;
-                    }
-                }
-                if (!needs_escape) {
-                    try self.stack.append(self.allocator, Value{ .string = str });
-                    return;
-                }
-
-                // Slow path: actual escaping
-                var result = try std.ArrayList(u8).initCapacity(self.allocator, str.len + str.len / 2);
-                for (str) |c| {
-                    switch (c) {
-                        '&' => try result.appendSlice(self.allocator, "&amp;"),
-                        '<' => try result.appendSlice(self.allocator, "&lt;"),
-                        '>' => try result.appendSlice(self.allocator, "&gt;"),
-                        '"' => try result.appendSlice(self.allocator, "&quot;"),
-                        '\'' => try result.appendSlice(self.allocator, "&#x27;"),
-                        else => try result.append(self.allocator, c),
-                    }
-                }
-                self.allocator.free(str);
-                try self.stack.append(self.allocator, Value{ .string = try result.toOwnedSlice(self.allocator) });
-            },
-            .FILTER_LENGTH => {
-                const val = self.stack.pop() orelse Value{ .null = {} };
-                const len: i64 = switch (val) {
-                    .string => |s| @intCast(s.len),
-                    .list => |l| @intCast(l.items.items.len),
-                    .dict => |d| @intCast(d.map.count()),
-                    else => 0,
-                };
-                val.deinit(self.allocator);
-                try self.stack.append(self.allocator, Value{ .integer = len });
-            },
-            .FILTER_DEFAULT => {
-                // Phase 6: Optimized default filter with pre-compiled default value
-                // Operand encoding:
-                //   bits 16-17: type (1=string, 2=int, 3=bool)
-                //   bits 0-15: value (string index, int value, or bool 0/1)
-                const val = self.stack.pop() orelse Value{ .null = {} };
-
-                // Fast inline truthiness check - avoid function call overhead
-                const is_truthy = switch (val) {
-                    .null => false,
-                    .undefined => false,
-                    .boolean => |b| b,
-                    .integer => |i| i != 0,
-                    .float => |f| f != 0.0,
-                    .string => |s| s.len > 0,
-                    .list => |l| l.items.items.len > 0,
-                    .dict => |d| d.map.count() > 0,
-                    else => true,
-                };
-
-                if (is_truthy) {
-                    // Value is truthy - return it as-is (already on stack conceptually)
-                    try self.stack.append(self.allocator, val);
-                } else {
-                    // Value is falsy - use pre-compiled default
-                    val.deinit(self.allocator);
-
-                    const value_type = (instr.operand >> 16) & 0x3;
-                    const value_data = instr.operand & 0xFFFF;
-
-                    const default_val: Value = switch (value_type) {
-                        1 => blk: {
-                            // String default
-                            const default_str = self.bytecode.strings.items[@as(usize, @intCast(value_data))];
-                            break :blk Value{ .string = try self.allocator.dupe(u8, default_str) };
-                        },
-                        2 => blk: {
-                            // Integer default
-                            break :blk Value{ .integer = @as(i64, @intCast(value_data)) };
-                        },
-                        3 => blk: {
-                            // Boolean default
-                            break :blk Value{ .boolean = value_data != 0 };
-                        },
-                        else => blk: {
-                            // Fallback - empty string
-                            break :blk Value{ .string = try self.allocator.dupe(u8, "") };
-                        },
-                    };
-                    try self.stack.append(self.allocator, default_val);
-                }
-            },
+            .FILTER_UPPER => try self.executeFilterUpper(),
+            .FILTER_LOWER => try self.executeFilterLower(),
+            .FILTER_ESCAPE => try self.executeFilterEscape(),
+            .FILTER_LENGTH => try self.executeFilterLength(),
+            .FILTER_DEFAULT => try self.executeFilterDefault(instr.operand),
             else => unreachable,
         }
     }
 
-    inline fn executeFastFilterTwo(self: *Self, instr: Instruction) anyerror!void {
-        switch (instr.opcode) {
-            .FILTER_TRIM => {
-                const val = self.stack.pop() orelse Value{ .null = {} };
-                const str = val.toString(self.allocator) catch {
+    inline fn executeFilterTrim(self: *Self) anyerror!void {
+        const val = self.stack.pop() orelse Value{ .null = {} };
+        const str = val.toString(self.allocator) catch {
+            val.deinit(self.allocator);
+            try self.stack.append(self.allocator, Value{ .string = try self.allocator.dupe(u8, "") });
+            return;
+        };
+        val.deinit(self.allocator);
+
+        // Trim whitespace (returns slice into original string)
+        const trimmed = std.mem.trim(u8, str, " \t\n\r");
+
+        // If same length, no trimming needed - return original
+        if (trimmed.len == str.len) {
+            try self.stack.append(self.allocator, Value{ .string = str });
+        } else {
+            // Allocate trimmed copy, free original
+            const result = try self.allocator.dupe(u8, trimmed);
+            self.allocator.free(str);
+            try self.stack.append(self.allocator, Value{ .string = result });
+        }
+    }
+
+    inline fn executeFilterFirst(self: *Self) anyerror!void {
+        const val = self.stack.pop() orelse Value{ .null = {} };
+        switch (val) {
+            .list => |l| {
+                if (l.items.items.len > 0) {
+                    const first = try l.items.items[0].deepCopy(self.allocator);
+                    val.deinit(self.allocator);
+                    try self.stack.append(self.allocator, first);
+                } else {
+                    val.deinit(self.allocator);
+                    try self.stack.append(self.allocator, Value{ .null = {} });
+                }
+            },
+            .string => |s| {
+                if (s.len > 0) {
+                    const first_char = try self.allocator.dupe(u8, s[0..1]);
+                    val.deinit(self.allocator);
+                    try self.stack.append(self.allocator, Value{ .string = first_char });
+                } else {
                     val.deinit(self.allocator);
                     try self.stack.append(self.allocator, Value{ .string = try self.allocator.dupe(u8, "") });
-                    return;
-                };
+                }
+            },
+            else => {
                 val.deinit(self.allocator);
+                try self.stack.append(self.allocator, Value{ .null = {} });
+            },
+        }
+    }
 
-                // Trim whitespace (returns slice into original string)
-                const trimmed = std.mem.trim(u8, str, " \t\n\r");
-
-                // If same length, no trimming needed - return original
-                if (trimmed.len == str.len) {
-                    try self.stack.append(self.allocator, Value{ .string = str });
+    inline fn executeFilterLast(self: *Self) anyerror!void {
+        const val = self.stack.pop() orelse Value{ .null = {} };
+        switch (val) {
+            .list => |l| {
+                if (l.items.items.len > 0) {
+                    const last = try l.items.items[l.items.items.len - 1].deepCopy(self.allocator);
+                    val.deinit(self.allocator);
+                    try self.stack.append(self.allocator, last);
                 } else {
-                    // Allocate trimmed copy, free original
-                    const result = try self.allocator.dupe(u8, trimmed);
-                    self.allocator.free(str);
-                    try self.stack.append(self.allocator, Value{ .string = result });
+                    val.deinit(self.allocator);
+                    try self.stack.append(self.allocator, Value{ .null = {} });
                 }
             },
-            .FILTER_FIRST => {
-                const val = self.stack.pop() orelse Value{ .null = {} };
-                switch (val) {
-                    .list => |l| {
-                        if (l.items.items.len > 0) {
-                            const first = try l.items.items[0].deepCopy(self.allocator);
-                            val.deinit(self.allocator);
-                            try self.stack.append(self.allocator, first);
-                        } else {
-                            val.deinit(self.allocator);
-                            try self.stack.append(self.allocator, Value{ .null = {} });
-                        }
-                    },
-                    .string => |s| {
-                        if (s.len > 0) {
-                            const first_char = try self.allocator.dupe(u8, s[0..1]);
-                            val.deinit(self.allocator);
-                            try self.stack.append(self.allocator, Value{ .string = first_char });
-                        } else {
-                            val.deinit(self.allocator);
-                            try self.stack.append(self.allocator, Value{ .string = try self.allocator.dupe(u8, "") });
-                        }
-                    },
-                    else => {
-                        val.deinit(self.allocator);
-                        try self.stack.append(self.allocator, Value{ .null = {} });
-                    },
+            .string => |s| {
+                if (s.len > 0) {
+                    const last_char = try self.allocator.dupe(u8, s[s.len - 1 ..]);
+                    val.deinit(self.allocator);
+                    try self.stack.append(self.allocator, Value{ .string = last_char });
+                } else {
+                    val.deinit(self.allocator);
+                    try self.stack.append(self.allocator, Value{ .string = try self.allocator.dupe(u8, "") });
                 }
             },
-            .FILTER_LAST => {
-                const val = self.stack.pop() orelse Value{ .null = {} };
-                switch (val) {
-                    .list => |l| {
-                        if (l.items.items.len > 0) {
-                            const last = try l.items.items[l.items.items.len - 1].deepCopy(self.allocator);
-                            val.deinit(self.allocator);
-                            try self.stack.append(self.allocator, last);
-                        } else {
-                            val.deinit(self.allocator);
-                            try self.stack.append(self.allocator, Value{ .null = {} });
-                        }
-                    },
-                    .string => |s| {
-                        if (s.len > 0) {
-                            const last_char = try self.allocator.dupe(u8, s[s.len - 1 ..]);
-                            val.deinit(self.allocator);
-                            try self.stack.append(self.allocator, Value{ .string = last_char });
-                        } else {
-                            val.deinit(self.allocator);
-                            try self.stack.append(self.allocator, Value{ .string = try self.allocator.dupe(u8, "") });
-                        }
-                    },
-                    else => {
-                        val.deinit(self.allocator);
-                        try self.stack.append(self.allocator, Value{ .null = {} });
-                    },
-                }
-            },
-            .FILTER_STRING => {
-                const val = self.stack.pop() orelse Value{ .null = {} };
-                const str = val.toString(self.allocator) catch try self.allocator.dupe(u8, "");
+            else => {
                 val.deinit(self.allocator);
-                try self.stack.append(self.allocator, Value{ .string = str });
+                try self.stack.append(self.allocator, Value{ .null = {} });
             },
-            .FILTER_INT => {
-                const val = self.stack.pop() orelse Value{ .null = {} };
-                const int_val: i64 = switch (val) {
-                    .integer => |i| i,
-                    .float => |f| @intFromFloat(f),
-                    .string => |s| std.fmt.parseInt(i64, s, 10) catch 0,
-                    .boolean => |b| if (b) @as(i64, 1) else 0,
-                    else => 0,
-                };
-                val.deinit(self.allocator);
-                try self.stack.append(self.allocator, Value{ .integer = int_val });
-            },
+        }
+    }
+
+    inline fn executeFilterString(self: *Self) anyerror!void {
+        const val = self.stack.pop() orelse Value{ .null = {} };
+        const str = val.toString(self.allocator) catch try self.allocator.dupe(u8, "");
+        val.deinit(self.allocator);
+        try self.stack.append(self.allocator, Value{ .string = str });
+    }
+
+    inline fn executeFilterInt(self: *Self) anyerror!void {
+        const val = self.stack.pop() orelse Value{ .null = {} };
+        const int_val: i64 = switch (val) {
+            .integer => |i| i,
+            .float => |f| @intFromFloat(f),
+            .string => |s| std.fmt.parseInt(i64, s, 10) catch 0,
+            .boolean => |b| if (b) @as(i64, 1) else 0,
+            else => 0,
+        };
+        val.deinit(self.allocator);
+        try self.stack.append(self.allocator, Value{ .integer = int_val });
+    }
+
+    inline fn executeFastFilterTwo(self: *Self, instr: Instruction) anyerror!void {
+        switch (instr.opcode) {
+            .FILTER_TRIM => try self.executeFilterTrim(),
+            .FILTER_FIRST => try self.executeFilterFirst(),
+            .FILTER_LAST => try self.executeFilterLast(),
+            .FILTER_STRING => try self.executeFilterString(),
+            .FILTER_INT => try self.executeFilterInt(),
             else => unreachable,
         }
     }
