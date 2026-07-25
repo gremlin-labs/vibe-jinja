@@ -459,7 +459,6 @@ pub const BytecodeGenerator = struct {
             .list_literal,
             .nsref,
             .slice,
-            .concat,
             .environment_attribute,
             .extension_attribute,
             .imported_name,
@@ -467,6 +466,7 @@ pub const BytecodeGenerator = struct {
             .context_reference,
             .derived_context_reference,
             => self.generateScalarExpression(expr),
+            .concat => |concat| self.generateConcat(concat),
             .bin_expr, .unary_expr => self.generateOperatorExpression(expr),
             .getattr, .getitem => self.generateAccessExpression(expr),
             .filter, .test_expr => self.generateFilterExpression(expr),
@@ -508,7 +508,7 @@ pub const BytecodeGenerator = struct {
                 try self.bytecode.addInstruction(.BUILD_LIST, @as(u32, @intCast(list.elements.items.len)));
             },
             // These expression types are handled specially or not yet implemented in bytecode
-            .nsref, .slice, .concat, .environment_attribute, .extension_attribute, .imported_name, .internal_name, .context_reference, .derived_context_reference => {
+            .nsref, .slice, .environment_attribute, .extension_attribute, .imported_name, .internal_name, .context_reference, .derived_context_reference => {
                 // Not yet implemented in bytecode - these require special handling
                 // For now, push undefined
                 try self.bytecode.addInstruction(.LOAD_NULL, 0);
@@ -517,9 +517,23 @@ pub const BytecodeGenerator = struct {
         }
     }
 
+    fn generateConcat(self: *Self, concat: *nodes.Concat) std.mem.Allocator.Error!void {
+        if (concat.nodes.items.len == 0) {
+            const string_index = try self.bytecode.addString("");
+            return self.bytecode.addInstruction(.LOAD_STRING, string_index);
+        }
+
+        for (concat.nodes.items, 0..) |expression, index| {
+            try self.generateExpression(expression);
+            try self.bytecode.addInstruction(.FILTER_STRING, 0);
+            if (index > 0) try self.bytecode.addInstruction(.BIN_OP, @intFromEnum(semantics.BinaryOp.add));
+        }
+    }
+
     fn generateOperatorExpression(self: *Self, expr: nodes.Expression) std.mem.Allocator.Error!void {
         switch (expr) {
             .bin_expr => |bin| {
+                if (bin.op == .AND or bin.op == .OR) return self.generateShortCircuitBoolean(bin);
                 // Generate left operand
                 try self.generateExpression(bin.left);
                 // Generate right operand
@@ -537,6 +551,26 @@ pub const BytecodeGenerator = struct {
             },
             else => unreachable,
         }
+    }
+
+    fn generateShortCircuitBoolean(self: *Self, bin: *nodes.BinExpr) std.mem.Allocator.Error!void {
+        try self.generateExpression(bin.left);
+        const short_circuit_jump = self.bytecode.getCurrentIndex();
+        try self.bytecode.addInstruction(if (bin.op == .AND) .JUMP_IF_FALSE else .JUMP_IF_TRUE, 0);
+
+        try self.generateExpression(bin.right);
+        // Normalize the selected right operand to the boolean contract used by
+        // the shared AST semantics.
+        try self.bytecode.addInstruction(.UNARY_OP, 2);
+        try self.bytecode.addInstruction(.UNARY_OP, 2);
+        const end_jump = self.bytecode.getCurrentIndex();
+        try self.bytecode.addInstruction(.JUMP, 0);
+
+        const short_circuit_target = self.bytecode.getCurrentIndex();
+        try self.bytecode.addInstruction(.LOAD_BOOL, if (bin.op == .AND) 0 else 1);
+        const end_target = self.bytecode.getCurrentIndex();
+        self.bytecode.instructions.items[@intCast(short_circuit_jump)].operand = short_circuit_target;
+        self.bytecode.instructions.items[@intCast(end_jump)].operand = end_target;
     }
 
     fn generateAccessExpression(self: *Self, expr: nodes.Expression) std.mem.Allocator.Error!void {

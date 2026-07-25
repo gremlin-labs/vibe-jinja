@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
         .root_module = root_module,
     });
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
-    
+
     // Add unit test modules
     const parser_test_module = b.addModule("parser_test", .{
         .root_source_file = b.path("test/unit/parser.zig"),
@@ -47,7 +47,7 @@ pub fn build(b: *std.Build) void {
         .root_module = parser_test_module,
     });
     const run_parser_tests = b.addRunArtifact(parser_tests);
-    
+
     const compiler_test_module = b.addModule("compiler_test", .{
         .root_source_file = b.path("test/unit/compiler.zig"),
         .target = target,
@@ -58,7 +58,7 @@ pub fn build(b: *std.Build) void {
         .root_module = compiler_test_module,
     });
     const run_compiler_tests = b.addRunArtifact(compiler_tests);
-    
+
     const filters_test_module = b.addModule("filters_test", .{
         .root_source_file = b.path("test/unit/filters.zig"),
         .target = target,
@@ -69,7 +69,7 @@ pub fn build(b: *std.Build) void {
         .root_module = filters_test_module,
     });
     const run_filters_tests = b.addRunArtifact(filters_tests);
-    
+
     const value_test_module = b.addModule("value_test", .{
         .root_source_file = b.path("test/unit/value.zig"),
         .target = target,
@@ -80,7 +80,7 @@ pub fn build(b: *std.Build) void {
         .root_module = value_test_module,
     });
     const run_value_tests = b.addRunArtifact(value_tests);
-    
+
     const value_comparison_test_module = b.addModule("value_comparison_test", .{
         .root_source_file = b.path("test/unit/value_comparison.zig"),
         .target = target,
@@ -91,7 +91,7 @@ pub fn build(b: *std.Build) void {
         .root_module = value_comparison_test_module,
     });
     const run_value_comparison_tests = b.addRunArtifact(value_comparison_tests);
-    
+
     const float_literal_test_module = b.addModule("float_literal_test", .{
         .root_source_file = b.path("test/unit/float_literal.zig"),
         .target = target,
@@ -102,7 +102,7 @@ pub fn build(b: *std.Build) void {
         .root_module = float_literal_test_module,
     });
     const run_float_literal_tests = b.addRunArtifact(float_literal_tests);
-    
+
     const variable_resolution_test_module = b.addModule("variable_resolution_test", .{
         .root_source_file = b.path("test/unit/variable_resolution.zig"),
         .target = target,
@@ -113,7 +113,7 @@ pub fn build(b: *std.Build) void {
         .root_module = variable_resolution_test_module,
     });
     const run_variable_resolution_tests = b.addRunArtifact(variable_resolution_tests);
-    
+
     const attribute_subscript_test_module = b.addModule("attribute_subscript_test", .{
         .root_source_file = b.path("test/unit/attribute_subscript.zig"),
         .target = target,
@@ -146,7 +146,7 @@ pub fn build(b: *std.Build) void {
         .root_module = binary_expressions_test_module,
     });
     const run_binary_expressions_tests = b.addRunArtifact(binary_expressions_tests);
-    
+
     const unary_expressions_test_module = b.addModule("unary_expressions_test", .{
         .root_source_file = b.path("test/unit/unary_expressions.zig"),
         .target = target,
@@ -157,7 +157,7 @@ pub fn build(b: *std.Build) void {
         .root_module = unary_expressions_test_module,
     });
     const run_unary_expressions_tests = b.addRunArtifact(unary_expressions_tests);
-    
+
     const comparison_expressions_test_module = b.addModule("comparison_expressions_test", .{
         .root_source_file = b.path("test/unit/comparison_expressions.zig"),
         .target = target,
@@ -168,7 +168,7 @@ pub fn build(b: *std.Build) void {
         .root_module = comparison_expressions_test_module,
     });
     const run_comparison_expressions_tests = b.addRunArtifact(comparison_expressions_tests);
-    
+
     const test_expressions_test_module = b.addModule("test_expressions_test", .{
         .root_source_file = b.path("test/unit/test_expressions.zig"),
         .target = target,
@@ -179,7 +179,7 @@ pub fn build(b: *std.Build) void {
         .root_module = test_expressions_test_module,
     });
     const run_test_expressions_tests = b.addRunArtifact(test_expressions_tests);
-    
+
     const control_flow_unit_test_module = b.addModule("control_flow_unit_test", .{
         .root_source_file = b.path("test/unit/control_flow.zig"),
         .target = target,
@@ -190,7 +190,7 @@ pub fn build(b: *std.Build) void {
         .root_module = control_flow_unit_test_module,
     });
     const run_control_flow_unit_tests = b.addRunArtifact(control_flow_unit_tests);
-    
+
     // Add integration test modules
     const control_flow_test_module = b.addModule("control_flow_test", .{
         .root_source_file = b.path("test/integration/control_flow.zig"),
@@ -202,7 +202,7 @@ pub fn build(b: *std.Build) void {
         .root_module = control_flow_test_module,
     });
     const run_control_flow_tests = b.addRunArtifact(control_flow_tests);
-    
+
     // Add integration test modules
     const macros_test_module = b.addModule("macros_test", .{
         .root_source_file = b.path("test/integration/macros.zig"),
@@ -214,7 +214,7 @@ pub fn build(b: *std.Build) void {
         .root_module = macros_test_module,
     });
     const run_macros_tests = b.addRunArtifact(macros_tests);
-    
+
     const set_with_test_module = b.addModule("set_with_test", .{
         .root_source_file = b.path("test/integration/set_with.zig"),
         .target = target,
@@ -225,7 +225,7 @@ pub fn build(b: *std.Build) void {
         .root_module = set_with_test_module,
     });
     const run_set_with_tests = b.addRunArtifact(set_with_tests);
-    
+
     const filter_block_test_module = b.addModule("filter_block_test", .{
         .root_source_file = b.path("test/integration/filter_block.zig"),
         .target = target,
@@ -236,7 +236,7 @@ pub fn build(b: *std.Build) void {
         .root_module = filter_block_test_module,
     });
     const run_filter_block_tests = b.addRunArtifact(filter_block_tests);
-    
+
     const raw_blocks_test_module = b.addModule("raw_blocks_test", .{
         .root_source_file = b.path("test/integration/raw_blocks.zig"),
         .target = target,
@@ -247,7 +247,7 @@ pub fn build(b: *std.Build) void {
         .root_module = raw_blocks_test_module,
     });
     const run_raw_blocks_tests = b.addRunArtifact(raw_blocks_tests);
-    
+
     const autoescape_test_module = b.addModule("autoescape_test", .{
         .root_source_file = b.path("test/integration/autoescape.zig"),
         .target = target,
@@ -258,7 +258,7 @@ pub fn build(b: *std.Build) void {
         .root_module = autoescape_test_module,
     });
     const run_autoescape_tests = b.addRunArtifact(autoescape_tests);
-    
+
     // Add regression test module
     const regression_test_module = b.addModule("regression_test", .{
         .root_source_file = b.path("test/integration/regression.zig"),
@@ -270,7 +270,7 @@ pub fn build(b: *std.Build) void {
         .root_module = regression_test_module,
     });
     const run_regression_tests = b.addRunArtifact(regression_tests);
-    
+
     // Add async test module
     const async_test_module = b.addModule("async_test", .{
         .root_source_file = b.path("test/integration/async.zig"),
@@ -282,7 +282,7 @@ pub fn build(b: *std.Build) void {
         .root_module = async_test_module,
     });
     const run_async_tests = b.addRunArtifact(async_tests);
-    
+
     // Add filters integration test module
     const filters_integration_test_module = b.addModule("filters_integration_test", .{
         .root_source_file = b.path("test/integration/filters.zig"),
@@ -294,7 +294,7 @@ pub fn build(b: *std.Build) void {
         .root_module = filters_integration_test_module,
     });
     const run_filters_integration_tests = b.addRunArtifact(filters_integration_tests);
-    
+
     // Add unit test modules
     const utils_test_module = b.addModule("utils_test", .{
         .root_source_file = b.path("test/unit/utils.zig"),
@@ -306,7 +306,7 @@ pub fn build(b: *std.Build) void {
         .root_module = utils_test_module,
     });
     const run_utils_tests = b.addRunArtifact(utils_tests);
-    
+
     const cache_test_module = b.addModule("cache_test", .{
         .root_source_file = b.path("test/unit/cache.zig"),
         .target = target,
@@ -317,7 +317,7 @@ pub fn build(b: *std.Build) void {
         .root_module = cache_test_module,
     });
     const run_cache_tests = b.addRunArtifact(cache_tests);
-    
+
     const tests_test_module = b.addModule("tests_test", .{
         .root_source_file = b.path("test/unit/tests.zig"),
         .target = target,
@@ -328,7 +328,7 @@ pub fn build(b: *std.Build) void {
         .root_module = tests_test_module,
     });
     const run_tests_tests = b.addRunArtifact(tests_tests);
-    
+
     const loaders_test_module = b.addModule("loaders_test", .{
         .root_source_file = b.path("test/unit/loaders.zig"),
         .target = target,
@@ -339,7 +339,7 @@ pub fn build(b: *std.Build) void {
         .root_module = loaders_test_module,
     });
     const run_loaders_tests = b.addRunArtifact(loaders_tests);
-    
+
     const extensions_test_module = b.addModule("extensions_test", .{
         .root_source_file = b.path("test/unit/extensions.zig"),
         .target = target,
@@ -350,7 +350,7 @@ pub fn build(b: *std.Build) void {
         .root_module = extensions_test_module,
     });
     const run_extensions_tests = b.addRunArtifact(extensions_tests);
-    
+
     const environment_test_module = b.addModule("environment_test", .{
         .root_source_file = b.path("test/unit/environment.zig"),
         .target = target,
@@ -374,7 +374,7 @@ pub fn build(b: *std.Build) void {
     const run_inheritance_tests = addTestRoot(b, root_module, target, optimize, "inheritance_test", "test/integration/inheritance.zig");
     const run_test_expressions_integration_tests = addTestRoot(b, root_module, target, optimize, "test_expressions_integration_test", "test/integration/test_expressions.zig");
     const run_public_api_tests = addTestRoot(b, root_module, target, optimize, "public_api_test", "test/public_api.zig");
-    
+
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_parser_tests.step);
@@ -416,7 +416,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_inheritance_tests.step);
     test_step.dependOn(&run_test_expressions_integration_tests.step);
     test_step.dependOn(&run_public_api_tests.step);
-    
+
     const unit_test_step = b.step("test:unit", "Run unit tests only");
     unit_test_step.dependOn(&run_parser_tests.step);
     unit_test_step.dependOn(&run_compiler_tests.step);
@@ -443,7 +443,7 @@ pub fn build(b: *std.Build) void {
     unit_test_step.dependOn(&run_runtime_tests.step);
     unit_test_step.dependOn(&run_sandbox_tests.step);
     unit_test_step.dependOn(&run_public_api_tests.step);
-    
+
     const integration_test_step = b.step("test:integration", "Run integration tests only");
     integration_test_step.dependOn(&run_control_flow_tests.step);
     integration_test_step.dependOn(&run_macros_tests.step);
@@ -459,7 +459,7 @@ pub fn build(b: *std.Build) void {
     integration_test_step.dependOn(&run_includes_tests.step);
     integration_test_step.dependOn(&run_inheritance_tests.step);
     integration_test_step.dependOn(&run_test_expressions_integration_tests.step);
-    
+
     // Individual integration test steps (for debugging)
     const control_flow_step = b.step("test:control_flow", "Run control flow integration tests");
     control_flow_step.dependOn(&run_control_flow_tests.step);
@@ -477,7 +477,7 @@ pub fn build(b: *std.Build) void {
     regression_step.dependOn(&run_regression_tests.step);
     const filters_integration_step = b.step("test:filters", "Run filters integration tests");
     filters_integration_step.dependOn(&run_filters_integration_tests.step);
-    
+
     // HuggingFace compatibility tests (Llama 3.2, etc.)
     const huggingface_test_module = b.addModule("huggingface_test", .{
         .root_source_file = b.path("test/integration/huggingface_compat.zig"),
@@ -509,7 +509,23 @@ pub fn build(b: *std.Build) void {
     production_step.dependOn(&run_production_tests.step);
     integration_test_step.dependOn(&run_production_tests.step);
     test_step.dependOn(&run_production_tests.step);
-    
+
+    // Community Qwen 3.5/3.6 compatibility template and regression scenarios.
+    const qwen_fixed_test_module = b.addModule("qwen_fixed_chat_template_test", .{
+        .root_source_file = b.path("test/integration/qwen_fixed_chat_template.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    qwen_fixed_test_module.addImport("vibe_jinja", root_module);
+    const qwen_fixed_tests = b.addTest(.{
+        .root_module = qwen_fixed_test_module,
+    });
+    const run_qwen_fixed_tests = b.addRunArtifact(qwen_fixed_tests);
+    const qwen_fixed_step = b.step("test:qwen-fixed", "Run Qwen 3.5/3.6 community template tests");
+    qwen_fixed_step.dependOn(&run_qwen_fixed_tests.step);
+    integration_test_step.dependOn(&run_qwen_fixed_tests.step);
+    test_step.dependOn(&run_qwen_fixed_tests.step);
+
     // Slice and globals tests (new feature tests)
     const slice_globals_test_module = b.addModule("slice_globals_test", .{
         .root_source_file = b.path("test/integration/slice_and_globals.zig"),
@@ -525,11 +541,11 @@ pub fn build(b: *std.Build) void {
     slice_globals_step.dependOn(&run_slice_globals_tests.step);
     test_step.dependOn(&run_slice_globals_tests.step);
     integration_test_step.dependOn(&run_slice_globals_tests.step);
-    
+
     // Add async-only test step
     const async_test_step = b.step("test:async", "Run async tests only");
     async_test_step.dependOn(&run_async_tests.step);
-    
+
     // Benchmarks
     const benchmark_module = b.addModule("benchmark", .{
         .root_source_file = b.path("test/benchmarks/benchmark.zig"),

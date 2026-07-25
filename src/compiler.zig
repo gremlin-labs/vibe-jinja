@@ -1072,6 +1072,12 @@ pub const Compiler = struct {
         var left_val = try self.visitExpression(&node.left, frame, ctx);
         defer left_val.deinit(self.allocator);
 
+        // Jinja boolean operators return booleans in this implementation, but
+        // must still short-circuit so guarded StrictUndefined names and helper
+        // calls are never evaluated eagerly.
+        if (node.op == .AND and !(try left_val.isTruthy())) return .{ .boolean = false };
+        if (node.op == .OR and try left_val.isTruthy()) return .{ .boolean = true };
+
         var right_val = try self.visitExpression(&node.right, frame, ctx);
         defer right_val.deinit(self.allocator);
         // Check for 'not in' - if left is a unary NOT with IN, handle specially
@@ -1083,6 +1089,15 @@ pub const Compiler = struct {
         const op = semantics.BinaryOp.fromTokenKind(node.op) orelse
             return value_mod.Value{ .string = try self.allocator.dupe(u8, "") };
         return semantics.evalBinary(self.allocator, left_val, right_val, op);
+    }
+
+    fn visitTestSubject(self: *Self, node: *nodes.TestExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
+        const inspects_definition = std.mem.eql(u8, node.name, "defined") or std.mem.eql(u8, node.name, "undefined");
+        if (!inspects_definition or node.node != .name) return self.visitExpression(&node.node, frame, ctx);
+
+        const name = node.node.name.name;
+        if (frame.resolve(name)) |resolved| return resolved.deepCopy(self.allocator);
+        return ctx.resolve(name).deepCopy(self.allocator);
     }
 
     /// Visit TestExpr node - evaluate test expression (value is test)
@@ -1097,8 +1112,9 @@ pub const Compiler = struct {
             std.debug.print("[TEST] {s} args={d} ENTER\n", .{ node.name, node.args.items.len });
         }
 
-        // Evaluate the expression to test
-        var val = try self.visitExpression(&node.node, frame, ctx);
+        // `is defined` and `is undefined` must be able to inspect a missing
+        // name even under StrictUndefined; normal name evaluation raises.
+        var val = try self.visitTestSubject(node, frame, ctx);
         defer val.deinit(self.allocator);
 
         // Evaluate test arguments
@@ -1302,6 +1318,33 @@ pub const Compiler = struct {
         return value_pool.getBool(!(try val.isTruthy()));
     }
 
+    fn primaryLoopTargetName(target: nodes.Expression) ?[]const u8 {
+        return switch (target) {
+            .name => |name| name.name,
+            .list_literal => |targets| if (targets.elements.items.len > 0 and targets.elements.items[0] == .name)
+                targets.elements.items[0].name.name
+            else
+                null,
+            else => null,
+        };
+    }
+
+    fn bindLoopTarget(self: *Self, target: nodes.Expression, item: value_mod.Value, frame: *Frame) !void {
+        switch (target) {
+            .name => |name| try frame.set(name.name, try item.deepCopy(self.allocator)),
+            .list_literal => |targets| {
+                if (item != .list or item.list.items.items.len != targets.elements.items.len) {
+                    return exceptions.TemplateError.RuntimeError;
+                }
+                for (targets.elements.items, item.list.items.items) |target_expr, target_value| {
+                    if (target_expr != .name) return exceptions.TemplateError.RuntimeError;
+                    try frame.set(target_expr.name.name, try target_value.deepCopy(self.allocator));
+                }
+            },
+            else => return exceptions.TemplateError.RuntimeError,
+        }
+    }
+
     /// Visit For node - execute for loop
     /// OPTIMIZED: Phase 1 - Zero-allocation per iteration
     /// - Uses OptimizedLoopContext instead of Dict per iteration
@@ -1360,13 +1403,7 @@ pub const Compiler = struct {
         }
 
         // Extract target variable name from Expression
-        const target_name = switch (node.target) {
-            .name => |n| n.name,
-            else => {
-                // Invalid target - return empty
-                return try self.allocator.dupe(u8, "");
-            },
-        };
+        const target_name = primaryLoopTargetName(node.target) orelse return exceptions.TemplateError.RuntimeError;
 
         // OPTIMIZATION: Create OptimizedLoopContext ONCE (stack-allocated)
         // This replaces the per-iteration Dict creation
@@ -1395,8 +1432,7 @@ pub const Compiler = struct {
 
             // Set loop variable (deep copy - still needed for proper ownership)
             const current_item = opt_loop.getCurrentItem();
-            const item_copy = try current_item.deepCopy(self.allocator);
-            try loop_frame.set(target_name, item_copy);
+            try self.bindLoopTarget(node.target, current_item, &loop_frame);
 
             // Execute body statements
             var should_break = false;
@@ -1510,14 +1546,15 @@ pub const Compiler = struct {
     /// Method calls on plain values behave like filter application:
     /// 'a,b'.split(',') is 'a,b'|split(','). This mirrors the bytecode VM,
     /// which compiles attribute calls to APPLY_FILTER. Dicts and custom
-    /// objects are excluded — they may carry real callable attributes that
-    /// the regular call path resolves.
+    /// custom objects are excluded because they may carry real callable
+    /// attributes. Dicts use the fallback only for their standard items().
     fn callMethodAsFilter(self: *Self, node: *nodes.CallExpr, attribute: *nodes.Getattr, frame: *Frame, ctx: *context.Context) !?value_mod.Value {
         const filter = self.environment.getFilter(attribute.attr) orelse return null;
 
         var object = try self.visitExpression(&attribute.node, frame, ctx);
         defer object.deinit(self.allocator);
-        if (object == .dict or object == .custom) return null;
+        if (object == .custom) return null;
+        if (object == .dict and !std.mem.eql(u8, attribute.attr, "items")) return null;
 
         var args = std.ArrayList(value_mod.Value){};
         defer {
@@ -1632,6 +1669,12 @@ pub const Compiler = struct {
     /// Visit CallExpr node - evaluate function call expression
     pub fn visitCallExpr(self: *Self, node: *nodes.CallExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
         if (try self.callAttributeSpecial(node, frame, ctx)) |result| return result;
+        // Macro names live in the context macro table rather than as ordinary
+        // variables. Resolve them before evaluating the callee so strict
+        // undefined mode does not reject a valid macro invocation.
+        if (node.func == .name) {
+            if (try self.callNamedSpecial(node.func.name.name, node, frame, ctx)) |result| return result;
+        }
 
         var function_value = try self.visitExpression(&node.func, frame, ctx);
         defer function_value.deinit(self.allocator);
@@ -2725,7 +2768,8 @@ fn stmtHasUnsupportedFeatures(stmt: *nodes.Stmt, depth: usize) bool {
         .import, .from_import, .include, .extends, .filter_block => true,
         .for_loop => blk: {
             const statement: *nodes.For = @ptrCast(@alignCast(stmt));
-            break :blk statementsHaveUnsupportedFeatures(statement.body.items, child_depth) or
+            break :blk statement.target != .name or
+                statementsHaveUnsupportedFeatures(statement.body.items, child_depth) or
                 statementsHaveUnsupportedFeatures(statement.else_body.items, child_depth);
         },
         .if_stmt => ifHasUnsupportedFeatures(@ptrCast(@alignCast(stmt)), child_depth),

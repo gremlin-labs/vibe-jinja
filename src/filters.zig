@@ -19,6 +19,7 @@
 //! - `upper` - Convert to uppercase
 //! - `title` - Titlecase string
 //! - `trim` / `lstrip` / `rstrip` - Remove whitespace
+//! - `startswith` / `endswith` - Test string prefixes and suffixes
 //! - `escape` - HTML escape
 //! - `truncate` - Truncate to length
 //! - `wordwrap` - Wrap text at width
@@ -224,6 +225,8 @@ pub const BuiltinFilterMap = std.StaticStringMap(FilterFn).initComptime(.{
     .{ "reverse", BuiltinFilters.reverse },
     .{ "replace", BuiltinFilters.replace },
     .{ "split", BuiltinFilters.split },
+    .{ "startswith", BuiltinFilters.startswith },
+    .{ "endswith", BuiltinFilters.endswith },
     .{ "trim", BuiltinFilters.trim },
     .{ "lstrip", BuiltinFilters.lstrip },
     .{ "rstrip", BuiltinFilters.rstrip },
@@ -566,6 +569,58 @@ pub const BuiltinFilters = struct {
         defer allocator.free(sep);
         if (sep.len == 0) return exceptions.TemplateError.TypeError;
         return splitExplicit(allocator, str, sep, maxsplit);
+    }
+
+    fn normalizeStringStart(raw: i64, len: usize) ?usize {
+        const signed_len: i64 = @intCast(len);
+        if (raw > signed_len) return null;
+        return @intCast(@max(if (raw < 0) signed_len + raw else raw, 0));
+    }
+
+    fn normalizeStringEnd(raw: i64, len: usize) usize {
+        const signed_len: i64 = @intCast(len);
+        return @intCast(std.math.clamp(if (raw < 0) signed_len + raw else raw, 0, signed_len));
+    }
+
+    fn stringHasAffix(allocator: std.mem.Allocator, val: Value, args: []Value, comptime suffix: bool) !Value {
+        if (args.len == 0 or args.len > 3) return exceptions.TemplateError.TypeError;
+
+        const str = try val.toString(allocator);
+        defer allocator.free(str);
+        const affix = try args[0].toString(allocator);
+        defer allocator.free(affix);
+
+        const start = if (args.len >= 2)
+            normalizeStringStart(args[1].toInteger() orelse return exceptions.TemplateError.TypeError, str.len) orelse return .{ .boolean = false }
+        else
+            0;
+        const end = if (args.len >= 3)
+            normalizeStringEnd(args[2].toInteger() orelse return exceptions.TemplateError.TypeError, str.len)
+        else
+            str.len;
+        if (start > end) return .{ .boolean = false };
+
+        const window = str[start..end];
+        return .{ .boolean = if (suffix)
+            std.mem.endsWith(u8, window, affix)
+        else
+            std.mem.startsWith(u8, window, affix) };
+    }
+
+    /// Python-style string prefix predicate, including optional start/end bounds.
+    pub fn startswith(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
+        _ = kwargs;
+        _ = ctx;
+        _ = env;
+        return stringHasAffix(allocator, val, args, false);
+    }
+
+    /// Python-style string suffix predicate, including optional start/end bounds.
+    pub fn endswith(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
+        _ = kwargs;
+        _ = ctx;
+        _ = env;
+        return stringHasAffix(allocator, val, args, true);
     }
 
     /// Strip whitespace from both ends

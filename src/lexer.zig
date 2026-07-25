@@ -139,6 +139,8 @@ pub const TokenKind = enum {
 pub const Token = struct {
     kind: TokenKind,
     value: []const u8,
+    trim_left: bool = false,
+    trim_right: bool = false,
     /// Line number where this token appears (1-indexed)
     lineno: usize,
     /// Column number where this token starts (1-indexed)
@@ -245,6 +247,7 @@ const keyword_token_kinds = std.StaticStringMap(TokenKind).initComptime(.{
     .{ "true", .BOOLEAN },
     .{ "false", .BOOLEAN },
     .{ "null", .NULL },
+    .{ "none", .NULL },
     .{ "None", .NULL },
 });
 
@@ -324,6 +327,28 @@ pub const Lexer = struct {
         };
     }
 
+    fn consumeLeadingTrim(pending: *bool, token: *Token) bool {
+        if (!pending.*) return false;
+        pending.* = false;
+        if (token.kind != .DATA) return false;
+        token.value = std.mem.trimLeft(u8, token.value, " \t\r\n");
+        return token.value.len == 0;
+    }
+
+    fn applyTrailingTrim(tokens: *std.ArrayList(Token), requested: bool) void {
+        if (!requested) return;
+        var index = tokens.items.len;
+        while (index > 0) {
+            index -= 1;
+            if (tokens.items[index].kind == .DATA) {
+                tokens.items[index].value = std.mem.trimRight(u8, tokens.items[index].value, " \t\r\n");
+                if (tokens.items[index].value.len == 0) _ = tokens.orderedRemove(index);
+                return;
+            }
+            if (tokens.items[index].kind != .WHITESPACE) return;
+        }
+    }
+
     /// Tokenize the entire source into a token stream
     pub fn tokenize(self: *Self, allocator: std.mem.Allocator) !TokenStream {
         var tokens = std.ArrayList(Token){};
@@ -332,8 +357,13 @@ pub const Lexer = struct {
         // avoid repeated growth reallocations while tokenizing large templates.
         try tokens.ensureTotalCapacity(allocator, self.source.len / 4 + 8);
 
+        var trim_leading_data = false;
         while (self.cursor < self.source.len) {
-            const token = try self.nextToken(allocator);
+            var token = try self.nextToken(allocator);
+            if (consumeLeadingTrim(&trim_leading_data, &token)) continue;
+            applyTrailingTrim(&tokens, token.trim_left);
+            trim_leading_data = token.trim_right;
+
             try tokens.append(allocator, token);
             if (token.kind == .EOF) break;
         }
@@ -555,10 +585,11 @@ pub const Lexer = struct {
     }
 
     fn tokenizeOpeningDelimiter(self: *Self, kind: TokenKind, delimiter: []const u8, lineno: usize, column: usize) Token {
-        const token = self.tokenizeDelimiter(kind, delimiter, lineno, column);
+        var token = self.tokenizeDelimiter(kind, delimiter, lineno, column);
         if (self.cursor < self.source.len and self.source[self.cursor] == '-') {
             self.cursor += 1;
             self.column += 1;
+            token.trim_left = true;
         }
         return token;
     }
@@ -570,11 +601,15 @@ pub const Lexer = struct {
     }
 
     fn tokenizeClosingDelimiter(self: *Self, kind: TokenKind, delimiter: []const u8, lineno: usize, column: usize) Token {
+        var trim_right = false;
         if (self.startsWithTrimmedEnd(delimiter)) {
             self.cursor += 1;
             self.column += 1;
+            trim_right = true;
         }
-        return self.tokenizeDelimiter(kind, delimiter, lineno, column);
+        var token = self.tokenizeDelimiter(kind, delimiter, lineno, column);
+        token.trim_right = trim_right;
+        return token;
     }
 
     /// Tokenize a line comment (from line comment prefix to end of line)

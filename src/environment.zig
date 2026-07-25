@@ -244,6 +244,8 @@ pub const Environment = struct {
         try self.addFilter("reverse", filters.BuiltinFilters.reverse);
         try self.addFilter("replace", filters.BuiltinFilters.replace);
         try self.addFilter("split", filters.BuiltinFilters.split);
+        try self.addFilter("startswith", filters.BuiltinFilters.startswith);
+        try self.addFilter("endswith", filters.BuiltinFilters.endswith);
         try self.addFilter("trim", filters.BuiltinFilters.trim);
         try self.addFilter("lstrip", filters.BuiltinFilters.lstrip);
         try self.addFilter("rstrip", filters.BuiltinFilters.rstrip);

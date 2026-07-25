@@ -741,7 +741,9 @@ pub const Parser = struct {
         }
 
         const name = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
-        if (name.kind != .NAME and name.kind != .IN) return exceptions.TemplateError.SyntaxError;
+        if (name.kind != .NAME and name.kind != .IN and name.kind != .NULL and name.kind != .BOOLEAN) {
+            return exceptions.TemplateError.SyntaxError;
+        }
         _ = self.stream.next();
         self.skipWhitespace();
 
@@ -770,13 +772,13 @@ pub const Parser = struct {
 
     /// Parse comparison expression
     fn parseCompare(self: *Self) ParseError!?nodes.Expression {
-        var left = try self.parseAdd() orelse return null;
+        var left = try self.parseConcat() orelse return null;
 
         while (self.stream.hasNext()) {
             self.skipWhitespace();
             const comparison = self.consumeComparisonOperator() orelse break;
             self.skipWhitespace();
-            const right = self.parseAdd() catch |err| {
+            const right = self.parseConcat() catch |err| {
                 left.deinit(self.allocator);
                 return err;
             } orelse {
@@ -792,6 +794,44 @@ pub const Parser = struct {
             if (token.kind == .IS) return try self.parseTest(left);
         }
         return try self.parseFilter(left);
+    }
+
+    /// Parse Jinja's string concatenation operator (`~`).
+    fn parseConcat(self: *Self) (exceptions.TemplateError || std.mem.Allocator.Error)!?nodes.Expression {
+        var left = try self.parseAdd() orelse return null;
+        var concat: ?*nodes.Concat = null;
+        errdefer if (concat) |node| {
+            node.deinit(self.allocator);
+            self.allocator.destroy(node);
+        } else left.deinit(self.allocator);
+
+        while (self.stream.hasNext()) {
+            self.skipWhitespace();
+            const token = self.stream.current() orelse break;
+            if (token.kind != .TILDE) break;
+
+            if (concat == null) {
+                const node = try self.allocator.create(nodes.Concat);
+                node.* = nodes.Concat.init(self.allocator, token.lineno, token.filename);
+                node.nodes.append(self.allocator, left) catch |err| {
+                    node.deinit(self.allocator);
+                    self.allocator.destroy(node);
+                    return err;
+                };
+                concat = node;
+            }
+
+            _ = self.stream.next();
+            self.skipWhitespace();
+            var right = try self.parseAdd() orelse return exceptions.TemplateError.SyntaxError;
+            concat.?.nodes.append(self.allocator, right) catch |err| {
+                right.deinit(self.allocator);
+                return err;
+            };
+        }
+
+        if (concat) |node| return .{ .concat = node };
+        return left;
     }
 
     /// Parse addition/subtraction expression
@@ -1042,74 +1082,51 @@ pub const Parser = struct {
                     break;
                 }
 
-                // Check for keyword argument (name=value)
+                // A keyword argument is the narrow `name = value` form. Save
+                // and restore the cursor so positional expressions beginning
+                // with a name still retain their trailers (`message.content`,
+                // calls, subscripts, filters, and operators).
+                var parsed_keyword = false;
                 if (at.kind == .NAME) {
+                    const argument_start = self.stream.cursor;
                     const name_str = at.value;
                     _ = self.stream.next();
                     self.skipWhitespace();
-
-                    const assign_token = self.stream.current();
-                    if (assign_token) |ass_t| {
-                        if (ass_t.kind == .ASSIGN) {
-                            // Keyword argument
+                    if (self.stream.current()) |assign_token| {
+                        if (assign_token.kind == .ASSIGN) {
                             _ = self.stream.next();
                             self.skipWhitespace();
                             const kw_value = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
                             const kw_name = try self.allocator.dupe(u8, name_str);
-                            try kwargs.put(kw_name, kw_value);
-
-                            self.skipWhitespace();
-                            const next_token = self.stream.current();
-                            if (next_token) |nt| {
-                                if (nt.kind == .COMMA) {
-                                    _ = self.stream.next();
-                                    self.skipWhitespace();
-                                    continue;
-                                } else if (nt.kind == .RPAREN) {
-                                    _ = self.stream.next();
-                                    break;
-                                }
-                            }
-                            continue;
+                            kwargs.put(kw_name, kw_value) catch |err| {
+                                self.allocator.free(kw_name);
+                                var owned_value = kw_value;
+                                owned_value.deinit(self.allocator);
+                                return err;
+                            };
+                            parsed_keyword = true;
                         }
                     }
+                    if (!parsed_keyword) self.stream.cursor = argument_start;
+                }
 
-                    // Positional argument - parse as expression starting from name
-                    const name_expr_node = try self.allocator.create(nodes.Name);
-                    name_expr_node.* = try nodes.Name.init(self.allocator, name_str, .load, at.lineno, at.filename);
-                    const name_expr = nodes.Expression{ .name = name_expr_node };
-                    try args.append(self.allocator, name_expr);
-
-                    self.skipWhitespace();
-                    const next_token = self.stream.current();
-                    if (next_token) |nt| {
-                        if (nt.kind == .COMMA) {
-                            _ = self.stream.next();
-                            self.skipWhitespace();
-                            continue;
-                        } else if (nt.kind == .RPAREN) {
-                            _ = self.stream.next();
-                            break;
-                        }
-                    }
-                } else {
-                    // Positional argument expression
+                if (!parsed_keyword) {
                     const arg_expr = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
                     try args.append(self.allocator, arg_expr);
-
-                    self.skipWhitespace();
-                    const next_token = self.stream.current();
-                    if (next_token) |nt| {
-                        if (nt.kind == .COMMA) {
-                            _ = self.stream.next();
-                            self.skipWhitespace();
-                            continue;
-                        } else if (nt.kind == .RPAREN) {
-                            _ = self.stream.next();
-                            break;
-                        }
-                    }
                 }
+
+                self.skipWhitespace();
+                const next_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+                if (next_token.kind == .COMMA) {
+                    _ = self.stream.next();
+                    self.skipWhitespace();
+                    continue;
+                }
+                if (next_token.kind == .RPAREN) {
+                    _ = self.stream.next();
+                    break;
+                }
+                return exceptions.TemplateError.SyntaxError;
             } else {
                 break;
             }
@@ -1680,10 +1697,41 @@ pub const Parser = struct {
 
         const target_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
         if (target_token.kind != .NAME) return exceptions.TemplateError.SyntaxError;
-        const target_name = try self.allocator.dupe(u8, target_token.value);
-        defer self.allocator.free(target_name);
+        const first_target = try self.allocator.create(nodes.Name);
+        first_target.* = try nodes.Name.init(self.allocator, target_token.value, .store, target_token.lineno, target_token.filename);
+        var target_expr = nodes.Expression{ .name = first_target };
+        var target_moved = false;
+        errdefer if (!target_moved) target_expr.deinit(self.allocator);
         _ = self.stream.next();
         self.skipWhitespace();
+
+        if (self.stream.current()) |token| {
+            if (token.kind == .COMMA) {
+                const targets = try self.allocator.create(nodes.ListLiteral);
+                targets.* = nodes.ListLiteral.init(target_token.lineno, target_token.filename);
+                var targets_moved = false;
+                errdefer if (!targets_moved) {
+                    targets.deinit(self.allocator);
+                    self.allocator.destroy(targets);
+                };
+                try targets.elements.append(self.allocator, target_expr);
+                target_expr = .{ .list_literal = targets };
+                targets_moved = true;
+
+                while (self.stream.current()) |comma| {
+                    if (comma.kind != .COMMA) break;
+                    _ = self.stream.next();
+                    self.skipWhitespace();
+                    const name_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
+                    if (name_token.kind != .NAME) return exceptions.TemplateError.SyntaxError;
+                    const name = try self.allocator.create(nodes.Name);
+                    name.* = try nodes.Name.init(self.allocator, name_token.value, .store, name_token.lineno, name_token.filename);
+                    try targets.elements.append(self.allocator, .{ .name = name });
+                    _ = self.stream.next();
+                    self.skipWhitespace();
+                }
+            }
+        }
 
         const in_token = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
         if (in_token.kind != .IN) return exceptions.TemplateError.SyntaxError;
@@ -1707,16 +1755,8 @@ pub const Parser = struct {
             else_body = try self.parseBodyUntil(&.{.ENDFOR});
         }
 
-        const target = try self.allocator.create(nodes.Name);
-        target.* = try nodes.Name.init(self.allocator, target_name, .store, for_token.lineno, for_token.filename);
-        var target_moved = false;
-        errdefer if (!target_moved) {
-            var expression = nodes.Expression{ .name = target };
-            expression.deinit(self.allocator);
-        };
-
         const for_node = try self.allocator.create(nodes.For);
-        for_node.* = nodes.For.init(self.allocator, .{ .name = target }, iter_expr, for_token.lineno, for_token.filename);
+        for_node.* = nodes.For.init(self.allocator, target_expr, iter_expr, for_token.lineno, for_token.filename);
         target_moved = true;
         iter_moved = true;
         for_node.body.deinit(self.allocator);

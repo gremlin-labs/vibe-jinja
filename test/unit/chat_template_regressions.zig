@@ -71,6 +71,31 @@ test "split filter follows Python str.split semantics" {
     try expectRender("b,c", "{{ 'a,b,c'.split(',', 1)[-1] }}");
 }
 
+test "string predicate methods support chat-template guards" {
+    try expectRender("true", "{{ '<tool_response>x'.startswith('<tool_response>') }}");
+    try expectRender("false", "{{ '<tool_response>x'.endswith('</tool_response>') }}");
+    try expectRender("false", "{{ 'abc'.startswith('', 4) }}");
+}
+
+test "mapping items method supports tuple loop targets" {
+    try expectRender(
+        "name=vibe-jinja",
+        "{% for key, item in dict(name='vibe-jinja').items() %}{{ key }}={{ item }}{% endfor %}",
+    );
+}
+
+test "chat-template concatenation and boolean guards are lazy" {
+    try expectRender("a1b", "{{ 'a' ~ 1 ~ 'b' }}");
+    try expectRender("ok", "{% if false and raise_exception('bad') %}bad{% else %}ok{% endif %}");
+    try expectRender("ok", "{% if true or raise_exception('bad') %}ok{% endif %}");
+}
+
+test "whitespace-control markers trim only adjacent template data" {
+    try expectRender("ab", "a   {{- 'b' }}");
+    try expectRender("ab", "a{{ 'b' -}}   ");
+    try expectRender("ab c", "a{%- set value = 'b' -%}{{ value }} c");
+}
+
 test "nested loop exits preserve the active loop and outer variable" {
     try expectRender(
         "empty",
