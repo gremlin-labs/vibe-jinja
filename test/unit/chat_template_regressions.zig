@@ -88,6 +88,10 @@ test "nested loop exits preserve the active loop and outer variable" {
         "outer",
         "{% set item = 'outer' %}{% for item in [1,2] %}{% break %}{% endfor %}{{ item }}",
     );
+    try expectRender(
+        "ab",
+        "{% for outer in [1,2] %}{% for inner in [1] %}{% break %}{% endfor %}{{ loop.cycle('a','b') }}{% endfor %}",
+    );
 }
 
 test "is not negates a test" {

@@ -1037,122 +1037,97 @@ pub const BytecodeVM = struct {
         }
     }
 
+    inline fn executeForLoopStart(self: *Self, name_operand: u32, pc: *u32) anyerror!void {
+        var iterable = self.stack.pop() orelse Value{ .null = {} };
+        const items: []const Value = switch (iterable) {
+            .list => |list| list.items.items,
+            else => &.{},
+        };
+        const var_name = self.bytecode.names.items[@intCast(name_operand)];
+
+        if (items.len == 0) {
+            const loop_end = findMatchingLoopEnd(self.bytecode.instructions.items, pc.*) orelse
+                return exceptions.TemplateError.RuntimeError;
+            const after_loop_end = loop_end + 1;
+            if (after_loop_end < self.bytecode.instructions.items.len and
+                self.bytecode.instructions.items[@intCast(after_loop_end)].opcode == .JUMP)
+            {
+                pc.* = after_loop_end + 1;
+            } else {
+                pc.* = after_loop_end;
+            }
+            iterable.deinit(self.allocator);
+            return;
+        }
+
+        try self.loop_stack.ensureUnusedCapacity(self.allocator, 1);
+        const saved_variable = self.saveLoopVariable(var_name);
+        self.loop_stack.appendAssumeCapacity(.{
+            .iterable = iterable,
+            .items = items,
+            .index = 0,
+            .var_name = var_name,
+            .loop_start_pc = pc.*,
+            .local_slot = 0,
+            .saved_variable = saved_variable,
+        });
+        self.loop_index0 = 0;
+        self.last_changed_hash = null;
+        try self.stack.append(self.allocator, try items[0].deepCopy(self.allocator));
+    }
+
+    inline fn restoreOuterLoopIndex(self: *Self) void {
+        if (self.loop_stack.items.len > 0) {
+            self.loop_index0 = @intCast(self.loop_stack.items[self.loop_stack.items.len - 1].index);
+        } else {
+            self.loop_index0 = 0;
+        }
+    }
+
+    inline fn executeForLoopEnd(self: *Self, loop_start_operand: u32, pc: *u32) anyerror!void {
+        if (self.loop_stack.items.len == 0) return exceptions.TemplateError.RuntimeError;
+
+        const loop_state = &self.loop_stack.items[self.loop_stack.items.len - 1];
+        loop_state.index += 1;
+        if (loop_state.index < loop_state.items.len) {
+            try self.stack.append(self.allocator, try loop_state.items[loop_state.index].deepCopy(self.allocator));
+            self.loop_index0 = @intCast(loop_state.index);
+            pc.* = loop_start_operand + 1;
+            return;
+        }
+
+        var completed_state = self.loop_stack.pop().?;
+        self.restoreLoopVariable(&completed_state);
+        completed_state.iterable.deinit(self.allocator);
+        self.restoreOuterLoopIndex();
+    }
+
+    inline fn executeBreakLoop(self: *Self, pc: *u32) anyerror!void {
+        if (self.loop_stack.items.len == 0) return exceptions.TemplateError.RuntimeError;
+
+        var completed_state = self.loop_stack.pop().?;
+        self.restoreLoopVariable(&completed_state);
+        completed_state.iterable.deinit(self.allocator);
+        self.restoreOuterLoopIndex();
+
+        const loop_end = findMatchingLoopEnd(self.bytecode.instructions.items, pc.*) orelse
+            return exceptions.TemplateError.RuntimeError;
+        pc.* = loop_end + 1;
+    }
+
+    inline fn executeContinueLoop(self: *Self, pc: *u32) anyerror!void {
+        if (self.loop_stack.items.len == 0) return exceptions.TemplateError.RuntimeError;
+        pc.* = findMatchingLoopEnd(self.bytecode.instructions.items, pc.*) orelse
+            return exceptions.TemplateError.RuntimeError;
+    }
+
     inline fn executeLoopInstruction(self: *Self, instr: Instruction, pc: *u32) anyerror!void {
         switch (instr.opcode) {
-            .FOR_LOOP_START => {
-                // Pop iterable from stack
-                var iterable = self.stack.pop() orelse Value{ .null = {} };
-
-                // Get items from iterable
-                const items: []const Value = switch (iterable) {
-                    .list => |l| l.items.items,
-                    else => &[_]Value{}, // Non-iterable = empty loop
-                };
-
-                // Get variable name from operand
-                const var_name = self.bytecode.names.items[@as(usize, @intCast(instr.operand))];
-
-                if (items.len == 0) {
-                    // Empty iterable - skip loop body but NOT else clause
-                    const loop_end = findMatchingLoopEnd(self.bytecode.instructions.items, pc.*) orelse
-                        return exceptions.TemplateError.RuntimeError;
-                    const after_loop_end = loop_end + 1;
-                    if (after_loop_end < self.bytecode.instructions.items.len and
-                        self.bytecode.instructions.items[@intCast(after_loop_end)].opcode == .JUMP)
-                    {
-                        // A non-empty loop executes this jump to skip its else body.
-                        pc.* = after_loop_end + 1;
-                    } else {
-                        pc.* = after_loop_end;
-                    }
-                    // Free empty iterable immediately
-                    iterable.deinit(self.allocator);
-                    return;
-                } else {
-                    // Push loop state - takes ownership of iterable and saves
-                    // any same-named outer local for restoration on every exit.
-                    try self.loop_stack.ensureUnusedCapacity(self.allocator, 1);
-                    const saved_variable = self.saveLoopVariable(var_name);
-                    self.loop_stack.appendAssumeCapacity(LoopState{
-                        .iterable = iterable,
-                        .items = items,
-                        .index = 0,
-                        .var_name = var_name,
-                        .loop_start_pc = pc.*, // PC after FOR_LOOP_START
-                        .local_slot = 0, // Reserved for future use
-                        .saved_variable = saved_variable,
-                    });
-
-                    // Update loop_index0 for loop.cycle() and loop.changed()
-                    self.loop_index0 = 0;
-                    self.last_changed_hash = null;
-
-                    // Push first item to stack (will be stored by next STORE_VAR)
-                    const first_item = try items[0].deepCopy(self.allocator);
-                    try self.stack.append(self.allocator, first_item);
-                }
-            },
-            .FOR_LOOP_END => {
-                // Get current loop state
-                if (self.loop_stack.items.len == 0) {
-                    return exceptions.TemplateError.RuntimeError;
-                }
-
-                const loop_state = &self.loop_stack.items[self.loop_stack.items.len - 1];
-                loop_state.index += 1;
-
-                if (loop_state.index < loop_state.items.len) {
-                    // More items - push next item and jump back
-                    const next_item = try loop_state.items[loop_state.index].deepCopy(self.allocator);
-                    try self.stack.append(self.allocator, next_item);
-                    // Update loop_index0 for loop.cycle() and loop.changed()
-                    self.loop_index0 = @intCast(loop_state.index);
-                    pc.* = instr.operand + 1; // Jump to instruction after FOR_LOOP_START
-                } else {
-                    // Loop complete - free iterable and pop loop state
-                    var completed_state = self.loop_stack.pop().?;
-                    self.restoreLoopVariable(&completed_state);
-                    completed_state.iterable.deinit(self.allocator);
-                    // Reset loop_index0 when exiting loop
-                    if (self.loop_stack.items.len > 0) {
-                        const outer_loop = &self.loop_stack.items[self.loop_stack.items.len - 1];
-                        self.loop_index0 = @intCast(outer_loop.index);
-                    } else {
-                        self.loop_index0 = 0;
-                    }
-                }
-            },
-            // Phase 6: Fast loop variable access
-            .GET_LOOP_VAR => {
-                try self.stack.append(self.allocator, try self.loopVariable(instr.operand));
-            },
-            .BREAK_LOOP => {
-                // Break out of current loop - find matching FOR_LOOP_END and jump past it
-                if (self.loop_stack.items.len == 0) {
-                    return exceptions.TemplateError.RuntimeError;
-                }
-
-                // Pop the loop state and free iterable
-                var completed_state = self.loop_stack.pop().?;
-                self.restoreLoopVariable(&completed_state);
-                completed_state.iterable.deinit(self.allocator);
-
-                const loop_end = findMatchingLoopEnd(self.bytecode.instructions.items, pc.*) orelse
-                    return exceptions.TemplateError.RuntimeError;
-                pc.* = loop_end + 1;
-                return;
-            },
-            .CONTINUE_LOOP => {
-                // Continue to next iteration - jump back to FOR_LOOP_END
-                if (self.loop_stack.items.len == 0) {
-                    return exceptions.TemplateError.RuntimeError;
-                }
-
-                // Let FOR_LOOP_END advance the active loop state.
-                pc.* = findMatchingLoopEnd(self.bytecode.instructions.items, pc.*) orelse
-                    return exceptions.TemplateError.RuntimeError;
-                return;
-            },
+            .FOR_LOOP_START => try self.executeForLoopStart(instr.operand, pc),
+            .FOR_LOOP_END => try self.executeForLoopEnd(instr.operand, pc),
+            .GET_LOOP_VAR => try self.stack.append(self.allocator, try self.loopVariable(instr.operand)),
+            .BREAK_LOOP => try self.executeBreakLoop(pc),
+            .CONTINUE_LOOP => try self.executeContinueLoop(pc),
             else => unreachable,
         }
     }
