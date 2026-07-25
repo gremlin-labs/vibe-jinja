@@ -321,8 +321,7 @@ pub const BytecodeVM = struct {
         };
     }
 
-    /// Execute bytecode and return result string
-    inline fn executeStackInstruction(self: *Self, instr: Instruction) anyerror!void {
+    inline fn executeLoadInstruction(self: *Self, instr: Instruction) anyerror!void {
         switch (instr.opcode) {
             .LOAD_STRING => {
                 const str = self.bytecode.strings.items[@as(usize, @intCast(instr.operand))];
@@ -342,6 +341,12 @@ pub const BytecodeVM = struct {
             .LOAD_NULL => {
                 try self.stack.append(self.allocator, Value{ .null = {} });
             },
+            else => unreachable,
+        }
+    }
+
+    inline fn executeVariableInstruction(self: *Self, instr: Instruction) anyerror!void {
+        switch (instr.opcode) {
             .LOAD_VAR => {
                 const name = self.bytecode.names.items[@as(usize, @intCast(instr.operand))];
                 const val = try self.loadVariable(name);
@@ -395,6 +400,12 @@ pub const BytecodeVM = struct {
                     val.deinit(self.allocator);
                 }
             },
+            else => unreachable,
+        }
+    }
+
+    inline fn executeOperatorInstruction(self: *Self, instr: Instruction) anyerror!void {
+        switch (instr.opcode) {
             .BIN_OP => {
                 const right = self.stack.pop() orelse Value{ .null = {} };
                 defer right.deinit(self.allocator);
@@ -428,6 +439,19 @@ pub const BytecodeVM = struct {
                 const result = try self.getItem(obj, key);
                 try self.stack.append(self.allocator, result);
             },
+            .ADD => {
+                const right = self.stack.pop() orelse Value{ .null = {} };
+                defer right.deinit(self.allocator);
+                const left = self.stack.pop() orelse Value{ .null = {} };
+                defer left.deinit(self.allocator);
+                try self.stack.append(self.allocator, try self.executeBinOp(left, right, @intFromEnum(semantics.BinaryOp.add)));
+            },
+            else => unreachable,
+        }
+    }
+
+    inline fn executeCollectionInstruction(self: *Self, instr: Instruction) anyerror!void {
+        switch (instr.opcode) {
             .BUILD_LIST => {
                 const count = instr.operand;
                 const list_ptr = try self.createList(count);
@@ -443,13 +467,6 @@ pub const BytecodeVM = struct {
 
                 try self.stack.append(self.allocator, Value{ .list = list_ptr });
             },
-            .ADD => {
-                const right = self.stack.pop() orelse Value{ .null = {} };
-                defer right.deinit(self.allocator);
-                const left = self.stack.pop() orelse Value{ .null = {} };
-                defer left.deinit(self.allocator);
-                try self.stack.append(self.allocator, try self.executeBinOp(left, right, @intFromEnum(semantics.BinaryOp.add)));
-            },
             .POP => {
                 const value = self.stack.pop() orelse Value{ .null = {} };
                 value.deinit(self.allocator);
@@ -459,6 +476,17 @@ pub const BytecodeVM = struct {
                     try self.stack.append(self.allocator, try self.stack.items[self.stack.items.len - 1].deepCopy(self.allocator));
                 }
             },
+            else => unreachable,
+        }
+    }
+
+    /// Execute stack-owned bytecode through small inline opcode families.
+    inline fn executeStackInstruction(self: *Self, instr: Instruction) anyerror!void {
+        switch (instr.opcode) {
+            .LOAD_STRING, .LOAD_INT, .LOAD_FLOAT, .LOAD_BOOL, .LOAD_NULL => try self.executeLoadInstruction(instr),
+            .LOAD_VAR, .STORE_VAR, .LOAD_LOCAL, .STORE_LOCAL => try self.executeVariableInstruction(instr),
+            .BIN_OP, .UNARY_OP, .GET_ATTR, .GET_ITEM, .ADD => try self.executeOperatorInstruction(instr),
+            .BUILD_LIST, .POP, .DUP => try self.executeCollectionInstruction(instr),
             else => unreachable,
         }
     }
