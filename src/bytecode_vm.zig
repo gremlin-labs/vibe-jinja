@@ -818,167 +818,136 @@ pub const BytecodeVM = struct {
         }
     }
 
+    inline fn executeFunctionCall(self: *Self, arg_count: u32) anyerror!void {
+        var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
+        defer args_buffer.deinit();
+        const args = args_buffer.items();
+
+        const func_val = self.stack.pop() orelse Value{ .null = {} };
+        defer func_val.deinit(self.allocator);
+
+        if (func_val == .callable) {
+            if (func_val.callable.func) |func| {
+                const result = func(self.allocator, args, self.context, self.environment) catch
+                    return exceptions.TemplateError.RuntimeError;
+                try self.stack.append(self.allocator, result);
+                return;
+            }
+        }
+        try self.stack.append(self.allocator, Value{ .null = {} });
+    }
+
+    inline fn executeGlobalCall(self: *Self, operand: u32) anyerror!void {
+        const name_idx = operand & 0xFFFF;
+        const arg_count = operand >> 16;
+        const func_name = self.bytecode.names.items[@intCast(name_idx)];
+
+        if (self.runtime_macros.get(func_name) != null or self.context.getMacro(func_name) != null) {
+            const result = try self.executeMacro(func_name, arg_count, 0, null);
+            try self.stack.append(self.allocator, result);
+            return;
+        }
+
+        var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
+        defer args_buffer.deinit();
+        const args = args_buffer.items();
+
+        if (self.environment.getGlobal(func_name)) |global_val| {
+            if (global_val == .callable) {
+                if (global_val.callable.func) |func| {
+                    const result = func(self.allocator, args, self.context, self.environment) catch
+                        return exceptions.TemplateError.RuntimeError;
+                    try self.stack.append(self.allocator, result);
+                    return;
+                }
+                try self.stack.append(self.allocator, Value{ .null = {} });
+                return;
+            }
+            try self.stack.append(self.allocator, try global_val.deepCopy(self.allocator));
+            return;
+        }
+
+        const filter = self.environment.getFilter(func_name) orelse
+            return exceptions.TemplateError.RuntimeError;
+        if (args.len == 0) {
+            try self.stack.append(self.allocator, Value{ .null = {} });
+            return;
+        }
+
+        var empty_kwargs = std.StringHashMap(Value).init(self.allocator);
+        defer empty_kwargs.deinit();
+        const result = try filter.func(
+            self.allocator,
+            args[0],
+            args[1..],
+            &empty_kwargs,
+            self.context,
+            self.environment,
+        );
+        try self.stack.append(self.allocator, result);
+    }
+
+    inline fn executeSliceInstruction(self: *Self, flags: u32) anyerror!void {
+        var step_val: ?i64 = null;
+        var stop_val: ?i64 = null;
+        var start_val: ?i64 = null;
+
+        if (flags & 4 != 0) {
+            const step = self.stack.pop() orelse Value{ .null = {} };
+            defer step.deinit(self.allocator);
+            step_val = step.toInteger();
+        }
+        if (flags & 2 != 0) {
+            const stop = self.stack.pop() orelse Value{ .null = {} };
+            defer stop.deinit(self.allocator);
+            stop_val = stop.toInteger();
+        }
+        if (flags & 1 != 0) {
+            const start = self.stack.pop() orelse Value{ .null = {} };
+            defer start.deinit(self.allocator);
+            start_val = start.toInteger();
+        }
+
+        const obj = self.stack.pop() orelse Value{ .null = {} };
+        defer obj.deinit(self.allocator);
+
+        const step: i64 = step_val orelse 1;
+        if (step == 0) return exceptions.TemplateError.RuntimeError;
+
+        try self.stack.append(self.allocator, try self.executeSlice(obj, start_val, stop_val, step));
+    }
+
+    inline fn executeLoopCycle(self: *Self, arg_count: u32) anyerror!void {
+        if (arg_count == 0) return exceptions.TemplateError.TypeError;
+
+        var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
+        defer args_buffer.deinit();
+        const args = args_buffer.items();
+        const idx: usize = @intCast(@mod(self.loop_index0, @as(i64, @intCast(arg_count))));
+        try self.stack.append(self.allocator, try args[idx].deepCopy(self.allocator));
+    }
+
+    inline fn executeLoopChanged(self: *Self, arg_count: u32) anyerror!void {
+        var hash: u64 = 0;
+        var changed_j: u32 = 0;
+        while (changed_j < arg_count) : (changed_j += 1) {
+            const arg = self.stack.pop() orelse Value{ .null = {} };
+            defer arg.deinit(self.allocator);
+            hash = hash *% 31 +% arg.hash();
+        }
+
+        const changed = if (self.last_changed_hash) |last_hash| hash != last_hash else true;
+        self.last_changed_hash = hash;
+        try self.stack.append(self.allocator, Value{ .boolean = changed });
+    }
+
     inline fn executeCallInstruction(self: *Self, instr: Instruction) anyerror!void {
         switch (instr.opcode) {
-            .CALL_FUNC => {
-                // Generic function call - pop function and args
-                const arg_count = instr.operand;
-
-                // Pop arguments from stack (in reverse order)
-                var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
-                defer args_buffer.deinit();
-                const args = args_buffer.items();
-
-                // Pop function value
-                const func_val = self.stack.pop() orelse Value{ .null = {} };
-                defer func_val.deinit(self.allocator);
-
-                // Call callable if it has a function pointer
-                if (func_val == .callable) {
-                    if (func_val.callable.func) |func| {
-                        const result = func(self.allocator, args, self.context, self.environment) catch {
-                            return exceptions.TemplateError.RuntimeError;
-                        };
-                        try self.stack.append(self.allocator, result);
-                    } else {
-                        try self.stack.append(self.allocator, Value{ .null = {} });
-                    }
-                } else {
-                    try self.stack.append(self.allocator, Value{ .null = {} });
-                }
-            },
-            .CALL_GLOBAL => {
-                // Call a global function by name
-                const name_idx = instr.operand & 0xFFFF;
-                const arg_count = instr.operand >> 16;
-
-                const func_name = self.bytecode.names.items[@as(usize, @intCast(name_idx))];
-
-                // First check if it's a macro (takes priority)
-                if (self.runtime_macros.get(func_name)) |_| {
-                    // It's a macro - execute it
-                    const result = try self.executeMacro(func_name, arg_count, 0, null);
-                    try self.stack.append(self.allocator, result);
-                } else if (self.context.getMacro(func_name)) |_| {
-                    // AST-defined macro
-                    const result = try self.executeMacro(func_name, arg_count, 0, null);
-                    try self.stack.append(self.allocator, result);
-                } else {
-                    // Pop arguments from stack (in reverse order)
-                    var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
-                    defer args_buffer.deinit();
-                    const args = args_buffer.items();
-
-                    if (self.environment.getGlobal(func_name)) |global_val| {
-                        if (global_val == .callable) {
-                            if (global_val.callable.func) |func| {
-                                const result = func(self.allocator, args, self.context, self.environment) catch {
-                                    return exceptions.TemplateError.RuntimeError;
-                                };
-                                try self.stack.append(self.allocator, result);
-                            } else {
-                                try self.stack.append(self.allocator, Value{ .null = {} });
-                            }
-                        } else {
-                            // Non-callable global - return as-is
-                            const result = try global_val.deepCopy(self.allocator);
-                            try self.stack.append(self.allocator, result);
-                        }
-                    } else {
-                        // Check if it's a filter that can be called as function
-                        if (self.environment.getFilter(func_name)) |filter| {
-                            // First arg is the value, rest are args
-                            if (args.len > 0) {
-                                const filter_args = args[1..];
-                                // Empty kwargs for bytecode execution
-                                var empty_kwargs = std.StringHashMap(Value).init(self.allocator);
-                                defer empty_kwargs.deinit();
-                                const result = try filter.func(self.allocator, args[0], filter_args, &empty_kwargs, self.context, self.environment);
-                                try self.stack.append(self.allocator, result);
-                            } else {
-                                try self.stack.append(self.allocator, Value{ .null = {} });
-                            }
-                        } else {
-                            return exceptions.TemplateError.RuntimeError;
-                        }
-                    }
-                }
-            },
-            .GET_SLICE => {
-                // Slice operation: obj[start:stop:step]
-                // Operand encodes which parts are present: bit 0=start, bit 1=stop, bit 2=step
-                const flags = instr.operand;
-
-                // Pop slice components in reverse order of how they were pushed
-                var step_val: ?i64 = null;
-                var stop_val: ?i64 = null;
-                var start_val: ?i64 = null;
-
-                if (flags & 4 != 0) {
-                    const step = self.stack.pop() orelse Value{ .null = {} };
-                    defer step.deinit(self.allocator);
-                    step_val = step.toInteger();
-                }
-                if (flags & 2 != 0) {
-                    const stop = self.stack.pop() orelse Value{ .null = {} };
-                    defer stop.deinit(self.allocator);
-                    stop_val = stop.toInteger();
-                }
-                if (flags & 1 != 0) {
-                    const start = self.stack.pop() orelse Value{ .null = {} };
-                    defer start.deinit(self.allocator);
-                    start_val = start.toInteger();
-                }
-
-                const obj = self.stack.pop() orelse Value{ .null = {} };
-                defer obj.deinit(self.allocator);
-
-                const step: i64 = step_val orelse 1;
-                if (step == 0) {
-                    return exceptions.TemplateError.RuntimeError;
-                }
-
-                const result = try self.executeSlice(obj, start_val, stop_val, step);
-                try self.stack.append(self.allocator, result);
-            },
-            .LOOP_CYCLE => {
-                // loop.cycle(args) - return arg at index % arg_count
-                const arg_count = instr.operand;
-                if (arg_count == 0) {
-                    return exceptions.TemplateError.TypeError;
-                }
-
-                // Pop arguments from stack (in reverse order)
-                var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
-                defer args_buffer.deinit();
-                const args = args_buffer.items();
-
-                // Get current loop index
-                const idx: usize = @intCast(@mod(self.loop_index0, @as(i64, @intCast(arg_count))));
-                const result = try args[idx].deepCopy(self.allocator);
-                try self.stack.append(self.allocator, result);
-            },
-            .LOOP_CHANGED => {
-                // loop.changed(args) - return true if args hash differs from last call
-                const arg_count = instr.operand;
-
-                // Pop arguments and compute hash
-                var hash: u64 = 0;
-                var changed_j: u32 = 0;
-                while (changed_j < arg_count) : (changed_j += 1) {
-                    const arg = self.stack.pop() orelse Value{ .null = {} };
-                    defer arg.deinit(self.allocator);
-                    hash = hash *% 31 +% arg.hash();
-                }
-
-                const changed = if (self.last_changed_hash) |last_hash|
-                    hash != last_hash
-                else
-                    true;
-
-                self.last_changed_hash = hash;
-                try self.stack.append(self.allocator, Value{ .boolean = changed });
-            },
+            .CALL_FUNC => try self.executeFunctionCall(instr.operand),
+            .CALL_GLOBAL => try self.executeGlobalCall(instr.operand),
+            .GET_SLICE => try self.executeSliceInstruction(instr.operand),
+            .LOOP_CYCLE => try self.executeLoopCycle(instr.operand),
+            .LOOP_CHANGED => try self.executeLoopChanged(instr.operand),
             else => unreachable,
         }
     }
