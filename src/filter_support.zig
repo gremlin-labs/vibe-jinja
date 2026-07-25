@@ -34,6 +34,12 @@ pub fn appendOwnedCopy(allocator: std.mem.Allocator, list: *value_mod.List, item
     try list.append(item_copy);
 }
 
+pub fn appendOwnedString(allocator: std.mem.Allocator, list: *value_mod.List, text: []const u8) !void {
+    const owned = try allocator.dupe(u8, text);
+    errdefer allocator.free(owned);
+    try list.append(.{ .string = owned });
+}
+
 pub fn deinitGroups(allocator: std.mem.Allocator, groups: *std.StringHashMap(*value_mod.List), own_lists: bool) void {
     var iter = groups.iterator();
     while (iter.next()) |entry| {

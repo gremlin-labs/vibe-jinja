@@ -18,6 +18,52 @@ fn callFilter(
     return filter_fn(allocator, input, args, &empty_kwargs, null, null);
 }
 
+fn expectSplitWithAllocator(
+    allocator: std.mem.Allocator,
+    input_text: []const u8,
+    separator: ?[]const u8,
+    maxsplit: ?i64,
+    expected: []const []const u8,
+) !void {
+    var input = value.Value{ .string = try allocator.dupe(u8, input_text) };
+    defer input.deinit(allocator);
+
+    var args_buffer: [2]value.Value = undefined;
+    var args_len: usize = 0;
+    if (separator) |separator_text| {
+        args_buffer[args_len] = .{ .string = try allocator.dupe(u8, separator_text) };
+        args_len += 1;
+    } else if (maxsplit != null) {
+        args_buffer[args_len] = .null;
+        args_len += 1;
+    }
+    if (maxsplit) |limit| {
+        args_buffer[args_len] = .{ .integer = limit };
+        args_len += 1;
+    }
+    defer for (args_buffer[0..args_len]) |*arg| arg.deinit(allocator);
+
+    var result = try callFilter(filters.BuiltinFilters.split, allocator, input, args_buffer[0..args_len]);
+    defer result.deinit(allocator);
+
+    try testing.expect(result == .list);
+    try testing.expectEqual(expected.len, result.list.items.items.len);
+    for (expected, result.list.items.items) |expected_item, actual_item| {
+        try testing.expect(actual_item == .string);
+        try testing.expectEqualStrings(expected_item, actual_item.string);
+    }
+}
+
+fn splitAllocationFailureScenario(allocator: std.mem.Allocator) !void {
+    try expectSplitWithAllocator(
+        allocator,
+        "alpha,beta,gamma,delta",
+        ",",
+        2,
+        &.{ "alpha", "beta", "gamma,delta" },
+    );
+}
+
 // ============================================================================
 // String Filters
 // ============================================================================
@@ -155,6 +201,22 @@ test "filter replace" {
 
     try testing.expect(result == .string);
     try testing.expectEqualStrings("hello zig", result.string);
+}
+
+test "filter split matches explicit and whitespace maxsplit boundaries" {
+    const allocator = testing.allocator;
+
+    try expectSplitWithAllocator(allocator, "a,,b", ",", null, &.{ "a", "", "b" });
+    try expectSplitWithAllocator(allocator, "a,b,c", ",", 0, &.{"a,b,c"});
+    try expectSplitWithAllocator(allocator, "a,b,c", ",", 1, &.{ "a", "b,c" });
+    try expectSplitWithAllocator(allocator, "  a   b ", null, null, &.{ "a", "b" });
+    try expectSplitWithAllocator(allocator, "  a   b ", null, 0, &.{"a   b "});
+    try expectSplitWithAllocator(allocator, "  a   b  c ", null, 1, &.{ "a", "b  c " });
+    try expectSplitWithAllocator(allocator, "   ", null, 0, &.{});
+}
+
+test "filter split releases every allocation on failure" {
+    try testing.checkAllAllocationFailures(testing.allocator, splitAllocationFailureScenario, .{});
 }
 
 test "filter abs" {

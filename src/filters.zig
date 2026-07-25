@@ -97,6 +97,7 @@ const createList = support.createList;
 const createDict = support.createDict;
 const attributeTruthy = support.attributeTruthy;
 const appendOwnedCopy = support.appendOwnedCopy;
+const appendOwnedString = support.appendOwnedString;
 const deinitGroups = support.deinitGroups;
 
 /// Filter function signature
@@ -514,41 +515,52 @@ pub const BuiltinFilters = struct {
 
             if (sep.len == 0) return exceptions.TemplateError.TypeError;
 
-            const result_list = try createList(allocator, std.mem.count(u8, str, sep) + 1);
-            errdefer {
-                result_list.deinit(allocator);
-                allocator.destroy(result_list);
-            }
+            const separator_count = std.mem.count(u8, str, sep);
+            const split_limit = if (maxsplit < 0)
+                separator_count
+            else
+                @min(separator_count, std.math.cast(usize, maxsplit) orelse std.math.maxInt(usize));
+            const capacity = std.math.add(usize, split_limit, 1) catch return error.OutOfMemory;
+            const result_list = try createList(allocator, capacity);
+            errdefer result_list.deinit(allocator);
 
             var splits: i64 = 0;
             var start: usize = 0;
             while (std.mem.indexOfPos(u8, str, start, sep)) |idx| {
                 if (maxsplit >= 0 and splits >= maxsplit) break;
-                try result_list.items.append(allocator, Value{ .string = try allocator.dupe(u8, str[start..idx]) });
+                try appendOwnedString(allocator, result_list, str[start..idx]);
                 start = idx + sep.len;
                 splits += 1;
             }
-            try result_list.items.append(allocator, Value{ .string = try allocator.dupe(u8, str[start..]) });
+            try appendOwnedString(allocator, result_list, str[start..]);
             return Value{ .list = result_list };
         }
 
         // No separator: split on runs of whitespace, dropping empty segments
-        const result_list = try createList(allocator, 0);
-        errdefer {
-            result_list.deinit(allocator);
-            allocator.destroy(result_list);
+        const max_items: ?usize = if (maxsplit < 0) null else limit: {
+            const converted = std.math.cast(usize, maxsplit) orelse std.math.maxInt(usize);
+            break :limit std.math.add(usize, converted, 1) catch std.math.maxInt(usize);
+        };
+        var capacity: usize = 0;
+        var capacity_iter = std.mem.tokenizeAny(u8, str, " \t\n\r");
+        while (capacity_iter.next()) |_| {
+            capacity += 1;
+            if (max_items) |limit| {
+                if (capacity >= limit) break;
+            }
         }
+        const result_list = try createList(allocator, capacity);
+        errdefer result_list.deinit(allocator);
 
         var splits: i64 = 0;
         var iter = std.mem.tokenizeAny(u8, str, " \t\n\r");
         while (iter.next()) |token| {
             if (maxsplit >= 0 and splits >= maxsplit) {
                 const rest = std.mem.trimLeft(u8, str[iter.index - token.len ..], " \t\n\r");
-                const trimmed = std.mem.trimRight(u8, rest, " \t\n\r");
-                try result_list.items.append(allocator, Value{ .string = try allocator.dupe(u8, trimmed) });
+                try appendOwnedString(allocator, result_list, rest);
                 break;
             }
-            try result_list.items.append(allocator, Value{ .string = try allocator.dupe(u8, token) });
+            try appendOwnedString(allocator, result_list, token);
             splits += 1;
         }
         return Value{ .list = result_list };

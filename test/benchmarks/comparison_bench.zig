@@ -320,6 +320,8 @@ fn benchmarkFilterFastPaths(allocator: std.mem.Allocator) !void {
         .{ .label = "escape (with specials - slow path)", .source = "{{ text|escape }}", .text = "<script>alert('xss');</script>" },
         .{ .label = "upper (already upper - fast path)", .source = "{{ text|upper }}", .text = "ALREADY UPPERCASE" },
         .{ .label = "upper (needs change - slow path)", .source = "{{ text|upper }}", .text = "needs to be uppercased" },
+        .{ .label = "split (explicit separator)", .source = "{{ text|split(',')|length }}", .text = "alpha,beta,gamma,delta" },
+        .{ .label = "split (whitespace maxsplit)", .source = "{{ text|split(none, 2)|length }}", .text = "alpha  beta   gamma delta" },
     };
 
     for (cases) |case| {
