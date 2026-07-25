@@ -6,6 +6,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-07-25
+
+### Added
+
+- Add and verify the exact Apache-2.0 community Qwen 3.5/3.6 v21.3 chat template, with source commit and checksum provenance.
+- Add a dedicated `zig build test:qwen-fixed` suite covering all ten upstream scenarios: thinking controls, tool argument and response truncation, mid-conversation system prompts, parallel tools, deep agent history, error escalation, and JSON tool calls.
+- Add Python-style `startswith` and `endswith` methods, Jinja `~` concatenation, mapping `.items()` iteration, and tuple loop-target unpacking required by current production chat templates.
+
+### Changed
+
+- Split VM call, stack, specialized-filter, loop, and macro-argument handling into focused helpers while preserving the existing public API.
+- Isolate explicit-separator and whitespace `split` algorithms and centralize bytecode loop-end discovery.
+- Refresh the Python comparison reference used by the release benchmark gate.
+
+### Fixed
+
+- Make `split` allocation-safe on partial construction and preserve Python whitespace/maxsplit behavior.
+- Preserve outer loop variables and active loop state across nested `break`, `continue`, and empty-loop paths.
+- Apply Jinja `{%-`, `{{-`, `-%}`, and `-}}` whitespace control to adjacent template data.
+- Short-circuit boolean expressions, support lowercase `none`, and allow `is defined`/`is undefined` to guard missing names under strict undefined behavior.
+- Parse complete positional call expressions such as `message.content` and resolve macro calls before strict variable lookup.
+
+### Performance
+
+- The refactor series remained performance-neutral in alternating baseline/candidate runs; no reproducible render regression was found.
+- The 2026-07-25 release-candidate gate passed all four Python comparisons: 2.64x simple-template, 5.17x loop, 22.54x conditional, and 13.99x filter-chain average speedups.
+- Steady-state comparison renders continue to make one backing-allocator allocation for the returned string.
+
 ## [1.2.0] - 2026-07-14
 
 ### Added
