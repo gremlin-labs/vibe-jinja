@@ -494,49 +494,29 @@ pub const BuiltinFilters = struct {
         return Value{ .string = try result.toOwnedSlice(allocator) };
     }
 
-    /// Split a string into a list, following Python str.split semantics:
-    /// with a separator, split on every occurrence and keep empty segments;
-    /// with no separator (or none), split on whitespace runs and drop empties.
-    /// Optional second argument is maxsplit (negative means unlimited).
-    pub fn split(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
-        _ = kwargs;
-        _ = ctx;
-        _ = env;
+    inline fn splitExplicit(allocator: std.mem.Allocator, str: []const u8, sep: []const u8, maxsplit: i64) !Value {
+        const separator_count = std.mem.count(u8, str, sep);
+        const split_limit = if (maxsplit < 0)
+            separator_count
+        else
+            @min(separator_count, std.math.cast(usize, maxsplit) orelse std.math.maxInt(usize));
+        const capacity = std.math.add(usize, split_limit, 1) catch return error.OutOfMemory;
+        const result_list = try createList(allocator, capacity);
+        errdefer result_list.deinit(allocator);
 
-        const str = try val.toString(allocator);
-        defer allocator.free(str);
-
-        const maxsplit: i64 = if (args.len >= 2) (args[1].toInteger() orelse -1) else -1;
-
-        const has_sep = args.len >= 1 and args[0] != .null and args[0] != .undefined;
-        if (has_sep) {
-            const sep = try args[0].toString(allocator);
-            defer allocator.free(sep);
-
-            if (sep.len == 0) return exceptions.TemplateError.TypeError;
-
-            const separator_count = std.mem.count(u8, str, sep);
-            const split_limit = if (maxsplit < 0)
-                separator_count
-            else
-                @min(separator_count, std.math.cast(usize, maxsplit) orelse std.math.maxInt(usize));
-            const capacity = std.math.add(usize, split_limit, 1) catch return error.OutOfMemory;
-            const result_list = try createList(allocator, capacity);
-            errdefer result_list.deinit(allocator);
-
-            var splits: i64 = 0;
-            var start: usize = 0;
-            while (std.mem.indexOfPos(u8, str, start, sep)) |idx| {
-                if (maxsplit >= 0 and splits >= maxsplit) break;
-                try appendOwnedString(allocator, result_list, str[start..idx]);
-                start = idx + sep.len;
-                splits += 1;
-            }
-            try appendOwnedString(allocator, result_list, str[start..]);
-            return Value{ .list = result_list };
+        var splits: i64 = 0;
+        var start: usize = 0;
+        while (std.mem.indexOfPos(u8, str, start, sep)) |idx| {
+            if (maxsplit >= 0 and splits >= maxsplit) break;
+            try appendOwnedString(allocator, result_list, str[start..idx]);
+            start = idx + sep.len;
+            splits += 1;
         }
+        try appendOwnedString(allocator, result_list, str[start..]);
+        return .{ .list = result_list };
+    }
 
-        // No separator: split on runs of whitespace, dropping empty segments
+    inline fn splitWhitespace(allocator: std.mem.Allocator, str: []const u8, maxsplit: i64) !Value {
         const max_items: ?usize = if (maxsplit < 0) null else limit: {
             const converted = std.math.cast(usize, maxsplit) orelse std.math.maxInt(usize);
             break :limit std.math.add(usize, converted, 1) catch std.math.maxInt(usize);
@@ -563,7 +543,29 @@ pub const BuiltinFilters = struct {
             try appendOwnedString(allocator, result_list, token);
             splits += 1;
         }
-        return Value{ .list = result_list };
+        return .{ .list = result_list };
+    }
+
+    /// Split a string into a list, following Python str.split semantics:
+    /// with a separator, split on every occurrence and keep empty segments;
+    /// with no separator (or none), split on whitespace runs and drop empties.
+    /// Optional second argument is maxsplit (negative means unlimited).
+    pub fn split(allocator: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
+        _ = kwargs;
+        _ = ctx;
+        _ = env;
+
+        const str = try val.toString(allocator);
+        defer allocator.free(str);
+        const maxsplit: i64 = if (args.len >= 2) (args[1].toInteger() orelse -1) else -1;
+
+        const has_sep = args.len >= 1 and args[0] != .null and args[0] != .undefined;
+        if (!has_sep) return splitWhitespace(allocator, str, maxsplit);
+
+        const sep = try args[0].toString(allocator);
+        defer allocator.free(sep);
+        if (sep.len == 0) return exceptions.TemplateError.TypeError;
+        return splitExplicit(allocator, str, sep, maxsplit);
     }
 
     /// Strip whitespace from both ends
