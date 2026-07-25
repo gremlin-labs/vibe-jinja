@@ -11,6 +11,22 @@ const Opcode = types.Opcode;
 const Instruction = types.Instruction;
 const Bytecode = types.Bytecode;
 
+fn findMatchingLoopEnd(instructions: []const Instruction, start_pc: u32) ?u32 {
+    var cursor = start_pc;
+    var depth: u32 = 1;
+    while (cursor < instructions.len) : (cursor += 1) {
+        switch (instructions[@intCast(cursor)].opcode) {
+            .FOR_LOOP_START => depth += 1,
+            .FOR_LOOP_END => {
+                depth -= 1;
+                if (depth == 0) return cursor;
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
 /// Normalize a slice index for Python-style slicing semantics
 fn normalizeSliceIndex(index: ?i64, length: i64, step: i64, is_start: bool) i64 {
     if (index) |idx| {
@@ -1021,36 +1037,16 @@ pub const BytecodeVM = struct {
 
                 if (items.len == 0) {
                     // Empty iterable - skip loop body but NOT else clause
-                    // Find matching FOR_LOOP_END and jump to instruction AFTER it
-                    // (which is either else body or the JUMP that skips else)
-                    var depth: u32 = 1;
-                    while (pc.* < self.bytecode.instructions.items.len) {
-                        const next_instr = self.bytecode.instructions.items[@as(usize, @intCast(pc.*))];
-                        if (next_instr.opcode == .FOR_LOOP_START) depth += 1;
-                        if (next_instr.opcode == .FOR_LOOP_END) {
-                            depth -= 1;
-                            if (depth == 0) {
-                                // Don't skip past FOR_LOOP_END - let main loop increment pc.*
-                                // This lands on instruction after FOR_LOOP_END
-                                // If there's else: lands on JUMP (will skip else) - WRONG
-                                // We need to skip the JUMP too!
-                                // Check if next instruction is JUMP, and if so, skip it
-                                const after_loop_end = pc.* + 1;
-                                if (after_loop_end < self.bytecode.instructions.items.len) {
-                                    const next_after = self.bytecode.instructions.items[@as(usize, @intCast(after_loop_end))];
-                                    if (next_after.opcode == .JUMP) {
-                                        // Skip the JUMP to get to else body
-                                        pc.* = after_loop_end + 1;
-                                    } else {
-                                        pc.* = after_loop_end;
-                                    }
-                                } else {
-                                    pc.* = after_loop_end;
-                                }
-                                break;
-                            }
-                        }
-                        pc.* += 1;
+                    const loop_end = findMatchingLoopEnd(self.bytecode.instructions.items, pc.*) orelse
+                        return exceptions.TemplateError.RuntimeError;
+                    const after_loop_end = loop_end + 1;
+                    if (after_loop_end < self.bytecode.instructions.items.len and
+                        self.bytecode.instructions.items[@intCast(after_loop_end)].opcode == .JUMP)
+                    {
+                        // A non-empty loop executes this jump to skip its else body.
+                        pc.* = after_loop_end + 1;
+                    } else {
+                        pc.* = after_loop_end;
                     }
                     // Free empty iterable immediately
                     iterable.deinit(self.allocator);
@@ -1124,20 +1120,9 @@ pub const BytecodeVM = struct {
                 self.restoreLoopVariable(&completed_state);
                 completed_state.iterable.deinit(self.allocator);
 
-                // Find matching FOR_LOOP_END (skip nested loops)
-                var depth: u32 = 1;
-                while (pc.* < self.bytecode.instructions.items.len) {
-                    const next_instr = self.bytecode.instructions.items[@as(usize, @intCast(pc.*))];
-                    if (next_instr.opcode == .FOR_LOOP_START) depth += 1;
-                    if (next_instr.opcode == .FOR_LOOP_END) {
-                        depth -= 1;
-                        if (depth == 0) {
-                            pc.* += 1; // Skip past FOR_LOOP_END
-                            break;
-                        }
-                    }
-                    pc.* += 1;
-                }
+                const loop_end = findMatchingLoopEnd(self.bytecode.instructions.items, pc.*) orelse
+                    return exceptions.TemplateError.RuntimeError;
+                pc.* = loop_end + 1;
                 return;
             },
             .CONTINUE_LOOP => {
@@ -1146,20 +1131,9 @@ pub const BytecodeVM = struct {
                     return exceptions.TemplateError.RuntimeError;
                 }
 
-                // Find matching FOR_LOOP_END (skip nested loops)
-                var depth: u32 = 1;
-                while (pc.* < self.bytecode.instructions.items.len) {
-                    const next_instr = self.bytecode.instructions.items[@as(usize, @intCast(pc.*))];
-                    if (next_instr.opcode == .FOR_LOOP_START) depth += 1;
-                    if (next_instr.opcode == .FOR_LOOP_END) {
-                        depth -= 1;
-                        if (depth == 0) {
-                            // Let FOR_LOOP_END handle advancing to next iteration
-                            break;
-                        }
-                    }
-                    pc.* += 1;
-                }
+                // Let FOR_LOOP_END advance the active loop state.
+                pc.* = findMatchingLoopEnd(self.bytecode.instructions.items, pc.*) orelse
+                    return exceptions.TemplateError.RuntimeError;
                 return;
             },
             else => unreachable,
@@ -1678,3 +1652,21 @@ pub const BytecodeVM = struct {
         return @import("bytecode_async.zig").execute(self);
     }
 };
+
+test "findMatchingLoopEnd skips nested loops and rejects malformed bytecode" {
+    const nested = [_]Instruction{
+        .init(.FOR_LOOP_START, 0),
+        .init(.LOAD_NULL, 0),
+        .init(.FOR_LOOP_START, 0),
+        .init(.FOR_LOOP_END, 2),
+        .init(.FOR_LOOP_END, 0),
+    };
+    try std.testing.expectEqual(@as(?u32, 4), findMatchingLoopEnd(&nested, 1));
+    try std.testing.expectEqual(@as(?u32, 3), findMatchingLoopEnd(&nested, 3));
+
+    const malformed = [_]Instruction{
+        .init(.FOR_LOOP_START, 0),
+        .init(.LOAD_NULL, 0),
+    };
+    try std.testing.expectEqual(@as(?u32, null), findMatchingLoopEnd(&malformed, 1));
+}

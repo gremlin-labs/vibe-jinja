@@ -71,6 +71,25 @@ test "split filter follows Python str.split semantics" {
     try expectRender("b,c", "{{ 'a,b,c'.split(',', 1)[-1] }}");
 }
 
+test "nested loop exits preserve the active loop and outer variable" {
+    try expectRender(
+        "empty",
+        "{% for outer in [] %}{% for inner in [1] %}bad{% endfor %}{% else %}empty{% endfor %}",
+    );
+    try expectRender(
+        "1121",
+        "{% for outer in [1,2] %}{% for inner in [1,2] %}{{ outer }}{{ inner }}{% break %}{% endfor %}{% endfor %}",
+    );
+    try expectRender(
+        "1222",
+        "{% for outer in [1,2] %}{% for inner in [1,2] %}{% if inner == 1 %}{% continue %}{% endif %}{{ outer }}{{ inner }}{% endfor %}{% endfor %}",
+    );
+    try expectRender(
+        "outer",
+        "{% set item = 'outer' %}{% for item in [1,2] %}{% break %}{% endfor %}{{ item }}",
+    );
+}
+
 test "is not negates a test" {
     try expectRender("T", "{% if 'x' is not none %}T{% else %}F{% endif %}");
     try expectRender("F", "{% if none is not none %}T{% else %}F{% endif %}");
