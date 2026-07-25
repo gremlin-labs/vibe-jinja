@@ -322,6 +322,7 @@ fn benchmarkFilterFastPaths(allocator: std.mem.Allocator) !void {
         .{ .label = "upper (needs change - slow path)", .source = "{{ text|upper }}", .text = "needs to be uppercased" },
         .{ .label = "split (explicit separator)", .source = "{{ text|split(',')|length }}", .text = "alpha,beta,gamma,delta" },
         .{ .label = "split (whitespace maxsplit)", .source = "{{ text|split(none, 2)|length }}", .text = "alpha  beta   gamma delta" },
+        .{ .label = "macro (default argument)", .source = "{% macro wrap(value, prefix='[') %}{{ prefix }}{{ value }}]{% endmacro %}{{ wrap(text) }}", .text = "payload" },
     };
 
     for (cases) |case| {

@@ -10,6 +10,7 @@ const types = @import("bytecode_types.zig");
 const Opcode = types.Opcode;
 const Instruction = types.Instruction;
 const Bytecode = types.Bytecode;
+const MacroInfo = types.MacroInfo;
 
 fn findMatchingLoopEnd(instructions: []const Instruction, start_pc: u32) ?u32 {
     var cursor = start_pc;
@@ -1315,6 +1316,104 @@ pub const BytecodeVM = struct {
         } };
     }
 
+    fn deinitMacroKwargs(self: *Self, kwargs: *std.StringHashMap(Value)) void {
+        var iter = kwargs.iterator();
+        while (iter.next()) |entry| entry.value_ptr.*.deinit(self.allocator);
+        kwargs.deinit();
+    }
+
+    fn popMacroKwargs(self: *Self, kwargs_count: u32) !std.StringHashMap(Value) {
+        var kwargs = std.StringHashMap(Value).init(self.allocator);
+        errdefer self.deinitMacroKwargs(&kwargs);
+        try kwargs.ensureTotalCapacity(kwargs_count);
+
+        var index: u32 = 0;
+        while (index < kwargs_count) : (index += 1) {
+            const value = self.stack.pop() orelse Value{ .null = {} };
+            const key_index = self.stack.pop() orelse Value{ .null = {} };
+            defer key_index.deinit(self.allocator);
+
+            if (key_index.toInteger()) |name_index| {
+                const name = self.bytecode.names.items[@intCast(name_index)];
+                try kwargs.put(name, value);
+            } else {
+                value.deinit(self.allocator);
+            }
+        }
+        return kwargs;
+    }
+
+    fn decodeMacroDefault(self: *Self, encoded: u32) !Value {
+        const type_bits = encoded >> 30;
+        const value_bits = encoded & 0x3FFFFFFF;
+        return switch (type_bits) {
+            0b10 => blk: {
+                const string = self.bytecode.strings.items[@intCast(encoded & 0x7FFFFFFF)];
+                break :blk .{ .string = try self.allocator.dupe(u8, string) };
+            },
+            0b01 => .{ .integer = @intCast(value_bits) },
+            0b11 => .{ .boolean = value_bits != 0 },
+            else => .{ .null = {} },
+        };
+    }
+
+    fn bindMacroParameters(
+        self: *Self,
+        frame: *MacroFrame,
+        macro_info: *const MacroInfo,
+        args: []Value,
+        used_positional: []bool,
+        kwargs: *std.StringHashMap(Value),
+    ) !void {
+        for (macro_info.params.items, 0..) |param, index| {
+            const param_value = if (kwargs.fetchRemove(param.name)) |entry|
+                entry.value
+            else if (index < args.len) positional: {
+                used_positional[index] = true;
+                break :positional args[index];
+            } else if (param.default_expr_idx) |encoded|
+                try self.decodeMacroDefault(encoded)
+            else
+                Value{ .null = {} };
+
+            // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: macro-frame variable keys must outlive borrowed parameter metadata.
+            const name_copy = try self.allocator.dupe(u8, param.name);
+            frame.variables.putAssumeCapacity(name_copy, param_value);
+        }
+    }
+
+    fn installMacroExtras(
+        self: *Self,
+        frame: *MacroFrame,
+        macro_info: *const MacroInfo,
+        args: []Value,
+        used_positional: []const bool,
+        kwargs: *std.StringHashMap(Value),
+    ) !void {
+        const parameter_count = macro_info.params.items.len;
+        const varargs_capacity = if (args.len > parameter_count) args.len - parameter_count else 0;
+        const varargs_list = try self.createList(varargs_capacity);
+        for (args, 0..) |arg, index| {
+            if (index >= parameter_count) {
+                varargs_list.items.appendAssumeCapacity(arg);
+            } else if (!used_positional[index]) {
+                var unused_arg = arg;
+                unused_arg.deinit(self.allocator);
+            }
+        }
+        const varargs_key = try self.allocator.dupe(u8, "varargs");
+        frame.variables.putAssumeCapacity(varargs_key, .{ .list = varargs_list });
+
+        const kwargs_dict = try self.allocator.create(value_mod.Dict);
+        kwargs_dict.* = value_mod.Dict.init(self.allocator);
+        var remaining = kwargs.iterator();
+        while (remaining.next()) |entry| try kwargs_dict.set(entry.key_ptr.*, entry.value_ptr.*);
+        kwargs.clearRetainingCapacity();
+
+        const kwargs_key = try self.allocator.dupe(u8, "kwargs");
+        frame.variables.putAssumeCapacity(kwargs_key, .{ .dict = kwargs_dict });
+    }
+
     /// Execute a macro and return its output as a Value
     fn executeMacro(self: *Self, macro_name: []const u8, arg_count: u32, kwargs_count: u32, caller: ?CallerInfo) !Value {
         // Look up macro - first in runtime_macros, then in bytecode.macros
@@ -1340,32 +1439,8 @@ pub const BytecodeVM = struct {
         errdefer if (!frame_pushed) self.deinitMacroFrame(&frame);
         try frame.variables.ensureTotalCapacity(@intCast(macro_info.params.items.len + 2));
 
-        // Build kwargs map for lookup - kwargs override positional args
-        var kwargs_map = std.StringHashMap(Value).init(self.allocator);
-        defer {
-            // Clean up any unused kwargs (those not matching a parameter)
-            var iter = kwargs_map.iterator();
-            while (iter.next()) |entry| {
-                entry.value_ptr.*.deinit(self.allocator);
-            }
-            kwargs_map.deinit();
-        }
-        try kwargs_map.ensureTotalCapacity(kwargs_count);
-
-        // Pop kwargs from stack (in pairs: key_idx, value) - store in kwargs_map
-        var kwargs_i: u32 = 0;
-        while (kwargs_i < kwargs_count) : (kwargs_i += 1) {
-            const val = self.stack.pop() orelse Value{ .null = {} };
-            const key_idx_val = self.stack.pop() orelse Value{ .null = {} };
-            defer key_idx_val.deinit(self.allocator);
-
-            if (key_idx_val.toInteger()) |key_idx| {
-                const key_name = self.bytecode.names.items[@as(usize, @intCast(key_idx))];
-                try kwargs_map.put(key_name, val);
-            } else {
-                val.deinit(self.allocator);
-            }
-        }
+        var kwargs_map = try self.popMacroKwargs(kwargs_count);
+        defer self.deinitMacroKwargs(&kwargs_map);
 
         // Pop positional args from stack
         var args_buffer = try ArgBuffer.initFromStack(self, arg_count);
@@ -1377,85 +1452,8 @@ pub const BytecodeVM = struct {
         defer used_positional_buffer.deinit();
         const used_positional = used_positional_buffer.items();
 
-        // Assign args to parameters - kwargs take priority over positional
-        for (macro_info.params.items, 0..) |param, i| {
-            var param_value: Value = undefined;
-            var found = false;
-
-            // 1. Check keyword argument first (overrides positional)
-            if (kwargs_map.fetchRemove(param.name)) |kv| {
-                param_value = kv.value;
-                found = true;
-            }
-            // 2. Then check positional argument
-            else if (i < args.len) {
-                param_value = args[i];
-                used_positional[i] = true;
-                found = true;
-            }
-            // 3. Finally check default value
-            else if (param.has_default and param.default_expr_idx != null) {
-                // Use default value - decode the packed value
-                const encoded = param.default_expr_idx.?;
-                const type_bits = encoded >> 30;
-                const value_bits = encoded & 0x3FFFFFFF;
-
-                param_value = switch (type_bits) {
-                    0b10 => blk: { // String (high bit set)
-                        const str_idx = encoded & 0x7FFFFFFF;
-                        const str = self.bytecode.strings.items[@intCast(str_idx)];
-                        // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: decoded default strings must be owned by the macro frame beyond the bytecode pool lookup.
-                        break :blk Value{ .string = try self.allocator.dupe(u8, str) };
-                    },
-                    0b01 => Value{ .integer = @intCast(value_bits) }, // Integer
-                    0b11 => Value{ .boolean = value_bits != 0 }, // Boolean
-                    else => Value{ .null = {} }, // Null or unknown
-                };
-                found = true;
-            }
-
-            if (!found) {
-                // Required parameter missing - use null
-                param_value = Value{ .null = {} };
-            }
-
-            // fallow-zig-ignore-next-line zig-alloc-inside-token-loop: macro-frame variable keys must outlive borrowed parameter metadata.
-            const name_copy = try self.allocator.dupe(u8, param.name);
-            frame.variables.putAssumeCapacity(name_copy, param_value);
-        }
-
-        // Build varargs list from unused positional args (beyond parameters)
-        // In Jinja2, varargs captures extra positional arguments
-        const varargs_capacity = if (args.len > macro_info.params.items.len) args.len - macro_info.params.items.len else 0;
-        const varargs_list = try self.createList(varargs_capacity);
-        for (args, 0..) |arg, i| {
-            if (i >= macro_info.params.items.len) {
-                // Extra positional arg - add to varargs
-                varargs_list.items.appendAssumeCapacity(arg);
-            } else if (!used_positional[i]) {
-                // Unused positional arg (replaced by kwarg) - free it
-                var arg_copy = arg;
-                arg_copy.deinit(self.allocator);
-            }
-        }
-        const varargs_key = try self.allocator.dupe(u8, "varargs");
-        frame.variables.putAssumeCapacity(varargs_key, Value{ .list = varargs_list });
-
-        // Build kwargs dict from remaining kwargs (not matched to parameters)
-        // In Jinja2, kwargs captures extra keyword arguments
-        const kwargs_dict = try self.allocator.create(value_mod.Dict);
-        kwargs_dict.* = value_mod.Dict.init(self.allocator);
-
-        // Dict.set duplicates borrowed name-pool keys; values move into kwargs_dict.
-        var remaining_iter = kwargs_map.iterator();
-        while (remaining_iter.next()) |entry| {
-            try kwargs_dict.set(entry.key_ptr.*, entry.value_ptr.*);
-        }
-
-        kwargs_map.clearRetainingCapacity();
-
-        const kwargs_key = try self.allocator.dupe(u8, "kwargs");
-        frame.variables.putAssumeCapacity(kwargs_key, Value{ .dict = kwargs_dict });
+        try self.bindMacroParameters(&frame, macro_info, args, used_positional, &kwargs_map);
+        try self.installMacroExtras(&frame, macro_info, args, used_positional, &kwargs_map);
 
         // Save current caller and push frame
         const saved_caller = self.current_caller;
