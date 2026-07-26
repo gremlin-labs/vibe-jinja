@@ -526,6 +526,22 @@ pub fn build(b: *std.Build) void {
     integration_test_step.dependOn(&run_qwen_fixed_tests.step);
     test_step.dependOn(&run_qwen_fixed_tests.step);
 
+    // Official Qwen3 Coder Next template compatibility and filtered mapping loops.
+    const qwen3_coder_next_test_module = b.addModule("qwen3_coder_next_chat_template_test", .{
+        .root_source_file = b.path("test/integration/qwen3_coder_next_chat_template.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    qwen3_coder_next_test_module.addImport("vibe_jinja", root_module);
+    const qwen3_coder_next_tests = b.addTest(.{
+        .root_module = qwen3_coder_next_test_module,
+    });
+    const run_qwen3_coder_next_tests = b.addRunArtifact(qwen3_coder_next_tests);
+    const qwen3_coder_next_step = b.step("test:qwen3-coder-next", "Run Qwen3 Coder Next template tests");
+    qwen3_coder_next_step.dependOn(&run_qwen3_coder_next_tests.step);
+    integration_test_step.dependOn(&run_qwen3_coder_next_tests.step);
+    test_step.dependOn(&run_qwen3_coder_next_tests.step);
+
     // Slice and globals tests (new feature tests)
     const slice_globals_test_module = b.addModule("slice_globals_test", .{
         .root_source_file = b.path("test/integration/slice_and_globals.zig"),

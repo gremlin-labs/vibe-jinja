@@ -1039,11 +1039,11 @@ pub const BytecodeVM = struct {
     }
 
     inline fn executeForLoopStart(self: *Self, name_operand: u32, pc: *u32) anyerror!void {
-        var iterable = self.stack.pop() orelse Value{ .null = {} };
-        const items: []const Value = switch (iterable) {
-            .list => |list| list.items.items,
-            else => &.{},
-        };
+        var source = self.stack.pop() orelse Value{ .null = {} };
+        defer source.deinit(self.allocator);
+        const collected = try semantics.collectIterationItems(self.allocator, source);
+        var iterable = Value{ .list = collected };
+        const items: []const Value = collected.items.items;
         const var_name = self.bytecode.names.items[@intCast(name_operand)];
 
         if (items.len == 0) {

@@ -85,7 +85,7 @@ fn appendJsonList(
     for (list.items.items, 0..) |item, index| {
         if (indent) |width| try appendIndent(output, allocator, (depth + 1) * width);
         try appendJsonValue(output, allocator, item, indent, depth + 1, traversal);
-        if (index + 1 < list.items.items.len) try output.append(allocator, ',');
+        if (index + 1 < list.items.items.len) try output.appendSlice(allocator, if (indent == null) ", " else ",");
         if (indent != null) try output.append(allocator, '\n');
     }
     if (indent) |width| try appendIndent(output, allocator, depth * width);
@@ -105,14 +105,23 @@ fn appendJsonDict(
     try output.append(allocator, '{');
     if (dict.map.count() == 0) return output.append(allocator, '}');
     if (indent != null) try output.append(allocator, '\n');
-    var iterator = dict.map.iterator();
-    var index: usize = 0;
-    while (iterator.next()) |entry| : (index += 1) {
+    const keys = try allocator.alloc([]const u8, dict.map.count());
+    defer allocator.free(keys);
+    var iterator = dict.map.keyIterator();
+    var key_index: usize = 0;
+    while (iterator.next()) |key| : (key_index += 1) keys[key_index] = key.*;
+    std.mem.sort([]const u8, keys, {}, struct {
+        fn lessThan(_: void, left: []const u8, right: []const u8) bool {
+            return std.mem.lessThan(u8, left, right);
+        }
+    }.lessThan);
+
+    for (keys, 0..) |key, index| {
         if (indent) |width| try appendIndent(output, allocator, (depth + 1) * width);
-        try appendQuoted(output, allocator, entry.key_ptr.*);
-        try output.appendSlice(allocator, if (indent != null) ": " else ":");
-        try appendJsonValue(output, allocator, entry.value_ptr.*, indent, depth + 1, traversal);
-        if (index + 1 < dict.map.count()) try output.append(allocator, ',');
+        try appendQuoted(output, allocator, key);
+        try output.appendSlice(allocator, ": ");
+        try appendJsonValue(output, allocator, dict.map.get(key).?, indent, depth + 1, traversal);
+        if (index + 1 < keys.len) try output.appendSlice(allocator, if (indent == null) ", " else ",");
         if (indent != null) try output.append(allocator, '\n');
     }
     if (indent) |width| try appendIndent(output, allocator, depth * width);

@@ -279,6 +279,36 @@ pub fn getItem(allocator: std.mem.Allocator, object: Value, index: Value, defaul
     };
 }
 
+/// Materialize Jinja iteration values with identical list, string, and mapping
+/// behavior for AST and bytecode execution. Mapping iteration yields keys.
+pub fn collectIterationItems(allocator: std.mem.Allocator, iterable: Value) !*value_mod.List {
+    const items = try allocator.create(value_mod.List);
+    items.* = value_mod.List.init(allocator);
+    errdefer items.deinit(allocator);
+
+    switch (iterable) {
+        .list => |list| {
+            try items.items.ensureTotalCapacity(allocator, list.items.items.len);
+            for (list.items.items) |item| items.items.appendAssumeCapacity(try item.deepCopy(allocator));
+        },
+        .string => |string| {
+            try items.items.ensureTotalCapacity(allocator, string.len);
+            for (string) |character| {
+                items.items.appendAssumeCapacity(.{ .string = try std.fmt.allocPrint(allocator, "{c}", .{character}) });
+            }
+        },
+        .dict => |dict| {
+            try items.items.ensureTotalCapacity(allocator, dict.map.count());
+            var iterator = dict.map.iterator();
+            while (iterator.next()) |entry| {
+                items.items.appendAssumeCapacity(.{ .string = try allocator.dupe(u8, entry.key_ptr.*) });
+            }
+        },
+        else => {},
+    }
+    return items;
+}
+
 /// Build the public dictionary representation of a template context.
 pub fn contextToValue(allocator: std.mem.Allocator, ctx: anytype) !Value {
     const dictionary = try allocator.create(value_mod.Dict);

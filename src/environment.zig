@@ -819,8 +819,12 @@ pub const Environment = struct {
         }
         defer if (needs_free) self.allocator.free(processed_source);
 
+        // Jinja drops one trailing newline by default. Preserve it only when
+        // the environment explicitly opts into keep_trailing_newline.
+        const lex_source = sourceWithTrailingNewlinePolicy(processed_source, self.keep_trailing_newline);
+
         // Tokenize
-        var lex = lexer.Lexer.init(self, processed_source, template_name);
+        var lex = lexer.Lexer.init(self, lex_source, template_name);
         const token_stream = try lex.tokenize(self.allocator);
         defer self.allocator.free(token_stream.tokens);
 
@@ -1652,4 +1656,10 @@ pub fn clearSpontaneousCache(allocator: std.mem.Allocator) void {
         spontaneous_cache = null;
         spontaneous_cache_allocator = null;
     }
+}
+fn sourceWithTrailingNewlinePolicy(source: []const u8, keep_trailing_newline: bool) []const u8 {
+    if (keep_trailing_newline) return source;
+    if (std.mem.endsWith(u8, source, "\r\n")) return source[0 .. source.len - 2];
+    if (std.mem.endsWith(u8, source, "\n")) return source[0 .. source.len - 1];
+    return source;
 }

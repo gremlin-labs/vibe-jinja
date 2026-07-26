@@ -121,6 +121,6 @@ test "Qwen 3.5/3.6 supports the JSON tool-call override" {
     defer testing.allocator.free(output);
     try expectContainsAll(output, &.{
         "Function calls MUST follow the specified format: a single JSON object with \"name\" and \"arguments\"",
-        "{\"name\": \"test\", \"arguments\": {\"par\":\"1234567890\"}}",
+        "{\"name\": \"test\", \"arguments\": {\"par\": \"1234567890\"}}",
     });
 }

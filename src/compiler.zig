@@ -1355,42 +1355,29 @@ pub const Compiler = struct {
         var iter_val = try self.visitExpression(&node.iter, frame, ctx);
         defer iter_val.deinit(self.allocator);
 
-        // Convert iter_val to iterable (list or string)
-        // NOTE: We still need to copy items here because iter_val will be freed
-        // But this is O(n) once at the start, not O(n) per iteration
-        var items = std.ArrayList(value_mod.Value){};
-        defer {
-            for (items.items) |*item| {
-                item.deinit(self.allocator);
-            }
-            items.deinit(self.allocator);
-        }
+        const source_items = try semantics.collectIterationItems(self.allocator, iter_val);
+        defer source_items.deinit(self.allocator);
 
-        switch (iter_val) {
-            .list => |l| {
-                // Deep copy list items - iter_val will be deinit'd later, we need our own copies
-                try items.ensureTotalCapacity(self.allocator, l.items.items.len);
-                for (l.items.items) |item| {
-                    const item_copy = try item.deepCopy(self.allocator);
-                    items.appendAssumeCapacity(item_copy);
-                }
-            },
-            .string => |s| {
-                // Convert string to list of characters (as strings)
-                try items.ensureTotalCapacity(self.allocator, s.len);
-                for (s) |c| {
-                    const char_str = try std.fmt.allocPrint(self.allocator, "{c}", .{c});
-                    items.appendAssumeCapacity(value_mod.Value{ .string = char_str });
-                }
-            },
-            else => {
-                // Not iterable - return empty
-                return try self.allocator.dupe(u8, "");
-            },
-        }
+        const items = if (node.test_expr) |*test_expr| filtered: {
+            const filtered_items = try self.allocator.create(value_mod.List);
+            filtered_items.* = value_mod.List.init(self.allocator);
+            errdefer filtered_items.deinit(self.allocator);
+            try filtered_items.items.ensureTotalCapacity(self.allocator, source_items.items.items.len);
+
+            var filter_frame = Frame.init("for_filter", frame, self.allocator);
+            defer filter_frame.deinit();
+            for (source_items.items.items) |item| {
+                try self.bindLoopTarget(node.target, item, &filter_frame);
+                var keep = try self.visitExpression(test_expr, &filter_frame, ctx);
+                defer keep.deinit(self.allocator);
+                if (try keep.isTruthy()) filtered_items.items.appendAssumeCapacity(try item.deepCopy(self.allocator));
+            }
+            break :filtered filtered_items;
+        } else source_items;
+        defer if (items != source_items) items.deinit(self.allocator);
 
         // Handle empty iterable - execute else clause
-        if (items.items.len == 0) {
+        if (items.items.items.len == 0) {
             var output = std.ArrayList(u8){};
             defer output.deinit(self.allocator);
 
@@ -1408,7 +1395,7 @@ pub const Compiler = struct {
         // OPTIMIZATION: Create OptimizedLoopContext ONCE (stack-allocated)
         // This replaces the per-iteration Dict creation
         var opt_loop = OptimizedLoopContext.init(
-            items.items,
+            items.items.items,
             target_name,
             frame.getOptLoop(), // Parent loop for depth tracking
         );
@@ -2768,7 +2755,7 @@ fn stmtHasUnsupportedFeatures(stmt: *nodes.Stmt, depth: usize) bool {
         .import, .from_import, .include, .extends, .filter_block => true,
         .for_loop => blk: {
             const statement: *nodes.For = @ptrCast(@alignCast(stmt));
-            break :blk statement.target != .name or
+            break :blk statement.target != .name or statement.test_expr != null or
                 statementsHaveUnsupportedFeatures(statement.body.items, child_depth) or
                 statementsHaveUnsupportedFeatures(statement.else_body.items, child_depth);
         },
@@ -2779,6 +2766,10 @@ fn stmtHasUnsupportedFeatures(stmt: *nodes.Stmt, depth: usize) bool {
         ),
         .with => statementsHaveUnsupportedFeatures(
             @as(*nodes.With, @ptrCast(@alignCast(stmt))).body.items,
+            child_depth,
+        ),
+        .macro => statementsHaveUnsupportedFeatures(
+            @as(*nodes.Macro, @ptrCast(@alignCast(stmt))).body.items,
             child_depth,
         ),
         .set => blk: {

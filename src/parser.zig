@@ -36,6 +36,9 @@ pub const Parser = struct {
     allocator: std.mem.Allocator,
     /// Current expression nesting depth (bounded by `max_expr_depth`).
     expr_depth: usize = 0,
+    /// A for-loop iterable suppresses a conditional expression only at its
+    /// outer parse depth; parenthesized and collection expressions retain it.
+    conditional_expression_suppression_depth: ?usize = null,
 
     const Self = @This();
 
@@ -516,7 +519,9 @@ pub const Parser = struct {
         if (self.stream.hasNext()) {
             const token = self.stream.current();
             if (token) |t| {
-                if (t.kind == .IF) {
+                const conditional_allowed = self.conditional_expression_suppression_depth == null or
+                    self.conditional_expression_suppression_depth.? != self.expr_depth;
+                if (conditional_allowed and t.kind == .IF) {
                     _ = self.stream.next();
                     self.skipWhitespace();
 
@@ -1738,10 +1743,31 @@ pub const Parser = struct {
         _ = self.stream.next();
         self.skipWhitespace();
 
-        var iter_expr = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
+        const previous_suppression_depth = self.conditional_expression_suppression_depth;
+        self.conditional_expression_suppression_depth = self.expr_depth + 1;
+        var iter_expr = self.parseExpression() catch |err| {
+            self.conditional_expression_suppression_depth = previous_suppression_depth;
+            return err;
+        } orelse {
+            self.conditional_expression_suppression_depth = previous_suppression_depth;
+            return exceptions.TemplateError.SyntaxError;
+        };
+        self.conditional_expression_suppression_depth = previous_suppression_depth;
         var iter_moved = false;
         errdefer if (!iter_moved) iter_expr.deinit(self.allocator);
         self.skipWhitespace();
+
+        var test_expr: ?nodes.Expression = null;
+        var test_moved = false;
+        errdefer if (!test_moved) if (test_expr) |*expression| expression.deinit(self.allocator);
+        if (self.stream.current()) |token| {
+            if (token.kind == .IF) {
+                _ = self.stream.next();
+                self.skipWhitespace();
+                test_expr = try self.parseExpression() orelse return exceptions.TemplateError.SyntaxError;
+                self.skipWhitespace();
+            }
+        }
 
         const header_end = self.stream.current() orelse return exceptions.TemplateError.SyntaxError;
         if (header_end.kind != .BLOCK_END) return exceptions.TemplateError.SyntaxError;
@@ -1759,6 +1785,8 @@ pub const Parser = struct {
         for_node.* = nodes.For.init(self.allocator, target_expr, iter_expr, for_token.lineno, for_token.filename);
         target_moved = true;
         iter_moved = true;
+        for_node.test_expr = test_expr;
+        test_moved = true;
         for_node.body.deinit(self.allocator);
         for_node.body = body.statements;
         body.statements = std.ArrayList(*nodes.Stmt){};
@@ -3253,6 +3281,9 @@ fn stmtContainsNameReference(stmt: *nodes.Stmt, name: []const u8, depth: usize) 
         .for_loop => {
             const for_stmt = @as(*nodes.For, @ptrCast(@alignCast(stmt)));
             if (exprContainsNameReference(&for_stmt.iter, name, depth + 1)) return true;
+            if (for_stmt.test_expr) |*test_expr| {
+                if (exprContainsNameReference(test_expr, name, depth + 1)) return true;
+            }
             for (for_stmt.body.items) |s| {
                 if (stmtContainsNameReference(s, name, depth + 1)) return true;
             }

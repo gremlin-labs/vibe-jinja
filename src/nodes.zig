@@ -725,6 +725,8 @@ pub const For = struct {
     target: Expression,
     /// Iterable expression
     iter: Expression,
+    /// Optional inline loop filter (`for item in items if predicate`).
+    test_expr: ?Expression,
     /// Loop body statements
     body: std.ArrayList(*Stmt),
     /// Else clause statements (if any)
@@ -745,6 +747,7 @@ pub const For = struct {
             },
             .target = target,
             .iter = iter,
+            .test_expr = null,
             .body = std.ArrayList(*Stmt){},
             .else_body = std.ArrayList(*Stmt){},
         };
@@ -753,6 +756,7 @@ pub const For = struct {
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         self.target.deinit(allocator);
         self.iter.deinit(allocator);
+        if (self.test_expr) |*test_expr| test_expr.deinit(allocator);
         for (self.body.items) |stmt| {
             deinitStmt(stmt, allocator);
         }
