@@ -6,7 +6,7 @@
 //! # Usage
 //!
 //! ```zig
-//! var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+//! var gpa = std.heap.DebugAllocator(.{}){};
 //! var counting = CountingAllocator.init(gpa.allocator());
 //! const alloc = counting.allocator();
 //!
@@ -293,7 +293,7 @@ pub const ScopedCountingAllocator = struct {
 
 // Tests
 test "CountingAllocator basic operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
 
     var counting = CountingAllocator.init(gpa.allocator());
@@ -324,7 +324,7 @@ test "CountingAllocator basic operations" {
 }
 
 test "CountingAllocator reset" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
 
     var counting = CountingAllocator.init(gpa.allocator());
@@ -345,7 +345,7 @@ test "CountingAllocator reset" {
 }
 
 test "CountingAllocator with diagnostics" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
 
     var diag = diagnostics.RenderDiagnostics{};

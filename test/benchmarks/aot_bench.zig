@@ -4,23 +4,7 @@
 const std = @import("std");
 const vibe_jinja = @import("vibe_jinja");
 const aot = vibe_jinja.aot_compiler;
-
-const Timer = struct {
-    start_time: i128,
-
-    pub fn start() Timer {
-        return .{ .start_time = std.time.nanoTimestamp() };
-    }
-
-    pub fn elapsed_ns(self: Timer) u64 {
-        const end = std.time.nanoTimestamp();
-        return @intCast(end - self.start_time);
-    }
-
-    pub fn elapsed_us(self: Timer) f64 {
-        return @as(f64, @floatFromInt(self.elapsed_ns())) / 1000.0;
-    }
-};
+const time = vibe_jinja.time;
 
 fn runAotBenchmark(allocator: std.mem.Allocator, template: []const u8, name: []const u8, iterations: usize) !f64 {
     // Compile template once
@@ -29,7 +13,7 @@ fn runAotBenchmark(allocator: std.mem.Allocator, template: []const u8, name: []c
 
     // For now, just measure compile time since we can't dynamically run generated code
     // The real benefit comes when templates are compiled at build time
-    var timer = Timer.start();
+    const timer = time.Timer.start();
 
     for (0..iterations) |_| {
         const result = try aot.compileToZig(allocator, template, name);
@@ -68,7 +52,7 @@ fn runJitBenchmark(allocator: std.mem.Allocator, template: []const u8, iteration
     defer ctx.deinit();
 
     // Benchmark render iterations
-    var timer = Timer.start();
+    const timer = time.Timer.start();
 
     for (0..iterations) |_| {
         const result = try compiled.render(&ctx, allocator);
@@ -79,7 +63,7 @@ fn runJitBenchmark(allocator: std.mem.Allocator, template: []const u8, iteration
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -172,14 +156,14 @@ pub fn main() !void {
 
     // SIMD findOpenBrace
     {
-        var timer = Timer.start();
+        var timer = time.Timer.start();
         for (0..simd_iterations) |_| {
             _ = simd.findOpenBrace(&large_template);
         }
         const simd_time = timer.elapsed_us() / @as(f64, @floatFromInt(simd_iterations));
 
         // Compare with std.mem.indexOfScalar
-        timer = Timer.start();
+        timer = time.Timer.start();
         for (0..simd_iterations) |_| {
             _ = std.mem.indexOfScalar(u8, &large_template, '{');
         }
@@ -191,14 +175,14 @@ pub fn main() !void {
 
     // SIMD containsHtmlSpecial
     {
-        var timer = Timer.start();
+        var timer = time.Timer.start();
         for (0..simd_iterations) |_| {
             _ = simd.containsHtmlSpecial(&large_template);
         }
         const simd_time = timer.elapsed_us() / @as(f64, @floatFromInt(simd_iterations));
 
         // Scalar comparison
-        timer = Timer.start();
+        timer = time.Timer.start();
         for (0..simd_iterations) |_| {
             for (large_template) |c| {
                 if (c == '<' or c == '>' or c == '&' or c == '"' or c == '\'') break;

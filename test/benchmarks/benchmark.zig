@@ -4,6 +4,7 @@ const environment = vibe_jinja.environment;
 const runtime = vibe_jinja.runtime;
 const context = vibe_jinja.context;
 const utils = vibe_jinja.utils;
+const time = vibe_jinja.time;
 const filters = vibe_jinja.filters;
 const tests = vibe_jinja.tests;
 const value_mod = vibe_jinja.value;
@@ -154,7 +155,7 @@ fn benchmarkSimpleTemplate(allocator: std.mem.Allocator) !void {
         defer samples.deinit();
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = time.Timer.start();
 
             var rt = runtime.Runtime.init(&env, allocator);
             defer rt.deinit();
@@ -168,7 +169,7 @@ fn benchmarkSimpleTemplate(allocator: std.mem.Allocator) !void {
             const result_str = try rt.renderString(source, vars, "test");
             allocator.free(result_str);
 
-            try samples.add(timer.read());
+            try samples.add(timer.elapsed_ns());
         }
 
         const result = samples.stats("Simple Template (full pipeline)");
@@ -187,7 +188,7 @@ fn benchmarkSimpleTemplate(allocator: std.mem.Allocator) !void {
         defer compiled.deinit();
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = time.Timer.start();
 
             var vars = std.StringHashMap(context.Value).init(allocator);
             defer vars.deinit();
@@ -201,7 +202,7 @@ fn benchmarkSimpleTemplate(allocator: std.mem.Allocator) !void {
             const result_str = try compiled.render(&ctx, allocator);
             allocator.free(result_str);
 
-            try samples.add(timer.read());
+            try samples.add(timer.elapsed_ns());
         }
 
         const result = samples.stats("Simple Template (pre-compiled)");
@@ -220,7 +221,7 @@ fn benchmarkLoopTemplate(allocator: std.mem.Allocator) !void {
     const iterations: usize = 100;
 
     for (0..iterations) |_| {
-        var timer = try std.time.Timer.start();
+        var timer = time.Timer.start();
 
         var rt = runtime.Runtime.init(&env, allocator);
         defer rt.deinit();
@@ -242,7 +243,7 @@ fn benchmarkLoopTemplate(allocator: std.mem.Allocator) !void {
         const result_str = try rt.renderString(source, vars, "test");
         allocator.free(result_str);
 
-        try samples.add(timer.read());
+        try samples.add(timer.elapsed_ns());
     }
 
     const result = samples.stats("Loop Template");
@@ -260,7 +261,7 @@ fn benchmarkConditionalTemplate(allocator: std.mem.Allocator) !void {
     const iterations: usize = 1000;
 
     for (0..iterations) |_| {
-        var timer = try std.time.Timer.start();
+        var timer = time.Timer.start();
 
         var rt = runtime.Runtime.init(&env, allocator);
         defer rt.deinit();
@@ -272,7 +273,7 @@ fn benchmarkConditionalTemplate(allocator: std.mem.Allocator) !void {
         const result_str = try rt.renderString(source, vars, "test");
         allocator.free(result_str);
 
-        try samples.add(timer.read());
+        try samples.add(timer.elapsed_ns());
     }
 
     const result = samples.stats("Conditional Template");
@@ -291,7 +292,7 @@ fn benchmarkNestedTemplates(allocator: std.mem.Allocator) !void {
     const iterations: usize = 1000;
 
     for (0..iterations) |_| {
-        var timer = try std.time.Timer.start();
+        var timer = time.Timer.start();
 
         var rt = runtime.Runtime.init(&env, allocator);
         defer rt.deinit();
@@ -304,7 +305,7 @@ fn benchmarkNestedTemplates(allocator: std.mem.Allocator) !void {
         const result_str = try rt.renderString(source, vars, "test");
         allocator.free(result_str);
 
-        try samples.add(timer.read());
+        try samples.add(timer.elapsed_ns());
     }
 
     const result = samples.stats("Nested Conditionals");
@@ -322,7 +323,7 @@ fn benchmarkFilters(allocator: std.mem.Allocator) !void {
     const iterations: usize = 500;
 
     for (0..iterations) |_| {
-        var timer = try std.time.Timer.start();
+        var timer = time.Timer.start();
 
         var rt = runtime.Runtime.init(&env, allocator);
         defer rt.deinit();
@@ -342,7 +343,7 @@ fn benchmarkFilters(allocator: std.mem.Allocator) !void {
         const result_str = try rt.renderString(source, vars, "test");
         allocator.free(result_str);
 
-        try samples.add(timer.read());
+        try samples.add(timer.elapsed_ns());
     }
 
     const result = samples.stats("Filter Chain");
@@ -364,14 +365,14 @@ fn benchmarkFilterLookup(allocator: std.mem.Allocator) !void {
         const filter_names = [_][]const u8{ "escape", "upper", "lower", "trim", "default", "length" };
 
         for (0..iterations) |i| {
-            var timer = try std.time.Timer.start();
+            var timer = time.Timer.start();
 
             // Look up filter using comptime interned map
             const name = filter_names[i % filter_names.len];
             const func = filters.getBuiltinFilter(name);
             std.mem.doNotOptimizeAway(func);
 
-            try samples.add(timer.read());
+            try samples.add(timer.elapsed_ns());
         }
 
         const result = samples.stats("Comptime filter lookup");
@@ -386,14 +387,14 @@ fn benchmarkFilterLookup(allocator: std.mem.Allocator) !void {
         const filter_names = [_][]const u8{ "escape", "upper", "lower", "trim", "default", "length" };
 
         for (0..iterations) |i| {
-            var timer = try std.time.Timer.start();
+            var timer = time.Timer.start();
 
             // Look up filter using dynamic hashmap
             const name = filter_names[i % filter_names.len];
             const filter = env.getFilter(name);
             std.mem.doNotOptimizeAway(filter);
 
-            try samples.add(timer.read());
+            try samples.add(timer.elapsed_ns());
         }
 
         const result = samples.stats("Dynamic filter lookup");
@@ -414,12 +415,12 @@ fn benchmarkValueComparison(allocator: std.mem.Allocator) !void {
         const val2 = context.Value{ .integer = 42 };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = time.Timer.start();
 
             const result = try val1.isEqual(val2);
             std.mem.doNotOptimizeAway(result);
 
-            try samples.add(timer.read());
+            try samples.add(timer.elapsed_ns());
         }
 
         const result = samples.stats("Integer comparison (same type)");
@@ -440,12 +441,12 @@ fn benchmarkValueComparison(allocator: std.mem.Allocator) !void {
         const val2 = context.Value{ .string = str2 };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = time.Timer.start();
 
             const result = try val1.isEqual(val2);
             std.mem.doNotOptimizeAway(result);
 
-            try samples.add(timer.read());
+            try samples.add(timer.elapsed_ns());
         }
 
         const result = samples.stats("String comparison");
@@ -461,12 +462,12 @@ fn benchmarkValueComparison(allocator: std.mem.Allocator) !void {
         const val2 = context.Value{ .float = 42.0 };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = time.Timer.start();
 
             const result = try val1.isEqual(val2);
             std.mem.doNotOptimizeAway(result);
 
-            try samples.add(timer.read());
+            try samples.add(timer.elapsed_ns());
         }
 
         const result = samples.stats("Cross-type comparison (int/float)");
@@ -486,12 +487,12 @@ fn benchmarkValueConversion(allocator: std.mem.Allocator) !void {
         const val = context.Value{ .integer = 12345 };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = time.Timer.start();
 
             const str = try val.toString(allocator);
             allocator.free(str);
 
-            try samples.add(timer.read());
+            try samples.add(timer.elapsed_ns());
         }
 
         const result = samples.stats("Integer to string");
@@ -508,12 +509,12 @@ fn benchmarkValueConversion(allocator: std.mem.Allocator) !void {
         const val = context.Value{ .string = str };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = time.Timer.start();
 
             const int_val = val.toInteger();
             std.mem.doNotOptimizeAway(int_val);
 
-            try samples.add(timer.read());
+            try samples.add(timer.elapsed_ns());
         }
 
         const result = samples.stats("String to integer");
@@ -528,12 +529,12 @@ fn benchmarkValueConversion(allocator: std.mem.Allocator) !void {
         const val = context.Value{ .integer = 42 };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = time.Timer.start();
 
             const truthy = val.isTruthy() catch false;
             std.mem.doNotOptimizeAway(truthy);
 
-            try samples.add(timer.read());
+            try samples.add(timer.elapsed_ns());
         }
 
         const result = samples.stats("Truthiness check");
@@ -557,9 +558,9 @@ fn benchmarkCache(allocator: std.mem.Allocator) !void {
     try vars1.put("name", context.Value{ .string = name_str1 });
     defer allocator.free(name_str1);
 
-    var timer1 = try std.time.Timer.start();
+    var timer1 = time.Timer.start();
     const result1 = try rt1.renderString(source, vars1, "test");
-    const first_render_time = timer1.read();
+    const first_render_time = timer1.elapsed_ns();
     allocator.free(result1);
 
     // Second render (cache hit)
@@ -572,9 +573,9 @@ fn benchmarkCache(allocator: std.mem.Allocator) !void {
     try vars2.put("name", context.Value{ .string = name_str2 });
     defer allocator.free(name_str2);
 
-    var timer2 = try std.time.Timer.start();
+    var timer2 = time.Timer.start();
     const result2 = try rt2.renderString(source, vars2, "test");
-    const second_render_time = timer2.read();
+    const second_render_time = timer2.elapsed_ns();
     allocator.free(result2);
 
     const speedup = @as(f64, @floatFromInt(first_render_time)) / @as(f64, @floatFromInt(second_render_time));
@@ -602,7 +603,7 @@ fn benchmarkAllocators(allocator: std.mem.Allocator) !void {
         defer env.deinit();
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = time.Timer.start();
 
             var rt = runtime.Runtime.init(&env, allocator);
             defer rt.deinit();
@@ -622,7 +623,7 @@ fn benchmarkAllocators(allocator: std.mem.Allocator) !void {
             const result_str = try rt.renderString(source, vars, "test");
             allocator.free(result_str);
 
-            try samples.add(timer.read());
+            try samples.add(timer.elapsed_ns());
         }
 
         const result = samples.stats("General Purpose Allocator");
@@ -636,7 +637,7 @@ fn benchmarkAllocators(allocator: std.mem.Allocator) !void {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

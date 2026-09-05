@@ -595,7 +595,7 @@ pub const AsyncGenerator = struct {
     /// Initialize a new async generator
     pub fn init(allocator: std.mem.Allocator, tracker: ?*AsyncTracker) Self {
         return Self{
-            .items = std.ArrayList(Value).init(allocator),
+            .items = std.ArrayList(Value).empty,
             .index = 0,
             .allocator = allocator,
             .tracker = tracker,

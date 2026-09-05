@@ -36,6 +36,7 @@
 
 const std = @import("std");
 const value_mod = @import("value.zig");
+const time = @import("time.zig");
 
 /// Re-export Value type for convenience
 pub const Value = value_mod.Value;
@@ -438,7 +439,7 @@ pub const Joiner = struct {
             return try self.allocator.dupe(u8, "");
         }
 
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(self.allocator);
 
         for (values, 0..) |val, i| {
@@ -726,7 +727,7 @@ pub fn lipsumGlobal(
     }
 
     // Generate lorem ipsum text
-    var result = std.ArrayList(u8){};
+    var result = std.ArrayList(u8).empty;
     defer result.deinit(allocator);
 
     const avg_words = (min_words + max_words) / 2;
@@ -764,7 +765,7 @@ pub fn generateLoremIpsum(allocator: std.mem.Allocator, words: usize) ![]const u
         "aliquip",    "ex",           "ea",      "commodo", "consequat",
     };
 
-    var result = std.ArrayList(u8){};
+    var result = std.ArrayList(u8).empty;
     defer result.deinit(allocator);
     var output_size: usize = if (words > 0) words - 1 else 0;
     for (0..words) |index| output_size += lorem_words[index % lorem_words.len].len;
@@ -992,14 +993,14 @@ pub fn strftimeNowGlobal(
     };
 
     // Get current timestamp
-    const timestamp = std.time.timestamp();
+    const timestamp = time.timestamp();
     const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @intCast(timestamp) };
     const day_seconds = epoch_seconds.getDaySeconds();
     const epoch_day = epoch_seconds.getEpochDay();
     const year_day = epoch_day.calculateYearDay();
 
     // Format according to strftime spec
-    var buffer = std.ArrayList(u8){};
+    var buffer = std.ArrayList(u8).empty;
     errdefer buffer.deinit(allocator);
     const output_capacity = std.math.mul(usize, format.len, 10) catch return error.OutOfMemory;
     try buffer.ensureTotalCapacity(allocator, output_capacity);
@@ -1012,39 +1013,39 @@ pub fn strftimeNowGlobal(
                 'd' => {
                     // Day of month (01-31)
                     const md = year_day.calculateMonthDay();
-                    try buffer.writer(allocator).print("{d:0>2}", .{md.day_index + 1});
+                    try buffer.print(allocator, "{d:0>2}", .{md.day_index + 1});
                 },
                 'm' => {
                     // Month (01-12)
                     const md = year_day.calculateMonthDay();
-                    try buffer.writer(allocator).print("{d:0>2}", .{md.month.numeric()});
+                    try buffer.print(allocator, "{d:0>2}", .{md.month.numeric()});
                 },
                 'Y' => {
                     // Year with century
-                    try buffer.writer(allocator).print("{d}", .{year_day.year});
+                    try buffer.print(allocator, "{d}", .{year_day.year});
                 },
                 'y' => {
                     // Year without century (00-99)
                     const year_short = @mod(year_day.year, 100);
-                    try buffer.writer(allocator).print("{d:0>2}", .{year_short});
+                    try buffer.print(allocator, "{d:0>2}", .{year_short});
                 },
                 'H' => {
                     // Hour (00-23)
-                    try buffer.writer(allocator).print("{d:0>2}", .{day_seconds.getHoursIntoDay()});
+                    try buffer.print(allocator, "{d:0>2}", .{day_seconds.getHoursIntoDay()});
                 },
                 'I' => {
                     // Hour (01-12)
                     const hours = day_seconds.getHoursIntoDay();
                     const hour12 = if (hours == 0) 12 else if (hours > 12) hours - 12 else hours;
-                    try buffer.writer(allocator).print("{d:0>2}", .{hour12});
+                    try buffer.print(allocator, "{d:0>2}", .{hour12});
                 },
                 'M' => {
                     // Minute (00-59)
-                    try buffer.writer(allocator).print("{d:0>2}", .{day_seconds.getMinutesIntoHour()});
+                    try buffer.print(allocator, "{d:0>2}", .{day_seconds.getMinutesIntoHour()});
                 },
                 'S' => {
                     // Second (00-59)
-                    try buffer.writer(allocator).print("{d:0>2}", .{day_seconds.getSecondsIntoMinute()});
+                    try buffer.print(allocator, "{d:0>2}", .{day_seconds.getSecondsIntoMinute()});
                 },
                 'p' => {
                     // AM/PM
@@ -1079,11 +1080,11 @@ pub fn strftimeNowGlobal(
                     // Weekday as decimal (0=Sunday, 6=Saturday)
                     const days: i32 = @intCast(epoch_day.day);
                     const dow = @mod(days + 4, 7);
-                    try buffer.writer(allocator).print("{d}", .{dow});
+                    try buffer.print(allocator, "{d}", .{dow});
                 },
                 'j' => {
                     // Day of year (001-366)
-                    try buffer.writer(allocator).print("{d:0>3}", .{year_day.day + 1});
+                    try buffer.print(allocator, "{d:0>3}", .{year_day.day + 1});
                 },
                 '%' => {
                     // Literal %

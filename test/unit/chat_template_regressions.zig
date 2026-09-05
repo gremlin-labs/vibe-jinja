@@ -14,7 +14,7 @@ const value = vibe_jinja.value;
 
 /// Render a template with no variables and compare against expected output
 fn expectRender(expected: []const u8, source: []const u8) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

@@ -225,7 +225,7 @@ pub const Optimizer = struct {
                                 try statements.ensureUnusedCapacity(self.allocator, replacement_count - 1);
                             }
                             var replacement = if_stmt.body;
-                            if_stmt.body = .{};
+                            if_stmt.body = .empty;
                             statements.replaceRangeAssumeCapacity(i, 1, replacement.items);
                             replacement.deinit(self.allocator);
                             if_stmt.deinit(self.allocator);
@@ -240,7 +240,7 @@ pub const Optimizer = struct {
                                     try statements.ensureUnusedCapacity(self.allocator, replacement_count - 1);
                                 }
                                 var replacement = if_stmt.else_body;
-                                if_stmt.else_body = .{};
+                                if_stmt.else_body = .empty;
                                 statements.replaceRangeAssumeCapacity(i, 1, replacement.items);
                                 replacement.deinit(self.allocator);
                                 if_stmt.deinit(self.allocator);

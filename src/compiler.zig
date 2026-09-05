@@ -11,6 +11,7 @@ const value_pool = @import("value_pool.zig");
 const render_arena = @import("render_arena.zig");
 const semantics = @import("semantics.zig");
 const filters_mod = @import("filters.zig");
+const time = @import("time.zig");
 
 /// Re-export optimized loop context
 pub const OptimizedLoopContext = loop_context_mod.OptimizedLoopContext;
@@ -298,7 +299,7 @@ pub const CompiledTemplate = struct {
         options: environment.RenderOptions,
     ) ![]const u8 {
         // Record start time for timeout checking
-        const start_time = std.time.milliTimestamp();
+        const render_timer = time.Timer.start();
 
         // Store options in context for access during rendering
         ctx.render_options = options;
@@ -316,7 +317,7 @@ pub const CompiledTemplate = struct {
 
         // Check timeout before starting
         if (options.timeout_ms) |timeout| {
-            const elapsed = @as(u64, @intCast(std.time.milliTimestamp() - start_time));
+            const elapsed = render_timer.elapsed_ms();
             if (elapsed > timeout) {
                 if (options.debug_trace) {
                     std.debug.print("[RENDER] TIMEOUT before start (elapsed={d}ms, limit={d}ms)\n", .{ elapsed, timeout });
@@ -336,7 +337,7 @@ pub const CompiledTemplate = struct {
             defer compiler_inst.deinit();
 
             // Store start time and timeout in compiler for periodic checking
-            compiler_inst.render_start_time = start_time;
+            compiler_inst.render_timer = render_timer;
             compiler_inst.render_timeout_ms = options.timeout_ms;
             compiler_inst.debug_trace = options.debug_trace;
 
@@ -348,7 +349,7 @@ pub const CompiledTemplate = struct {
 
         // Final timeout check
         if (options.timeout_ms) |timeout| {
-            const elapsed = @as(u64, @intCast(std.time.milliTimestamp() - start_time));
+            const elapsed = render_timer.elapsed_ms();
             if (elapsed > timeout) {
                 if (options.debug_trace) {
                     std.debug.print("[RENDER] TIMEOUT after completion (elapsed={d}ms, limit={d}ms)\n", .{ elapsed, timeout });
@@ -358,7 +359,7 @@ pub const CompiledTemplate = struct {
         }
 
         if (options.debug_trace) {
-            const elapsed = @as(u64, @intCast(std.time.milliTimestamp() - start_time));
+            const elapsed = render_timer.elapsed_ms();
             std.debug.print("[RENDER] COMPLETE template={s} elapsed={d}ms\n", .{ self.template.base.filename orelse "<string>", elapsed });
         }
 
@@ -390,7 +391,7 @@ pub const Compiler = struct {
     current_frame: ?*Frame,
 
     // Debug/timeout fields (set by renderWithOptions)
-    render_start_time: i64 = 0,
+    render_timer: ?time.Timer = null,
     render_timeout_ms: ?u64 = null,
     debug_trace: bool = false,
 
@@ -402,9 +403,9 @@ pub const Compiler = struct {
             .environment = env,
             .filename = filename,
             .allocator = allocator,
-            .frames = std.ArrayList(*Frame){},
+            .frames = std.ArrayList(*Frame).empty,
             .current_frame = null,
-            .render_start_time = 0,
+            .render_timer = null,
             .render_timeout_ms = null,
             .debug_trace = false,
         };
@@ -475,7 +476,7 @@ pub const Compiler = struct {
         // - Child template's body IS rendered
         // - Blocks in child override parent blocks
         // - If child doesn't define a block, parent's block is used when referenced
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(self.allocator);
 
         // Extending templates render the root ancestor's layout. Block dispatch
@@ -617,7 +618,7 @@ pub const Compiler = struct {
 
     /// Visit Output node
     pub fn visitOutput(self: *Self, node: *nodes.Output, frame: *Frame, ctx: *context.Context) ![]const u8 {
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(self.allocator);
 
         // Check if autoescaping is enabled for this frame
@@ -692,7 +693,8 @@ pub const Compiler = struct {
     /// Returns TimeoutError if timeout exceeded, otherwise null
     fn checkTimeout(self: *Self) !void {
         if (self.render_timeout_ms) |timeout| {
-            const elapsed = @as(u64, @intCast(std.time.milliTimestamp() - self.render_start_time));
+            const timer = self.render_timer orelse return;
+            const elapsed = timer.elapsed_ms();
             if (elapsed > timeout) {
                 if (self.debug_trace) {
                     std.debug.print("[TIMEOUT] Execution timeout exceeded (elapsed={d}ms, limit={d}ms)\n", .{ elapsed, timeout });
@@ -710,7 +712,7 @@ pub const Compiler = struct {
         try self.checkTimeout();
 
         // Debug trace: log filter entry
-        const filter_start = if (self.debug_trace) std.time.milliTimestamp() else 0;
+        const filter_timer: ?time.Timer = if (self.debug_trace) .start() else null;
         if (self.debug_trace) {
             std.debug.print("[FILTER] {s} args={d} kwargs={d} ENTER\n", .{ node.name, node.args.items.len, node.kwargs.count() });
         }
@@ -819,7 +821,7 @@ pub const Compiler = struct {
 
         // Debug trace: log filter exit with timing
         if (self.debug_trace) {
-            const filter_elapsed = @as(u64, @intCast(std.time.milliTimestamp() - filter_start));
+            const filter_elapsed = filter_timer.?.elapsed_ms();
             std.debug.print("[FILTER] {s} EXIT ({d}ms)\n", .{ node.name, filter_elapsed });
         }
 
@@ -1045,7 +1047,7 @@ pub const Compiler = struct {
         }
 
         // Build result string
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         errdefer result.deinit(self.allocator);
         try result.ensureTotalCapacity(self.allocator, str.len);
 
@@ -1107,7 +1109,7 @@ pub const Compiler = struct {
         try self.checkTimeout();
 
         // Debug trace: log test entry
-        const test_start = if (self.debug_trace) std.time.milliTimestamp() else 0;
+        const test_timer: ?time.Timer = if (self.debug_trace) .start() else null;
         if (self.debug_trace) {
             std.debug.print("[TEST] {s} args={d} ENTER\n", .{ node.name, node.args.items.len });
         }
@@ -1118,7 +1120,7 @@ pub const Compiler = struct {
         defer val.deinit(self.allocator);
 
         // Evaluate test arguments
-        var args = std.ArrayList(value_mod.Value){};
+        var args = std.ArrayList(value_mod.Value).empty;
         defer {
             for (args.items) |*arg| {
                 arg.deinit(self.allocator);
@@ -1169,7 +1171,7 @@ pub const Compiler = struct {
 
         // Debug trace: log test exit with timing
         if (self.debug_trace) {
-            const test_elapsed = @as(u64, @intCast(std.time.milliTimestamp() - test_start));
+            const test_elapsed = test_timer.?.elapsed_ms();
             std.debug.print("[TEST] {s} result={} EXIT ({d}ms)\n", .{ node.name, result, test_elapsed });
         }
 
@@ -1378,7 +1380,7 @@ pub const Compiler = struct {
 
         // Handle empty iterable - execute else clause
         if (items.items.items.len == 0) {
-            var output = std.ArrayList(u8){};
+            var output = std.ArrayList(u8).empty;
             defer output.deinit(self.allocator);
 
             for (node.else_body.items) |stmt| {
@@ -1407,7 +1409,7 @@ pub const Compiler = struct {
         // OPTIMIZATION: Set opt_loop pointer instead of creating Dict per iteration
         loop_frame.opt_loop = &opt_loop;
 
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(self.allocator);
 
         // Execute loop body
@@ -1469,7 +1471,7 @@ pub const Compiler = struct {
         var condition_val = try self.visitExpression(&node.condition, frame, ctx);
         defer condition_val.deinit(self.allocator);
 
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(self.allocator);
 
         // Check if condition is truthy
@@ -1543,7 +1545,7 @@ pub const Compiler = struct {
         if (object == .custom) return null;
         if (object == .dict and !std.mem.eql(u8, attribute.attr, "items")) return null;
 
-        var args = std.ArrayList(value_mod.Value){};
+        var args = std.ArrayList(value_mod.Value).empty;
         defer {
             for (args.items) |*argument| argument.deinit(self.allocator);
             args.deinit(self.allocator);
@@ -1584,7 +1586,7 @@ pub const Compiler = struct {
     }
 
     fn callFilterAsFunction(self: *Self, filter: *filters_mod.Filter, node: *nodes.CallExpr, frame: *Frame, ctx: *context.Context) !value_mod.Value {
-        var args = std.ArrayList(value_mod.Value){};
+        var args = std.ArrayList(value_mod.Value).empty;
         defer {
             for (args.items) |*argument| argument.deinit(self.allocator);
             args.deinit(self.allocator);
@@ -1616,7 +1618,7 @@ pub const Compiler = struct {
         if (global != .callable) return try global.deepCopy(self.allocator);
         const callable = global.callable;
 
-        var args = std.ArrayList(value_mod.Value){};
+        var args = std.ArrayList(value_mod.Value).empty;
         defer {
             for (args.items) |*argument| argument.deinit(self.allocator);
             args.deinit(self.allocator);
@@ -1815,7 +1817,7 @@ pub const Compiler = struct {
 
     /// Visit Concat node - concatenate expressions as strings
     pub fn visitConcat(self: *Self, node: *nodes.Concat, frame: *Frame, ctx: *context.Context) !value_mod.Value {
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(self.allocator);
 
         // Evaluate and concatenate all expressions
@@ -1922,7 +1924,7 @@ pub const Compiler = struct {
         const macro = @as(*nodes.Macro, @ptrCast(@alignCast(macro_handle)));
 
         // Render call block body to pass as caller
-        var caller_body = std.ArrayList(u8){};
+        var caller_body = std.ArrayList(u8).empty;
         defer caller_body.deinit(self.allocator);
 
         for (node.body.items) |stmt| {
@@ -1938,7 +1940,7 @@ pub const Compiler = struct {
         const caller_value = value_mod.Value{ .string = caller_str };
 
         // Extract args from call_expr if it's a CallExpr
-        var args = std.ArrayList(nodes.Expression){};
+        var args = std.ArrayList(nodes.Expression).empty;
         defer args.deinit(self.allocator);
         var kwargs = std.StringHashMap(nodes.Expression).init(self.allocator);
         defer kwargs.deinit();
@@ -2048,7 +2050,7 @@ pub const Compiler = struct {
     }
 
     fn renderStatements(self: *Self, statements: []*nodes.Stmt, frame: *Frame, ctx: *context.Context) ![]const u8 {
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(self.allocator);
         for (statements) |statement| {
             const statement_output = try self.visitStatement(statement, frame, ctx);
@@ -2089,7 +2091,7 @@ pub const Compiler = struct {
 
         if (node.body) |*body| {
             // Set block variant - render body to get value
-            var body_output = std.ArrayList(u8){};
+            var body_output = std.ArrayList(u8).empty;
             defer body_output.deinit(self.allocator);
 
             for (body.items) |stmt| {
@@ -2173,7 +2175,7 @@ pub const Compiler = struct {
         }
 
         // Execute body with new frame
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(self.allocator);
 
         for (node.body.items) |stmt| {
@@ -2188,7 +2190,7 @@ pub const Compiler = struct {
     /// Visit FilterBlock node - apply filter to block
     pub fn visitFilterBlock(self: *Self, node: *nodes.FilterBlock, frame: *Frame, ctx: *context.Context) ![]const u8 {
         // Render block body first
-        var body_output = std.ArrayList(u8){};
+        var body_output = std.ArrayList(u8).empty;
         defer body_output.deinit(self.allocator);
 
         for (node.body.items) |stmt| {
@@ -2215,7 +2217,7 @@ pub const Compiler = struct {
 
         // Apply filter to body
         const body_value = value_mod.Value{ .string = body_str };
-        var filter_args = std.ArrayList(value_mod.Value){};
+        var filter_args = std.ArrayList(value_mod.Value).empty;
         defer {
             for (filter_args.items) |*arg| {
                 arg.deinit(self.allocator);
@@ -2281,7 +2283,7 @@ pub const Compiler = struct {
         autoescape_frame.autoescape = enabled;
 
         // Execute body with autoescape setting
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(self.allocator);
 
         for (node.body.items) |stmt| {
@@ -2395,7 +2397,7 @@ pub const Compiler = struct {
         defer frame.current_block = previous_block;
 
         // Execute block body
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(self.allocator);
 
         for (selected.body.items) |stmt| {
@@ -2654,7 +2656,7 @@ pub const Compiler = struct {
         _ = node;
         _ = frame;
 
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(self.allocator);
 
         // Start output

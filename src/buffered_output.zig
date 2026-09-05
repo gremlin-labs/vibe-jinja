@@ -71,7 +71,7 @@ pub const BufferedOutput = struct {
             try self.flush();
         }
 
-        const written = std.fmt.formatInt(
+        const written = std.fmt.printInt(
             self.buffer[self.pos..],
             n,
             10,
@@ -84,16 +84,12 @@ pub const BufferedOutput = struct {
     /// Write a float without allocation
     pub fn writeFloat(self: *Self, f: f64) !void {
         // Ensure we have space for float representation
-        if (self.pos + 32 > BUFFER_SIZE) {
+        if (self.pos + std.fmt.float.min_buffer_size > BUFFER_SIZE) {
             try self.flush();
         }
 
-        // Use formatFloat for proper representation
-        const result = std.fmt.formatFloat(
-            self.buffer[self.pos..],
-            f,
-            .{},
-        );
+        // Use fmt.float.render for proper representation
+        const result = try std.fmt.float.render(self.buffer[self.pos..], f, .{});
         self.pos += result.len;
     }
 
@@ -175,7 +171,8 @@ pub const OutputBuilder = struct {
     /// Append a float
     pub fn appendFloat(self: *Self, f: f64) !void {
         try self.segments.append(self.allocator, .{ .float = f });
-        self.total_estimated += 32; // Conservative estimate
+        // Must match what `float.render` asserts, not what a float prints
+        self.total_estimated += std.fmt.float.min_buffer_size;
     }
 
     /// Finalize and build the output string
@@ -190,11 +187,11 @@ pub const OutputBuilder = struct {
                     pos += s.len;
                 },
                 .integer => |n| {
-                    const written = std.fmt.formatInt(result[pos..], n, 10, .lower, .{});
+                    const written = std.fmt.printInt(result[pos..], n, 10, .lower, .{});
                     pos += written;
                 },
                 .float => |f| {
-                    const written = std.fmt.formatFloat(result[pos..], f, .{});
+                    const written = try std.fmt.float.render(result[pos..], f, .{});
                     pos += written.len;
                 },
             }

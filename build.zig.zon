@@ -1,8 +1,8 @@
 .{
     .name = .vibe_jinja,
-    .version = "1.3.1",
+    .version = "1.4.0",
     .fingerprint = 0x2cc7375cfe3711db, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{},
     .paths = .{
         "build.zig",

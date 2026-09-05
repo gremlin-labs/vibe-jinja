@@ -19,6 +19,14 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = lib.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+    const docs_step = b.step("docs", "Generate API documentation into zig-out/docs");
+    docs_step.dependOn(&install_docs.step);
+
     const chat_template_cli_module = b.addModule("chat_template_cli", .{
         .root_source_file = b.path("src/chat_template_cli.zig"),
         .target = target,
@@ -30,6 +38,19 @@ pub fn build(b: *std.Build) void {
         .root_module = chat_template_cli_module,
     });
     b.installArtifact(chat_template_cli);
+
+    // Runs the chat-template CLI rather than shipping a second executable:
+    // same library, and it exercises the tool people actually run. Piping a
+    // fixed payload keeps `zig build cli` runnable with no input.
+    const cli_payload =
+        \\{"template": "{% for m in messages %}<|{{ m.role }}|>{{ m.content }}\n{% endfor %}",
+        \\ "messages": [{"role": "user", "content": "hi"},
+        \\              {"role": "assistant", "content": "hello"}]}
+    ;
+    const run_cli = b.addRunArtifact(chat_template_cli);
+    run_cli.setStdIn(.{ .bytes = cli_payload });
+    const cli_step = b.step("cli", "Render a sample chat template through the CLI");
+    cli_step.dependOn(&run_cli.step);
 
     const lib_unit_tests = b.addTest(.{
         .root_module = root_module,
@@ -567,13 +588,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("test/benchmarks/benchmark.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = false,
     });
     benchmark_module.addImport("vibe_jinja", root_module);
     const benchmarks = b.addExecutable(.{
         .name = "benchmark",
         .root_module = benchmark_module,
     });
-    benchmarks.linkLibC();
     const run_benchmarks = b.addRunArtifact(benchmarks);
     const benchmark_step = b.step("benchmark", "Run performance benchmarks");
     benchmark_step.dependOn(&run_benchmarks.step);
@@ -583,13 +604,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("test/benchmarks/diagnostic_bench.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = false,
     });
     diagnostic_bench_module.addImport("vibe_jinja", root_module);
     const diagnostic_bench = b.addExecutable(.{
         .name = "diagnostic_bench",
         .root_module = diagnostic_bench_module,
     });
-    diagnostic_bench.linkLibC();
     const run_diagnostic_bench = b.addRunArtifact(diagnostic_bench);
     const diagnostic_bench_step = b.step("bench-diagnostic", "Run diagnostic benchmarks for performance profiling");
     diagnostic_bench_step.dependOn(&run_diagnostic_bench.step);
@@ -599,13 +620,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("test/benchmarks/comparison_bench.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = false,
     });
     comparison_bench_module.addImport("vibe_jinja", root_module);
     const comparison_bench = b.addExecutable(.{
         .name = "comparison_bench",
         .root_module = comparison_bench_module,
     });
-    comparison_bench.linkLibC();
     const run_comparison_bench = b.addRunArtifact(comparison_bench);
     // The bench reads test/benchmarks/python_reference.json relative to the repo root.
     run_comparison_bench.setCwd(b.path("."));
@@ -626,13 +647,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("test/benchmarks/aot_bench.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = false,
     });
     aot_bench_module.addImport("vibe_jinja", root_module);
     const aot_bench = b.addExecutable(.{
         .name = "aot_bench",
         .root_module = aot_bench_module,
     });
-    aot_bench.linkLibC();
     const run_aot_bench = b.addRunArtifact(aot_bench);
     const aot_bench_step = b.step("bench-aot", "Run AOT vs JIT benchmark (Phase 7)");
     aot_bench_step.dependOn(&run_aot_bench.step);

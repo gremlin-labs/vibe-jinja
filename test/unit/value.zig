@@ -4,7 +4,7 @@ const vibe_jinja = @import("vibe_jinja");
 const value = vibe_jinja.value;
 
 test "value toString for string" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -18,7 +18,7 @@ test "value toString for string" {
 }
 
 test "value toString for integer" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -30,7 +30,7 @@ test "value toString for integer" {
 }
 
 test "value toString for float" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -42,7 +42,7 @@ test "value toString for float" {
 }
 
 test "value toString for boolean" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -236,7 +236,7 @@ const TestUser = struct {
 };
 
 test "custom object - basic creation and type check" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -252,7 +252,7 @@ test "custom object - basic creation and type check" {
 }
 
 test "custom object - field access" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -288,7 +288,7 @@ test "custom object - field access" {
 }
 
 test "custom object - method access" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -318,7 +318,7 @@ test "custom object - method access" {
 }
 
 test "custom object - toString" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -335,7 +335,7 @@ test "custom object - toString" {
 }
 
 test "custom object - toBoolean" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -355,7 +355,7 @@ test "custom object - toBoolean" {
 }
 
 test "custom object - length" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -373,7 +373,7 @@ test "custom object - length" {
 }
 
 test "custom object - equality" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -399,7 +399,7 @@ test "custom object - equality" {
 }
 
 test "custom object - deepCopy" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -420,7 +420,7 @@ test "custom object - deepCopy" {
 }
 
 test "custom object - typeName" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     

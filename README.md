@@ -4,7 +4,7 @@
 
 **A high-performance, Jinja2-compatible template engine for Zig.**
 
-Vibe Jinja implements the Jinja syntax and runtime features used by web templates, code generators, configuration tools, and Hugging Face chat templates. It is written in Zig 0.15.2, has no runtime dependencies beyond the Zig standard library, and exposes both AST and bytecode-backed rendering paths.
+Vibe Jinja implements the Jinja syntax and runtime features used by web templates, code generators, configuration tools, and Hugging Face chat templates. It is written in Zig 0.16.0, has no runtime dependencies beyond the Zig standard library, and exposes both AST and bytecode-backed rendering paths.
 
 The project targets practical Jinja2 compatibility. Its unit and integration suites cover inheritance, includes, imports, macros, filters, tests, autoescaping, slicing, and production chat-template fixtures. Compatibility is not claimed for every Python/Jinja2 extension or edge case; consumers should test their own templates against both engines.
 
@@ -51,7 +51,7 @@ zig build bench-check -Doptimize=ReleaseFast
 
 ## Requirements
 
-- Zig 0.15.2 or later
+- Zig 0.16.0 or later
 - No runtime dependencies outside the Zig standard library
 - Python 3 and Jinja2 only for the cross-language benchmark
 
@@ -80,10 +80,8 @@ exe.root_module.addImport("vibe_jinja", vibe_jinja.module("vibe_jinja"));
 const std = @import("std");
 const jinja = @import("vibe_jinja");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
     var env = jinja.Environment.init(allocator);
     defer env.deinit();
