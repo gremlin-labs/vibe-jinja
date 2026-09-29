@@ -321,8 +321,8 @@ test "clear spontaneous cache removes all cached environments" {
 
 test "spontaneous cache destroys entries with their creating allocators" {
     clearSpontaneousCache(testing.allocator);
-    var first_gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var second_gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var first_gpa = std.heap.DebugAllocator(.{}){};
+    var second_gpa = std.heap.DebugAllocator(.{}){};
 
     _ = try getSpontaneousEnvironment(first_gpa.allocator(), .{ .trim_blocks = true });
     _ = try getSpontaneousEnvironment(second_gpa.allocator(), .{ .enable_async = true });

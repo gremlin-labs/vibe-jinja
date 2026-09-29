@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Minimum Zig version is now 0.16.0.** The 0.15.2 toolchain no longer builds this package. Consumers must upgrade; `main` in the chat-template CLI now takes `std.process.Init`, matching the 0.16 entry-point signature.
+- Add `src/time.zig` (exported as `vibe_jinja.time`) whose `timestamp`/`milliTimestamp`/`nanoTimestamp`/`Timer` mirror the `std.time` API 0.16 removed, and route filesystem calls through `std.Io.Dir`; both use the process-global `Io`. `Environment.init(allocator)`, the loader constructors, and the filter/test callback contracts are unchanged — no `Io` parameter was added to the public API.
+- The AOT compiler emits 0.16 code: generated templates now build their output with `std.Io.Writer.Allocating` instead of the removed `std.ArrayList(u8).writer()`.
+- Benchmarks time over `std.Io.Clock.awake`: `time.Timer` replaces the removed `std.time.Timer` for the roots that used it, and `aot_bench`'s own timer keeps its API. Measured resolution is unchanged at ~41.67ns on Apple Silicon.
+- `root.zig` now references every re-exported module from a test, so `zig build test` actually compiles `src/`. This raised the suite from 620 to 664 tests.
+
 ## [1.3.1] - 2026-07-25
 
 ### Added

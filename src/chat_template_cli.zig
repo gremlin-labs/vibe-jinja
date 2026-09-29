@@ -3,12 +3,13 @@ const jinja = @import("vibe_jinja");
 
 const max_input_bytes = 16 * 1024 * 1024;
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
-    const input = try std.fs.File.stdin().readToEndAlloc(allocator, max_input_bytes);
+    var stdin_buffer: [4096]u8 = undefined;
+    var stdin_reader = std.Io.File.stdin().readerStreaming(io, &stdin_buffer);
+    const input = try stdin_reader.interface.allocRemaining(allocator, .limited(max_input_bytes));
     defer allocator.free(input);
 
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, input, .{});
@@ -44,7 +45,7 @@ pub fn main() !void {
     const output = try runtime.renderString(template, vars, "chat_template");
     defer allocator.free(output);
 
-    try std.fs.File.stdout().writeAll(output);
+    try std.Io.File.stdout().writeStreamingAll(io, output);
 }
 
 fn deinitVars(allocator: std.mem.Allocator, vars: *std.StringHashMap(jinja.Value)) void {

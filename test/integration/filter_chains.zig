@@ -15,7 +15,7 @@ fn deinitVars(allocator: std.mem.Allocator, vars: *std.StringHashMap(context.Val
 }
 
 test "filter chain basic" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -42,7 +42,7 @@ test "filter chain basic" {
 }
 
 test "filter chain with arguments" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -69,7 +69,7 @@ test "filter chain with arguments" {
 }
 
 test "filter chain multiple filters" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -96,7 +96,7 @@ test "filter chain multiple filters" {
 }
 
 test "filter with default argument" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -124,7 +124,7 @@ test "filter with default argument" {
 }
 
 test "filter error handling" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -153,7 +153,7 @@ test "filter error handling" {
 }
 
 test "filter with list operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

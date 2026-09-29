@@ -21,6 +21,7 @@
 //! ```
 
 const std = @import("std");
+const time = @import("time.zig");
 
 /// Render diagnostics for performance profiling
 ///
@@ -51,50 +52,47 @@ pub const RenderDiagnostics = struct {
     bytecode_generated: bool = false,
 
     // Internal timing state
-    _parse_start: ?i128 = null,
-    _compile_start: ?i128 = null,
-    _render_start: ?i128 = null,
+    _parse_start: ?time.Timer = null,
+    _compile_start: ?time.Timer = null,
+    _render_start: ?time.Timer = null,
 
     const Self = @This();
 
     /// Start timing the parse phase
     pub fn startParse(self: *Self) void {
-        self._parse_start = std.time.nanoTimestamp();
+        self._parse_start = .start();
     }
 
     /// End timing the parse phase
     pub fn endParse(self: *Self) void {
-        if (self._parse_start) |start| {
-            const end = std.time.nanoTimestamp();
-            self.parse_ns = @intCast(@max(0, end - start));
+        if (self._parse_start) |timer| {
+            self.parse_ns = timer.elapsed_ns();
             self._parse_start = null;
         }
     }
 
     /// Start timing the compile phase
     pub fn startCompile(self: *Self) void {
-        self._compile_start = std.time.nanoTimestamp();
+        self._compile_start = .start();
     }
 
     /// End timing the compile phase
     pub fn endCompile(self: *Self) void {
-        if (self._compile_start) |start| {
-            const end = std.time.nanoTimestamp();
-            self.compile_ns = @intCast(@max(0, end - start));
+        if (self._compile_start) |timer| {
+            self.compile_ns = timer.elapsed_ns();
             self._compile_start = null;
         }
     }
 
     /// Start timing the render phase
     pub fn startRender(self: *Self) void {
-        self._render_start = std.time.nanoTimestamp();
+        self._render_start = .start();
     }
 
     /// End timing the render phase
     pub fn endRender(self: *Self) void {
-        if (self._render_start) |start| {
-            const end = std.time.nanoTimestamp();
-            self.render_ns = @intCast(@max(0, end - start));
+        if (self._render_start) |timer| {
+            self.render_ns = timer.elapsed_ns();
             self._render_start = null;
         }
     }
@@ -354,7 +352,7 @@ test "RenderDiagnostics basic operations" {
 
     // Test timing
     diag.startParse();
-    std.Thread.sleep(1_000_000); // 1ms
+    std.Io.Threaded.global_single_threaded.io().sleep(.fromNanoseconds(1_000_000), .awake) catch {}; // 1ms
     diag.endParse();
 
     try std.testing.expect(diag.parse_ns > 0);

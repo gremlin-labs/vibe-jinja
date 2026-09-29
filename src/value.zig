@@ -582,7 +582,7 @@ pub const Value = union(enum) {
                 try state.enter(@intFromPtr(l));
                 defer state.leave();
                 // Convert list to string representation
-                var result = std.ArrayList(u8){};
+                var result = std.ArrayList(u8).empty;
                 defer result.deinit(allocator);
                 try result.append(allocator, '[');
                 for (l.items.items, 0..) |item, i| {
@@ -598,7 +598,7 @@ pub const Value = union(enum) {
                 try state.enter(@intFromPtr(d));
                 defer state.leave();
                 // Convert dict to string representation
-                var result = std.ArrayList(u8){};
+                var result = std.ArrayList(u8).empty;
                 defer result.deinit(allocator);
                 try result.append(allocator, '{');
                 var iter = d.map.iterator();

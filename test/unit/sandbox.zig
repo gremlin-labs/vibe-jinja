@@ -78,7 +78,7 @@ test "sandbox safe range zero step" {
 }
 
 test "sandbox safe range to list" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -101,7 +101,7 @@ test "sandbox MAX_RANGE constant" {
 // ============================================================================
 
 test "sandbox modifies known mutable - list operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -130,7 +130,7 @@ test "sandbox modifies known mutable - list operations" {
 }
 
 test "sandbox modifies known mutable - dict operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -157,7 +157,7 @@ test "sandbox modifies known mutable - dict operations" {
 }
 
 test "sandbox modifies known mutable - string operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -175,7 +175,7 @@ test "sandbox modifies known mutable - string operations" {
 // ============================================================================
 
 test "sandbox is internal attribute - double underscore" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -232,7 +232,7 @@ test "sandbox unsafe callable names" {
 // ============================================================================
 
 test "sandbox environment init" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -244,7 +244,7 @@ test "sandbox environment init" {
 }
 
 test "sandbox environment safe range check" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -274,7 +274,7 @@ test "sandbox unsafe attribute check" {
 }
 
 test "sandbox safe attribute check" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -293,7 +293,7 @@ test "sandbox safe attribute check" {
 }
 
 test "sandbox safe callable check" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -310,7 +310,7 @@ test "sandbox safe callable check" {
 }
 
 test "sandbox add safe attribute" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -326,7 +326,7 @@ test "sandbox add safe attribute" {
 }
 
 test "sandbox add safe function" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -344,7 +344,7 @@ test "sandbox add safe function" {
 // ============================================================================
 
 test "immutable sandbox environment init" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -356,7 +356,7 @@ test "immutable sandbox environment init" {
 }
 
 test "immutable sandbox blocks mutable list operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -382,7 +382,7 @@ test "immutable sandbox blocks mutable list operations" {
 }
 
 test "immutable sandbox blocks mutable dict operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -408,7 +408,7 @@ test "immutable sandbox blocks mutable dict operations" {
 }
 
 test "sandbox module level safe attribute" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -420,7 +420,7 @@ test "sandbox module level safe attribute" {
 }
 
 test "sandbox module level safe callable" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

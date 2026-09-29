@@ -211,7 +211,7 @@ pub const FileSystemLoader = struct {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
         // Split template path (simple split without allocation)
-        var path_parts = std.ArrayList([]const u8){};
+        var path_parts = std.ArrayList([]const u8).empty;
         defer path_parts.deinit(self.allocator);
 
         var iter = std.mem.splitSequence(u8, name, "/");
@@ -228,7 +228,7 @@ pub const FileSystemLoader = struct {
 
         // Try each search path
         for (self.searchpath) |search_path| {
-            var full_path = std.ArrayList(u8){};
+            var full_path = std.ArrayList(u8).empty;
             defer full_path.deinit(self.allocator);
 
             full_path.appendSlice(self.allocator, search_path) catch return false;
@@ -250,11 +250,9 @@ pub const FileSystemLoader = struct {
             defer self.allocator.free(path_str);
 
             // Check file modification time
-            const file = std.fs.cwd().openFile(path_str, .{}) catch continue;
-            defer file.close();
-
-            const stat = file.stat() catch return false;
-            const file_mtime = @as(i64, @intCast(stat.mtime));
+            const io = std.Io.Threaded.global_single_threaded.io();
+            const stat = std.Io.Dir.cwd().statFile(io, path_str, .{}) catch continue;
+            const file_mtime = @as(i64, @intCast(stat.mtime.nanoseconds));
 
             // File is up-to-date if modification time hasn't changed
             return file_mtime <= last_modified;
@@ -270,7 +268,7 @@ pub const FileSystemLoader = struct {
 
         // Split template path and check for security issues
         // Store slices of the original name (no allocation needed)
-        var path_parts = std.ArrayList([]const u8){};
+        var path_parts = std.ArrayList([]const u8).empty;
         defer path_parts.deinit(allocator);
 
         var iter = std.mem.splitSequence(u8, name, "/");
@@ -288,7 +286,7 @@ pub const FileSystemLoader = struct {
 
         // Try each search path
         for (self.searchpath) |search_path| {
-            var full_path = std.ArrayList(u8){};
+            var full_path = std.ArrayList(u8).empty;
             defer full_path.deinit(allocator);
 
             try full_path.appendSlice(allocator, search_path);
@@ -310,14 +308,9 @@ pub const FileSystemLoader = struct {
             defer allocator.free(path_str);
 
             // Try to open the file - convert file errors to TemplateNotFound
-            const file = std.fs.cwd().openFile(path_str, .{}) catch {
-                continue; // Try next search path
-            };
-            defer file.close();
-
-            // Read file contents - convert read errors to RuntimeError
-            const contents = file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES) catch {
-                return exceptions.TemplateError.RuntimeError;
+            const contents = std.Io.Dir.cwd().readFileAlloc(std.Io.Threaded.global_single_threaded.io(), path_str, allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES)) catch |err| switch (err) {
+                error.StreamTooLong => return exceptions.TemplateError.RuntimeError,
+                else => continue,
             };
             return contents;
         }
@@ -329,7 +322,7 @@ pub const FileSystemLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);
@@ -339,13 +332,14 @@ pub const FileSystemLoader = struct {
 
         // List templates from all search paths
         for (self.searchpath) |search_path| {
-            var dir = std.fs.cwd().openDir(search_path, .{ .iterate = true }) catch continue;
-            defer dir.close();
+            const io = std.Io.Threaded.global_single_threaded.io();
+            var dir = std.Io.Dir.cwd().openDir(io, search_path, .{ .iterate = true }) catch continue;
+            defer dir.close(io);
 
             var walker = dir.walk(allocator) catch continue;
             defer walker.deinit();
 
-            while (walker.next() catch continue) |entry| {
+            while (walker.next(io) catch continue) |entry| {
                 if (entry.kind == .file) {
                     // Check if it's a template file (simple check - could be enhanced)
                     const template_name = try std.fs.path.join(allocator, &[_][]const u8{ search_path, entry.path });
@@ -456,7 +450,7 @@ pub const DictLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);
@@ -715,7 +709,7 @@ pub const PrefixLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);
@@ -872,7 +866,7 @@ pub const ChoiceLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);
@@ -969,7 +963,7 @@ pub const PackageLoader = struct {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
         // Build full path
-        var full_path = std.ArrayList(u8){};
+        var full_path = std.ArrayList(u8).empty;
         defer full_path.deinit(self.allocator);
 
         full_path.appendSlice(self.allocator, self.package_path) catch return false;
@@ -986,11 +980,8 @@ pub const PackageLoader = struct {
         defer self.allocator.free(path_str);
 
         // Check file modification time
-        const file = std.fs.cwd().openFile(path_str, .{}) catch return false;
-        defer file.close();
-
-        const stat = file.stat() catch return false;
-        const file_mtime = @as(i64, @intCast(stat.mtime));
+        const stat = std.Io.Dir.cwd().statFile(std.Io.Threaded.global_single_threaded.io(), path_str, .{}) catch return false;
+        const file_mtime = @as(i64, @intCast(stat.mtime.nanoseconds));
 
         return file_mtime <= last_modified;
     }
@@ -1000,7 +991,7 @@ pub const PackageLoader = struct {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
         // Build full path
-        var full_path = std.ArrayList(u8){};
+        var full_path = std.ArrayList(u8).empty;
         defer full_path.deinit(allocator);
 
         try full_path.appendSlice(allocator, self.package_path);
@@ -1017,14 +1008,9 @@ pub const PackageLoader = struct {
         defer allocator.free(path_str);
 
         // Try to open the file - convert file errors to template errors
-        const file = std.fs.cwd().openFile(path_str, .{}) catch {
-            return exceptions.TemplateError.TemplateNotFound;
-        };
-        defer file.close();
-
-        // Read file contents - convert read errors to runtime errors
-        const contents = file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES) catch {
-            return exceptions.TemplateError.RuntimeError;
+        const contents = std.Io.Dir.cwd().readFileAlloc(std.Io.Threaded.global_single_threaded.io(), path_str, allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES)) catch |err| switch (err) {
+            error.FileNotFound => return exceptions.TemplateError.TemplateNotFound,
+            else => return exceptions.TemplateError.RuntimeError,
         };
         return contents;
     }
@@ -1033,7 +1019,7 @@ pub const PackageLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);
@@ -1042,7 +1028,7 @@ pub const PackageLoader = struct {
         }
 
         // Build resource directory path
-        var resource_dir = std.ArrayList(u8){};
+        var resource_dir = std.ArrayList(u8).empty;
         defer resource_dir.deinit(allocator);
 
         try resource_dir.appendSlice(allocator, self.package_path);
@@ -1055,13 +1041,14 @@ pub const PackageLoader = struct {
         defer allocator.free(dir_path);
 
         // List templates from resource directory
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return templates.toOwnedSlice(allocator);
-        defer dir.close();
+        const io = std.Io.Threaded.global_single_threaded.io();
+        var dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch return templates.toOwnedSlice(allocator);
+        defer dir.close(io);
 
         var walker = dir.walk(allocator) catch return templates.toOwnedSlice(allocator);
         defer walker.deinit();
 
-        while (walker.next() catch null) |entry| {
+        while (walker.next(io) catch null) |entry| {
             if (entry.kind == .file) {
                 const template_name = try allocator.dupe(u8, entry.path);
                 try templates.append(allocator, template_name);
@@ -1216,7 +1203,7 @@ pub const ModuleLoader = struct {
 
         // Try each search path
         for (self.paths) |search_path| {
-            var full_path = std.ArrayList(u8){};
+            var full_path = std.ArrayList(u8).empty;
             defer full_path.deinit(allocator);
 
             try full_path.appendSlice(allocator, search_path);
@@ -1229,12 +1216,9 @@ pub const ModuleLoader = struct {
             defer allocator.free(path_str);
 
             // Try to open the module file
-            const file = std.fs.cwd().openFile(path_str, .{}) catch continue;
-            defer file.close();
-
-            // Read file contents
-            const contents = file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES) catch {
-                return exceptions.TemplateError.RuntimeError;
+            const contents = std.Io.Dir.cwd().readFileAlloc(std.Io.Threaded.global_single_threaded.io(), path_str, allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES)) catch |err| switch (err) {
+                error.StreamTooLong => return exceptions.TemplateError.RuntimeError,
+                else => continue,
             };
             return contents;
         }
@@ -1246,7 +1230,7 @@ pub const ModuleLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);

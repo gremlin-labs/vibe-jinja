@@ -7,7 +7,7 @@ const lexer = vibe_jinja.lexer;
 const nodes = vibe_jinja.nodes;
 
 test "parse plain text" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -34,7 +34,7 @@ test "parse plain text" {
 }
 
 test "parse string literal expression" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -62,7 +62,7 @@ test "parse string literal expression" {
 }
 
 test "parse integer literal expression" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -92,7 +92,7 @@ test "parse integer literal expression" {
 }
 
 test "parse boolean literal expression" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -122,7 +122,7 @@ test "parse boolean literal expression" {
 }
 
 test "parse name expression" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -152,7 +152,7 @@ test "parse name expression" {
 }
 
 test "parse binary addition expression" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -182,7 +182,7 @@ test "parse binary addition expression" {
 }
 
 test "parse filter expression" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -212,7 +212,7 @@ test "parse filter expression" {
 }
 
 test "parse comment" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -236,7 +236,7 @@ test "parse comment" {
 }
 
 test "parse autoescape block" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -272,7 +272,7 @@ test "parse autoescape block" {
 }
 
 test "parse survives adversarially deep expression nesting via depth budget" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -283,7 +283,7 @@ test "parse survives adversarially deep expression nesting via depth budget" {
     // expression-depth budget (256). With it, parseOr fails the statement with
     // SyntaxError and the parser's standard error recovery drops it — parsing
     // completes with an empty body instead of crashing the process.
-    var source = std.ArrayList(u8){};
+    var source = std.ArrayList(u8).empty;
     defer source.deinit(allocator);
     try source.appendSlice(allocator, "{{ ");
     try source.appendNTimes(allocator, '(', 50_000);

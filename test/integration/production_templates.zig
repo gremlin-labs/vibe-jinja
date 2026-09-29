@@ -81,7 +81,7 @@ const vicuna = @embedFile("templates/vicuna.jinja");
 // ----------------------------------------------------------------------------
 
 test "llama3-instruct: basic user message" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -129,7 +129,7 @@ test "llama3-instruct: basic user message" {
 // ----------------------------------------------------------------------------
 
 test "chatml: basic conversation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -173,7 +173,7 @@ test "chatml: basic conversation" {
 // ----------------------------------------------------------------------------
 
 test "qwen2-instruct: with system message extraction" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -214,7 +214,7 @@ test "qwen2-instruct: with system message extraction" {
 // ----------------------------------------------------------------------------
 
 test "mistral-instruct: multi-turn conversation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -261,7 +261,7 @@ test "mistral-instruct: multi-turn conversation" {
 // ----------------------------------------------------------------------------
 
 test "phi-3: basic format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -312,7 +312,7 @@ test "phi-3: basic format" {
 // ----------------------------------------------------------------------------
 
 test "zephyr: basic format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -357,7 +357,7 @@ test "zephyr: basic format" {
 // ----------------------------------------------------------------------------
 
 test "granite-instruct: question/answer format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -398,7 +398,7 @@ test "granite-instruct: question/answer format" {
 // ----------------------------------------------------------------------------
 
 test "falcon-instruct: basic format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -439,7 +439,7 @@ test "falcon-instruct: basic format" {
 // ----------------------------------------------------------------------------
 
 test "solar-instruct: basic format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -480,7 +480,7 @@ test "solar-instruct: basic format" {
 // ----------------------------------------------------------------------------
 
 test "chatqa: basic format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -528,7 +528,7 @@ test "chatqa: basic format" {
 // ----------------------------------------------------------------------------
 
 test "openchat: GPT4 Correct format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -573,7 +573,7 @@ test "openchat: GPT4 Correct format" {
 // ----------------------------------------------------------------------------
 
 test "vicuna: USER/ASSISTANT format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -617,7 +617,7 @@ test "vicuna: USER/ASSISTANT format" {
 // ----------------------------------------------------------------------------
 
 test "llama2-chat: multi-turn conversation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -663,7 +663,7 @@ test "llama2-chat: multi-turn conversation" {
 // ----------------------------------------------------------------------------
 
 test "gemma-instruct: user/model format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -709,7 +709,7 @@ test "gemma-instruct: user/model format" {
 // ----------------------------------------------------------------------------
 
 test "command-r: Cohere format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

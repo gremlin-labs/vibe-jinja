@@ -13,6 +13,7 @@ const cache_mod = @import("template_cache.zig");
 const optimizer_mod = @import("optimizer.zig");
 const extensions = @import("extensions.zig");
 const utils = @import("utils.zig");
+const time = @import("time.zig");
 
 /// Re-export Value type for convenience
 pub const Value = value_mod.Value;
@@ -772,7 +773,7 @@ pub const Environment = struct {
         errdefer self.allocator.destroy(entry);
         entry.* = .{
             .template = template,
-            .last_modified = std.time.timestamp(),
+            .last_modified = time.timestamp(),
             .access_count = 0,
             .source_checksum = TemplateCacheEntry.calculateChecksum(source),
         };
@@ -1459,11 +1460,11 @@ const SpontaneousEntry = struct {
 
 var spontaneous_cache: ?std.StringHashMap(SpontaneousEntry) = null;
 var spontaneous_cache_allocator: ?std.mem.Allocator = null;
-var spontaneous_cache_mutex: std.Thread.Mutex = .{};
+var spontaneous_cache_mutex: std.Io.Mutex = .init;
 const SPONTANEOUS_CACHE_SIZE: usize = 10;
 
 fn appendSpontaneousKeyPart(allocator: std.mem.Allocator, key: *std.ArrayList(u8), value: []const u8) !void {
-    try key.writer(allocator).print("{d}:{s}|", .{ value.len, value });
+    try key.print(allocator, "{d}:{s}|", .{ value.len, value });
 }
 
 fn appendOptionalSpontaneousKeyPart(allocator: std.mem.Allocator, key: *std.ArrayList(u8), value: ?[]const u8) !void {
@@ -1489,7 +1490,7 @@ fn appendSpontaneousSyntaxKey(allocator: std.mem.Allocator, key: *std.ArrayList(
 
 fn appendSpontaneousBehaviorKey(allocator: std.mem.Allocator, key: *std.ArrayList(u8), options: Environment.OverlayOptions) !void {
     const autoescape = if (options.autoescape) |value| value.bool else defaults.AUTOESCAPE;
-    try key.writer(allocator).print("{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|", .{
+    try key.print(allocator, "{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|", .{
         @intFromBool(options.trim_blocks orelse defaults.TRIM_BLOCKS),
         @intFromBool(options.lstrip_blocks orelse defaults.LSTRIP_BLOCKS),
         @intFromBool(options.keep_trailing_newline orelse defaults.KEEP_TRAILING_NEWLINE),
@@ -1611,8 +1612,9 @@ pub fn getSpontaneousEnvironment(allocator: std.mem.Allocator, options: Environm
         return try createSpontaneousEnvironment(allocator, options, false);
     }
 
-    spontaneous_cache_mutex.lock();
-    defer spontaneous_cache_mutex.unlock();
+    const mutex_io = std.Io.Threaded.global_single_threaded.io();
+    spontaneous_cache_mutex.lockUncancelable(mutex_io);
+    defer spontaneous_cache_mutex.unlock(mutex_io);
 
     // Initialize cache if needed
     if (spontaneous_cache == null) {
@@ -1647,8 +1649,9 @@ pub fn getSpontaneousEnvironment(allocator: std.mem.Allocator, options: Environm
 /// This should be called during application shutdown or when you want to reclaim memory
 pub fn clearSpontaneousCache(allocator: std.mem.Allocator) void {
     _ = allocator; // Entries remember the allocator that owns each environment.
-    spontaneous_cache_mutex.lock();
-    defer spontaneous_cache_mutex.unlock();
+    const mutex_io = std.Io.Threaded.global_single_threaded.io();
+    spontaneous_cache_mutex.lockUncancelable(mutex_io);
+    defer spontaneous_cache_mutex.unlock(mutex_io);
 
     if (spontaneous_cache) |*cache| {
         clearSpontaneousEntries(spontaneous_cache_allocator.?, cache);

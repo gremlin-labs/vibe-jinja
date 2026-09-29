@@ -7,7 +7,7 @@ const context = vibe_jinja.context;
 const environment = vibe_jinja.environment;
 
 test "test defined" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -38,7 +38,7 @@ test "test defined" {
 }
 
 test "test undefined" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -115,7 +115,7 @@ test "test divisibleby" {
 }
 
 test "test lower" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -133,7 +133,7 @@ test "test lower" {
 }
 
 test "test upper" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -151,7 +151,7 @@ test "test upper" {
 }
 
 test "test string" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -167,7 +167,7 @@ test "test number" {
     try testing.expect(tests.BuiltinTests.number(value.Value{ .integer = 42 }, &[_]value.Value{}, null, null));
     try testing.expect(tests.BuiltinTests.number(value.Value{ .float = 3.14 }, &[_]value.Value{}, null, null));
     
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -177,7 +177,7 @@ test "test number" {
 }
 
 test "test empty" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -195,7 +195,7 @@ test "test empty" {
 test "test none" {
     try testing.expect(tests.BuiltinTests.none(value.Value{ .null = {} }, &[_]value.Value{}, null, null));
     
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     
@@ -238,7 +238,7 @@ test "test float" {
 }
 
 test "test mapping" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -254,7 +254,7 @@ test "test mapping" {
 }
 
 test "test sequence" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -270,7 +270,7 @@ test "test sequence" {
 }
 
 test "test iterable" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -295,7 +295,7 @@ test "test iterable" {
 
 test "test callable" {
     // Callable test checks for macros, functions, and callable objects
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -376,7 +376,7 @@ test "test sameas" {
 }
 
 test "test escaped" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -392,7 +392,7 @@ test "test escaped" {
 }
 
 test "test in" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -423,7 +423,7 @@ test "test in" {
 }
 
 test "test filter" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -446,7 +446,7 @@ test "test filter" {
 }
 
 test "test test" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -485,7 +485,7 @@ test "test equalto with integers" {
 }
 
 test "test equalto with strings" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -508,7 +508,7 @@ test "test equalto with strings" {
 // ============================================================================
 
 test "test empty list" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -521,7 +521,7 @@ test "test empty list" {
 }
 
 test "test empty dict" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -534,7 +534,7 @@ test "test empty dict" {
 }
 
 test "test non-empty list" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -728,7 +728,7 @@ test "comparison test: ne with integers" {
 }
 
 test "comparison test: ne with strings" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -778,7 +778,7 @@ test "comparison test: mixed int/float" {
 }
 
 test "comparison test aliases exist in environment" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

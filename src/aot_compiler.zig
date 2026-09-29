@@ -66,7 +66,10 @@ pub const AotCompiler = struct {
 
         var psr = parser.Parser.init(&env, stream, template_name, self.allocator);
         const template = try psr.parse();
-        defer template.deinit(self.allocator);
+        defer {
+            template.deinit(self.allocator);
+            self.allocator.destroy(template);
+        }
 
         // Generate Zig header
         try self.writeHeader(template_name);
@@ -111,9 +114,9 @@ pub const AotCompiler = struct {
     fn writeFooter(self: *Self) !void {
         try self.write("\n/// Render to a string (allocates)\n");
         try self.write("pub fn renderToString(ctx: anytype, allocator: std.mem.Allocator) ![]u8 {\n");
-        try self.write("    var output = std.ArrayList(u8).init(allocator);\n");
+        try self.write("    var output: std.Io.Writer.Allocating = .init(allocator);\n");
         try self.write("    errdefer output.deinit();\n");
-        try self.write("    try render(ctx, output.writer());\n");
+        try self.write("    try render(ctx, &output.writer);\n");
         try self.write("    return output.toOwnedSlice();\n");
         try self.write("}\n");
     }
@@ -195,11 +198,11 @@ pub const AotCompiler = struct {
             self.indent_level += 1;
 
             try self.writeIndent();
-            try self.write("var _set_buf = std.ArrayList(u8).init(ctx.allocator);\n");
+            try self.write("var _set_buf: std.Io.Writer.Allocating = .init(ctx.allocator);\n");
             try self.writeIndent();
             try self.write("defer _set_buf.deinit();\n");
             try self.writeIndent();
-            try self.write("const _set_writer = _set_buf.writer();\n");
+            try self.write("const _set_writer = &_set_buf.writer;\n");
 
             // Generate body statements writing to _set_writer
             for (body.items) |stmt| {
@@ -296,7 +299,7 @@ pub const AotCompiler = struct {
         try self.writeIndent();
         try self.write("var _filter_buf");
         try self.writeFmt("{d}", .{temp_var});
-        try self.write(" = std.ArrayList(u8).init(ctx.allocator);\n");
+        try self.write(": std.Io.Writer.Allocating = .init(ctx.allocator);\n");
         try self.writeIndent();
         try self.write("defer _filter_buf");
         try self.writeFmt("{d}", .{temp_var});
@@ -776,7 +779,7 @@ pub const AotCompiler = struct {
     /// Generate filter chain (value | filter1 | filter2 | filter3)
     fn generateFilterChain(self: *Self, filter: *nodes.FilterExpr, base_temp: usize) Error!void {
         // Build chain of filters
-        var filters = std.ArrayList([]const u8){};
+        var filters = std.ArrayList([]const u8).empty;
         defer filters.deinit(self.allocator);
 
         var current: nodes.Expression = nodes.Expression{ .filter = filter };

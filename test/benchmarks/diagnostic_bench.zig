@@ -29,6 +29,7 @@ const value_mod = vibe_jinja.value;
 const compiler = vibe_jinja.compiler;
 const diagnostics = vibe_jinja.diagnostics;
 const CountingAllocator = vibe_jinja.counting_allocator.CountingAllocator;
+const time = vibe_jinja.time;
 
 /// Benchmark scenario configuration
 const Scenario = struct {
@@ -285,7 +286,7 @@ fn runScenario(
     var max_ns: u64 = 0;
 
     for (0..scenario.iterations) |_| {
-        const start = std.time.nanoTimestamp();
+        const timer = time.Timer.start();
 
         var rt = runtime.Runtime.init(&env, allocator);
         defer rt.deinit();
@@ -296,7 +297,7 @@ fn runScenario(
         };
         allocator.free(result);
 
-        const elapsed: u64 = @intCast(@max(0, std.time.nanoTimestamp() - start));
+        const elapsed = timer.elapsed_ns();
         total_ns += elapsed;
         min_ns = @min(min_ns, elapsed);
         max_ns = @max(max_ns, elapsed);
@@ -342,7 +343,7 @@ fn checkBytecodeGeneration(allocator: std.mem.Allocator) !bool {
 
 /// Main diagnostic benchmark entry point
 pub fn runDiagnostics() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const base_allocator = gpa.allocator();
 
@@ -399,6 +400,7 @@ pub fn runDiagnostics() !void {
         diag.updateFromAllocator(counting.allocation_count, counting.total_bytes, counting.peak_bytes);
 
         // Calculate per-iteration overhead for loop tests
+        var per_iter_buf: [32]u8 = undefined;
         const per_iter_str: []const u8 = if (scenario.loop_count) |count| blk: {
             const per_iter = @as(f64, @floatFromInt(diag.render_ns)) / @as(f64, @floatFromInt(count)) / 1000.0;
 
@@ -407,9 +409,8 @@ pub fn runDiagnostics() !void {
                 .time_us = @as(f64, @floatFromInt(diag.render_ns)) / 1000.0,
             });
 
-            var buf: [32]u8 = undefined;
-            const len = (std.fmt.bufPrint(&buf, "{d:.2}", .{per_iter}) catch "?").len;
-            break :blk buf[0..len];
+            const formatted: []const u8 = std.fmt.bufPrint(&per_iter_buf, "{d:.2}", .{per_iter}) catch "?";
+            break :blk formatted;
         } else "-";
 
         std.debug.print("{s:<25} {d:>12.2} {d:>12} {d:>12} {s:>12}\n", .{

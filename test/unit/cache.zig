@@ -14,7 +14,7 @@ fn makeEntry(allocator: std.mem.Allocator, name: []const u8) !*cache_mod.Templat
 }
 
 test "LRU cache basic operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -42,7 +42,7 @@ test "LRU cache basic operations" {
 }
 
 test "LRU cache eviction" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -99,7 +99,7 @@ test "LRU cache eviction" {
 }
 
 test "LRU cache statistics" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

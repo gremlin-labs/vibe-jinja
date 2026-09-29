@@ -1184,7 +1184,7 @@ pub const BytecodeVM = struct {
             },
             .INVOKE_CALLER => {
                 if (self.current_caller) |caller| {
-                    var caller_output = std.ArrayList(u8){};
+                    var caller_output = std.ArrayList(u8).empty;
                     errdefer caller_output.deinit(self.allocator);
                     try self.executeRange(caller.start_pc, caller.end_pc, &caller_output);
                     try self.stack.append(self.allocator, Value{ .string = try caller_output.toOwnedSlice(self.allocator) });
@@ -1468,7 +1468,7 @@ pub const BytecodeVM = struct {
 
         // Macro bodies use the same dispatcher as top-level rendering so every
         // supported opcode has identical semantics in both execution contexts.
-        var macro_output_builder = std.ArrayList(u8){};
+        var macro_output_builder = std.ArrayList(u8).empty;
         errdefer macro_output_builder.deinit(self.allocator);
         try self.executeRange(macro_info.body_start, macro_info.body_end, &macro_output_builder);
         const macro_output = try macro_output_builder.toOwnedSlice(self.allocator);
@@ -1563,7 +1563,7 @@ pub const BytecodeVM = struct {
                 const normalized_start = normalizeSliceIndex(start_val, len, step, true);
                 const normalized_stop = normalizeSliceIndex(stop_val, len, step, false);
 
-                var result_builder = std.ArrayList(u8){};
+                var result_builder = std.ArrayList(u8).empty;
                 errdefer result_builder.deinit(self.allocator);
                 try result_builder.ensureTotalCapacity(self.allocator, s.len);
 

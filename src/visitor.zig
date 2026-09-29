@@ -71,7 +71,7 @@ pub const Visitor = struct {
 
     /// Visit a Template node
     pub fn visitTemplate(self: *Self, node: *nodes.Template, ctx: *context.Context) ![]const u8 {
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(self.allocator);
 
         // Visit all statements in the template body
@@ -113,7 +113,7 @@ pub const Visitor = struct {
         }
 
         // Otherwise, evaluate expressions and convert to string
-        var output = std.ArrayList(u8){};
+        var output = std.ArrayList(u8).empty;
         defer output.deinit(self.allocator);
 
         for (node.nodes.items) |*expr| {

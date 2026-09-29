@@ -87,6 +87,7 @@ const PassArg = @import("pass_arg.zig").PassArg;
 const value_format = @import("value_format.zig");
 const support = @import("filter_support.zig");
 const html_escape = @import("html_escape.zig");
+const time = @import("time.zig");
 
 /// Re-export Value type for convenience
 pub const Value = value_mod.Value;
@@ -486,7 +487,7 @@ pub const BuiltinFilters = struct {
         }
 
         // Python/Jinja inserts the replacement at every boundary for an empty needle.
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
         try result.ensureTotalCapacity(allocator, str.len + (str.len + 1) * new_str_val.len);
         result.appendSliceAssumeCapacity(new_str_val);
@@ -539,7 +540,7 @@ pub const BuiltinFilters = struct {
         var iter = std.mem.tokenizeAny(u8, str, " \t\n\r");
         while (iter.next()) |token| {
             if (maxsplit >= 0 and splits >= maxsplit) {
-                const rest = std.mem.trimLeft(u8, str[iter.index - token.len ..], " \t\n\r");
+                const rest = std.mem.trimStart(u8, str[iter.index - token.len ..], " \t\n\r");
                 try appendOwnedString(allocator, result_list, rest);
                 break;
             }
@@ -647,7 +648,7 @@ pub const BuiltinFilters = struct {
         const str = try val.toString(allocator);
         defer allocator.free(str);
 
-        const trimmed = std.mem.trimLeft(u8, str, " \t\n\r");
+        const trimmed = std.mem.trimStart(u8, str, " \t\n\r");
         return Value{ .string = try allocator.dupe(u8, trimmed) };
     }
 
@@ -661,7 +662,7 @@ pub const BuiltinFilters = struct {
         const str = try val.toString(allocator);
         defer allocator.free(str);
 
-        const trimmed = std.mem.trimRight(u8, str, " \t\n\r");
+        const trimmed = std.mem.trimEnd(u8, str, " \t\n\r");
         return Value{ .string = try allocator.dupe(u8, trimmed) };
     }
 
@@ -771,7 +772,7 @@ pub const BuiltinFilters = struct {
         const format_str = try val.toString(allocator);
         defer allocator.free(format_str);
 
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
         try result.ensureTotalCapacity(allocator, format_str.len);
 
@@ -809,7 +810,7 @@ pub const BuiltinFilters = struct {
         defer if (args.len > 0) allocator.free(prefix_str);
         const prefix = if (args.len > 0) prefix_str else "    ";
 
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
 
         var line_start: usize = 0;
@@ -849,7 +850,7 @@ pub const BuiltinFilters = struct {
 
         return switch (val) {
             .list => |l| {
-                var result = std.ArrayList(u8){};
+                var result = std.ArrayList(u8).empty;
                 defer result.deinit(allocator);
 
                 for (l.items.items, 0..) |item, i| {
@@ -881,7 +882,7 @@ pub const BuiltinFilters = struct {
         const str = try val.toString(allocator);
         defer allocator.free(str);
 
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
         try result.ensureTotalCapacity(allocator, str.len);
 
@@ -995,7 +996,7 @@ pub const BuiltinFilters = struct {
         const str = try val.toString(allocator);
         defer allocator.free(str);
 
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
         try result.ensureTotalCapacity(allocator, str.len * 3);
 
@@ -1003,7 +1004,7 @@ pub const BuiltinFilters = struct {
             if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '.' or c == '~') {
                 result.appendAssumeCapacity(c);
             } else {
-                try result.writer(allocator).print("%{X:0>2}", .{c});
+                try result.print(allocator, "%{X:0>2}", .{c});
             }
         }
 
@@ -1022,7 +1023,7 @@ pub const BuiltinFilters = struct {
 
         // Simple URL detection - just wrap URLs in <a> tags
         // This is a simplified version
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
         const result_capacity = try support.urlOutputCapacity(str.len);
         try result.ensureTotalCapacity(allocator, result_capacity);
@@ -1110,7 +1111,7 @@ pub const BuiltinFilters = struct {
         const width: usize = @intCast(std.math.clamp(raw_wrap_width, 1, max_filter_width));
         _ = if (args.len > 1) (args[1].toBoolean() catch true) else true; // break_long_words - not fully implemented yet
 
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
         // Wrapping replaces or drops whitespace, so output never exceeds input length.
         try result.ensureTotalCapacity(allocator, str.len);
@@ -1150,7 +1151,7 @@ pub const BuiltinFilters = struct {
 
         return switch (val) {
             .dict => |d| {
-                var result = std.ArrayList(u8){};
+                var result = std.ArrayList(u8).empty;
                 defer result.deinit(allocator);
                 try result.ensureTotalCapacity(allocator, d.map.count());
 
@@ -1165,7 +1166,7 @@ pub const BuiltinFilters = struct {
                     defer allocator.free(val_str);
 
                     // Escape XML special chars in value
-                    var escaped_val = std.ArrayList(u8){};
+                    var escaped_val = std.ArrayList(u8).empty;
                     defer escaped_val.deinit(allocator);
                     const escaped_capacity = std.math.mul(usize, val_str.len, 6) catch return error.OutOfMemory;
                     try escaped_val.ensureTotalCapacity(allocator, escaped_capacity);
@@ -1568,7 +1569,7 @@ pub const BuiltinFilters = struct {
             value: Value,
             key: []u8,
         };
-        var entries = std.ArrayList(Entry){};
+        var entries = std.ArrayList(Entry).empty;
         defer entries.deinit(allocator);
         try entries.ensureTotalCapacity(allocator, val.list.items.items.len);
         errdefer {
@@ -1656,7 +1657,7 @@ pub const BuiltinFilters = struct {
             .list => |l| {
                 const result_list = try createList(allocator, l.items.items.len);
 
-                var seen = std.ArrayList(Value){};
+                var seen = std.ArrayList(Value).empty;
                 defer seen.deinit(allocator);
                 try seen.ensureTotalCapacity(allocator, l.items.items.len);
 
@@ -1796,7 +1797,7 @@ pub const BuiltinFilters = struct {
             value: Value,
             sort_key: []u8,
         };
-        var entries = std.ArrayList(Entry){};
+        var entries = std.ArrayList(Entry).empty;
         defer entries.deinit(allocator);
         try entries.ensureTotalCapacity(allocator, val.dict.map.count());
         defer for (entries.items) |entry| allocator.free(entry.sort_key);
@@ -1999,7 +2000,7 @@ pub const BuiltinFilters = struct {
                     return Value{ .null = {} };
                 }
                 // Simple random - use index based on current time
-                const index = @as(usize, @intCast(@mod(std.time.timestamp(), @as(i64, @intCast(l.items.items.len)))));
+                const index = @as(usize, @intCast(@mod(time.timestamp(), @as(i64, @intCast(l.items.items.len)))));
                 return l.items.items[index];
             },
             else => val,

@@ -16,7 +16,7 @@ const value = vibe_jinja.value;
 // ----------------------------------------------------------------------------
 
 test "tojson compact output (no indent)" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -57,7 +57,7 @@ test "tojson compact output (no indent)" {
 }
 
 test "tojson with positional indent argument" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -98,7 +98,7 @@ test "tojson with positional indent argument" {
 
 test "tojson with keyword argument indent=4" {
     // Filter kwargs now work in bytecode mode (Phase 2 implemented)
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -139,7 +139,7 @@ test "tojson with keyword argument indent=4" {
 
 test "tojson with indent=2 kwarg" {
     // Test tojson(indent=2) kwargs - verifies bytecode kwargs work
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -176,7 +176,7 @@ test "tojson with indent=2 kwarg" {
 }
 
 test "tojson with nested data structure" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -220,7 +220,7 @@ test "tojson with nested data structure" {
 }
 
 test "tojson with list" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -268,7 +268,7 @@ test "tojson with list" {
 // ----------------------------------------------------------------------------
 
 test "truncate with positional arguments" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -302,7 +302,7 @@ test "truncate with positional arguments" {
 }
 
 test "truncate with default behavior" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -338,7 +338,7 @@ test "truncate with default behavior" {
 }
 
 test "truncate preserves short strings" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -375,7 +375,7 @@ test "truncate preserves short strings" {
 // ----------------------------------------------------------------------------
 
 test "batch with size argument" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -416,7 +416,7 @@ test "batch with size argument" {
 }
 
 test "batch creates correct number of batches" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -461,7 +461,7 @@ test "batch creates correct number of batches" {
 // ----------------------------------------------------------------------------
 
 test "filter with multiple positional arguments" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -494,7 +494,7 @@ test "filter with multiple positional arguments" {
 }
 
 test "filter chain with arguments" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -531,7 +531,7 @@ test "filter chain with arguments" {
 // ----------------------------------------------------------------------------
 
 test "default filter with boolean argument" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -553,7 +553,7 @@ test "default filter with boolean argument" {
 }
 
 test "default filter with empty string" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -590,7 +590,7 @@ test "default filter with empty string" {
 // ----------------------------------------------------------------------------
 
 test "round filter with precision argument" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -622,7 +622,7 @@ test "round filter with precision argument" {
 }
 
 test "round filter default (0 precision)" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -658,7 +658,7 @@ test "round filter default (0 precision)" {
 // ----------------------------------------------------------------------------
 
 test "indent filter with width argument" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -699,7 +699,7 @@ test "indent filter with width argument" {
 // ----------------------------------------------------------------------------
 
 test "center filter with width argument" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -737,7 +737,7 @@ test "center filter with width argument" {
 // ----------------------------------------------------------------------------
 
 test "wordwrap filter with width argument" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -775,7 +775,7 @@ test "wordwrap filter with width argument" {
 // ----------------------------------------------------------------------------
 
 test "join filter with separator argument" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -818,7 +818,7 @@ test "join filter with separator argument" {
 // ----------------------------------------------------------------------------
 
 test "format filter with multiple arguments" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -844,7 +844,7 @@ test "format filter with multiple arguments" {
 // ----------------------------------------------------------------------------
 
 test "slice filter with count argument" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

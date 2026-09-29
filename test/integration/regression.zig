@@ -11,7 +11,7 @@ const loaders = vibe_jinja.loaders;
 // ============================================================================
 
 test "regression - assigned scoping in for loop" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -39,7 +39,7 @@ test "regression - assigned scoping in for loop" {
 }
 
 test "regression - set after for loop" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -67,7 +67,7 @@ test "regression - set after for loop" {
 // ============================================================================
 
 test "regression - partial conditional assignments" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -109,7 +109,7 @@ test "regression - partial conditional assignments" {
 }
 
 test "regression - old macro loop scoping bug" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -131,7 +131,7 @@ test "regression - old macro loop scoping bug" {
 }
 
 test "regression - else loop bug" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -168,7 +168,7 @@ test "regression - else loop bug" {
 }
 
 test "regression - empty if" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -193,7 +193,7 @@ test "regression - empty if" {
 }
 
 test "regression - variable reuse" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -235,7 +235,7 @@ test "regression - variable reuse" {
 }
 
 test "regression - include cycle returns runtime error" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -296,7 +296,7 @@ test "regression - inheritance cycle returns runtime error" {
 // ============================================================================
 
 test "regression - whitespace control" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -319,7 +319,7 @@ test "regression - whitespace control" {
 }
 
 test "regression - preserve internal whitespace" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -346,7 +346,7 @@ test "regression - preserve internal whitespace" {
 // ============================================================================
 
 test "regression - filter chaining" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -372,7 +372,7 @@ test "regression - filter chaining" {
 // ============================================================================
 
 test "regression - nested loop scoping" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -400,7 +400,7 @@ test "regression - nested loop scoping" {
 // ============================================================================
 
 test "regression - conditional in expression" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -422,7 +422,7 @@ test "regression - conditional in expression" {
 }
 
 test "regression - conditional with undefined" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -448,7 +448,7 @@ test "regression - conditional with undefined" {
 // ============================================================================
 
 test "regression - string escape sequences" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -475,7 +475,7 @@ test "regression - string escape sequences" {
 // ============================================================================
 
 test "regression - integer division" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -497,7 +497,7 @@ test "regression - integer division" {
 }
 
 test "regression - modulo operator" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -519,7 +519,7 @@ test "regression - modulo operator" {
 }
 
 test "regression - power operator" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

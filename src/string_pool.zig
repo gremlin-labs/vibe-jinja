@@ -12,7 +12,7 @@ const std = @import("std");
 /// All strings are stored once and referenced by index
 pub const StringPool = struct {
     /// Map from string content to index
-    strings: std.StringArrayHashMap(u32),
+    strings: std.StringArrayHashMapUnmanaged(u32),
     /// Storage for all interned strings
     storage: std.ArrayList([]const u8),
     /// Allocator for string storage
@@ -23,7 +23,7 @@ pub const StringPool = struct {
     /// Initialize a new string pool
     pub fn init(allocator: std.mem.Allocator) Self {
         return .{
-            .strings = std.StringArrayHashMap(u32).init(allocator),
+            .strings = .empty,
             .storage = std.ArrayList([]const u8).empty,
             .allocator = allocator,
         };
@@ -36,7 +36,7 @@ pub const StringPool = struct {
             self.allocator.free(s);
         }
         self.storage.deinit(self.allocator);
-        self.strings.deinit();
+        self.strings.deinit(self.allocator);
     }
 
     /// Intern a string - returns index for later retrieval
@@ -53,7 +53,7 @@ pub const StringPool = struct {
         errdefer self.allocator.free(owned);
 
         try self.storage.append(self.allocator, owned);
-        try self.strings.put(owned, idx);
+        try self.strings.put(self.allocator, owned, idx);
 
         return idx;
     }
