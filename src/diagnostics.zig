@@ -12,9 +12,9 @@
 //! var diag = RenderDiagnostics{};
 //!
 //! // Start timing parse phase
-//! diag.startParse();
+//! diag.startParse(io);
 //! // ... parse template ...
-//! diag.endParse();
+//! diag.endParse(io);
 //!
 //! // After render, report results
 //! diag.report();
@@ -51,49 +51,53 @@ pub const RenderDiagnostics = struct {
     bytecode_generated: bool = false,
 
     // Internal timing state
-    _parse_start: ?i128 = null,
-    _compile_start: ?i128 = null,
-    _render_start: ?i128 = null,
+    _parse_start: ?i96 = null,
+    _compile_start: ?i96 = null,
+    _render_start: ?i96 = null,
 
     const Self = @This();
 
+    fn now(io: std.Io) i96 {
+        return std.Io.Clock.awake.now(io).toNanoseconds();
+    }
+
     /// Start timing the parse phase
-    pub fn startParse(self: *Self) void {
-        self._parse_start = std.time.nanoTimestamp();
+    pub fn startParse(self: *Self, io: std.Io) void {
+        self._parse_start = now(io);
     }
 
     /// End timing the parse phase
-    pub fn endParse(self: *Self) void {
+    pub fn endParse(self: *Self, io: std.Io) void {
         if (self._parse_start) |start| {
-            const end = std.time.nanoTimestamp();
+            const end = now(io);
             self.parse_ns = @intCast(@max(0, end - start));
             self._parse_start = null;
         }
     }
 
     /// Start timing the compile phase
-    pub fn startCompile(self: *Self) void {
-        self._compile_start = std.time.nanoTimestamp();
+    pub fn startCompile(self: *Self, io: std.Io) void {
+        self._compile_start = now(io);
     }
 
     /// End timing the compile phase
-    pub fn endCompile(self: *Self) void {
+    pub fn endCompile(self: *Self, io: std.Io) void {
         if (self._compile_start) |start| {
-            const end = std.time.nanoTimestamp();
+            const end = now(io);
             self.compile_ns = @intCast(@max(0, end - start));
             self._compile_start = null;
         }
     }
 
     /// Start timing the render phase
-    pub fn startRender(self: *Self) void {
-        self._render_start = std.time.nanoTimestamp();
+    pub fn startRender(self: *Self, io: std.Io) void {
+        self._render_start = now(io);
     }
 
     /// End timing the render phase
-    pub fn endRender(self: *Self) void {
+    pub fn endRender(self: *Self, io: std.Io) void {
         if (self._render_start) |start| {
-            const end = std.time.nanoTimestamp();
+            const end = now(io);
             self.render_ns = @intCast(@max(0, end - start));
             self._render_start = null;
         }
@@ -353,9 +357,9 @@ test "RenderDiagnostics basic operations" {
     var diag = RenderDiagnostics{};
 
     // Test timing
-    diag.startParse();
-    std.Thread.sleep(1_000_000); // 1ms
-    diag.endParse();
+    diag.startParse(std.testing.io);
+    std.testing.io.sleep(.fromMilliseconds(1), .awake) catch {}; // 1ms
+    diag.endParse(std.testing.io);
 
     try std.testing.expect(diag.parse_ns > 0);
     try std.testing.expect(diag.parse_ns >= 1_000_000);
