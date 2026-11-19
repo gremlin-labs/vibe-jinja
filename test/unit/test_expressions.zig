@@ -10,7 +10,7 @@ test "test expression defined" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -32,7 +32,7 @@ test "test expression empty" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -54,7 +54,7 @@ test "test expression even" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -76,7 +76,7 @@ test "test expression odd" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -98,7 +98,7 @@ test "test expression divisibleby" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -120,7 +120,7 @@ test "test expression equalto" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -142,7 +142,7 @@ test "test expression string" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -164,7 +164,7 @@ test "test expression number" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -186,7 +186,7 @@ test "test expression boolean" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -208,7 +208,7 @@ test "test expression integer" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -230,7 +230,7 @@ test "test expression float" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -252,7 +252,7 @@ test "test expression mapping" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -282,7 +282,7 @@ test "test expression sequence" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -312,7 +312,7 @@ test "test expression iterable" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -334,7 +334,7 @@ test "test expression none" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -360,7 +360,7 @@ test "test expression lt" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -383,7 +383,7 @@ test "test expression lt false" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -406,7 +406,7 @@ test "test expression le" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -429,7 +429,7 @@ test "test expression le false" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -452,7 +452,7 @@ test "test expression gt" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -475,7 +475,7 @@ test "test expression gt false" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -498,7 +498,7 @@ test "test expression ge" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -521,7 +521,7 @@ test "test expression ge false" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -544,7 +544,7 @@ test "test expression ne" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -567,7 +567,7 @@ test "test expression ne false" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -590,7 +590,7 @@ test "test expression eq" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -613,7 +613,7 @@ test "test expression lessthan alias" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -636,7 +636,7 @@ test "test expression greaterthan alias" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -671,7 +671,7 @@ test "test expression 42 is integer" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -692,7 +692,7 @@ test "test expression 3.14 is float" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -713,7 +713,7 @@ test "test expression 42 is number" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -734,7 +734,7 @@ test "test expression string is string" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -763,7 +763,7 @@ test "test expression 2 is eq 2" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -784,7 +784,7 @@ test "test expression 2 is ne 3" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -805,7 +805,7 @@ test "test expression 2 is lt 3" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -826,7 +826,7 @@ test "test expression 2 is le 2" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -847,7 +847,7 @@ test "test expression 2 is gt 1" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -868,7 +868,7 @@ test "test expression 2 is ge 2" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -906,7 +906,7 @@ test "test expression upper" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -928,7 +928,7 @@ test "test expression not upper" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -950,7 +950,7 @@ test "test expression lower" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -972,7 +972,7 @@ test "test expression not lower" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);

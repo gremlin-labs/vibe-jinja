@@ -11,7 +11,7 @@ test "include basic" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const header_source = "<header>Header Content</header>";
@@ -43,7 +43,7 @@ test "include with context" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const partial_source = "Hello {{ name }}!";
@@ -85,7 +85,7 @@ test "include nested" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const footer_source = "<footer>Footer</footer>";
@@ -119,7 +119,7 @@ test "include with ignore missing" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const main_source = "Main {% include 'missing.jinja' ignore missing %}";
@@ -153,7 +153,7 @@ test "include variable template name" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const partial_source = "Partial content";

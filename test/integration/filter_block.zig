@@ -10,7 +10,7 @@ test "filter block" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source =
@@ -36,7 +36,7 @@ test "filter block with trim" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source =

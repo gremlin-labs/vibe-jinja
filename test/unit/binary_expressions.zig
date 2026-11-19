@@ -10,7 +10,7 @@ test "binary addition integers" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -32,7 +32,7 @@ test "binary subtraction integers" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -54,7 +54,7 @@ test "binary multiplication integers" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -76,7 +76,7 @@ test "binary division floats" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -99,7 +99,7 @@ test "binary modulo integers" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -121,7 +121,7 @@ test "binary power integers" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -143,7 +143,7 @@ test "string concatenation" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -165,7 +165,7 @@ test "string and number concatenation" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -187,7 +187,7 @@ test "number and string concatenation" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -209,7 +209,7 @@ test "comparison operators" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -231,7 +231,7 @@ test "logical operators" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -253,7 +253,7 @@ test "operator precedence" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -276,7 +276,7 @@ test "mixed int float operations" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);

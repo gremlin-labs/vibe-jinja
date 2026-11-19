@@ -130,7 +130,7 @@ test "LRU cache statistics" {
 }
 
 test "LRU cache compatibility aliases use the environment implementation" {
-    var env = vibe_jinja.Environment.init(testing.allocator);
+    var env = vibe_jinja.Environment.init(testing.allocator, std.testing.io);
     defer env.deinit();
     const canonical: *vibe_jinja.template_cache.LRUCache = env.template_cache.?;
     const compatibility: *cache_mod.LRUCache = canonical;
@@ -230,6 +230,7 @@ test "filesystem bytecode cache initialization" {
     // Use a test-specific directory
     var fs_cache = try cache_mod.FileSystemBytecodeCache.init(
         allocator,
+        std.testing.io,
         "/tmp/vibe_jinja_test_cache",
         null,
     );
@@ -244,6 +245,7 @@ test "filesystem bytecode cache custom pattern" {
     
     var fs_cache = try cache_mod.FileSystemBytecodeCache.init(
         allocator,
+        std.testing.io,
         "/tmp/vibe_jinja_test_cache",
         "custom_%s.bc",
     );
@@ -257,6 +259,7 @@ test "filesystem bytecode cache write and read" {
     
     var fs_cache = try cache_mod.FileSystemBytecodeCache.init(
         allocator,
+        std.testing.io,
         "/tmp/vibe_jinja_test_cache",
         null,
     );
@@ -302,6 +305,7 @@ test "filesystem bytecode cache checksum mismatch" {
     
     var fs_cache = try cache_mod.FileSystemBytecodeCache.init(
         allocator,
+        std.testing.io,
         "/tmp/vibe_jinja_test_cache",
         null,
     );

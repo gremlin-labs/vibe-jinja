@@ -19,7 +19,7 @@ test "filter chain basic" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ text | upper | reverse }}";
@@ -46,7 +46,7 @@ test "filter chain with arguments" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ text | replace('world', 'zig') | upper }}";
@@ -73,7 +73,7 @@ test "filter chain multiple filters" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ text | trim | upper | reverse }}";
@@ -100,7 +100,7 @@ test "filter with default argument" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ value | default('N/A') | upper }}";
@@ -128,7 +128,7 @@ test "filter error handling" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Filter that might error (e.g., division by zero)
@@ -157,7 +157,7 @@ test "filter with list operations" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ items | length | string }}";

@@ -10,7 +10,7 @@ test "loader filesystem loader init" {
     const allocator = gpa.allocator();
 
     var searchpath = [_][]const u8{"test/templates"};
-    var loader = try loaders.FileSystemLoader.init(allocator, &searchpath);
+    var loader = try loaders.FileSystemLoader.init(allocator, std.testing.io, &searchpath);
     defer loader.deinit();
 
     try testing.expect(loader.searchpath.len == 1);
@@ -24,16 +24,16 @@ test "loader filesystem loader load existing file" {
 
     // Create a temporary test file
     const test_dir = "test/templates";
-    try std.Io.Dir.cwd().makePath(test_dir);
-    defer std.Io.Dir.cwd().deleteTree(test_dir) catch {};
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, test_dir);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, test_dir) catch {};
 
     const test_file = "test/templates/test.jinja";
-    const file = try std.Io.Dir.cwd().createFile(test_file, .{});
-    try file.writeAll("Hello {{ name }}!");
-    file.close();
+    const file = try std.Io.Dir.cwd().createFile(std.testing.io, test_file, .{});
+    try file.writeStreamingAll(std.testing.io, "Hello {{ name }}!");
+    file.close(std.testing.io);
 
     const searchpath = [_][]const u8{"test/templates"};
-    var loader = try loaders.FileSystemLoader.init(allocator, &searchpath);
+    var loader = try loaders.FileSystemLoader.init(allocator, std.testing.io, &searchpath);
     defer loader.deinit();
 
     const content = try loader.getLoader().load("test.jinja");
@@ -48,7 +48,7 @@ test "loader filesystem loader load non-existent file" {
     const allocator = gpa.allocator();
 
     const searchpath = [_][]const u8{"test/templates"};
-    var loader = try loaders.FileSystemLoader.init(allocator, &searchpath);
+    var loader = try loaders.FileSystemLoader.init(allocator, std.testing.io, &searchpath);
     defer loader.deinit();
 
     const result = loader.getLoader().load("nonexistent.jinja");
@@ -239,16 +239,16 @@ test "loader package loader" {
 
     // Create test directory structure
     const test_dir = "test/pkg_templates";
-    try std.Io.Dir.cwd().makePath(test_dir);
-    defer std.Io.Dir.cwd().deleteTree(test_dir) catch {};
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, test_dir);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, test_dir) catch {};
 
     const test_file = "test/pkg_templates/hello.jinja";
-    const test_file_handle = try std.Io.Dir.cwd().createFile(test_file, .{});
-    try test_file_handle.writeAll("Hello from package!");
-    test_file_handle.close();
+    const test_file_handle = try std.Io.Dir.cwd().createFile(std.testing.io, test_file, .{});
+    try test_file_handle.writeStreamingAll(std.testing.io, "Hello from package!");
+    test_file_handle.close(std.testing.io);
 
     // Package loader requires package_path, package_name, and resource_path
-    var loader = try loaders.PackageLoader.init(allocator, "test", "test_package", "pkg_templates");
+    var loader = try loaders.PackageLoader.init(allocator, std.testing.io, "test", "test_package", "pkg_templates");
     defer loader.deinit();
 
     try testing.expectEqualStrings("test_package", loader.package_name);
@@ -268,20 +268,20 @@ test "loader package loader list templates" {
 
     // Create test directory structure
     const test_dir = "test/pkg_list_templates";
-    try std.Io.Dir.cwd().makePath(test_dir);
-    defer std.Io.Dir.cwd().deleteTree(test_dir) catch {};
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, test_dir);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, test_dir) catch {};
 
     // Create multiple test files
     const files = [_][]const u8{ "index.jinja", "about.jinja" };
     for (files) |filename| {
         const full_path = try std.Io.Dir.path.join(allocator, &[_][]const u8{ test_dir, filename });
         defer allocator.free(full_path);
-        const file = try std.Io.Dir.cwd().createFile(full_path, .{});
-        try file.writeAll("Template content");
-        file.close();
+        const file = try std.Io.Dir.cwd().createFile(std.testing.io, full_path, .{});
+        try file.writeStreamingAll(std.testing.io, "Template content");
+        file.close(std.testing.io);
     }
 
-    var loader = try loaders.PackageLoader.init(allocator, "test", "mypackage", "pkg_list_templates");
+    var loader = try loaders.PackageLoader.init(allocator, std.testing.io, "test", "mypackage", "pkg_list_templates");
     defer loader.deinit();
 
     const templates = try loader.getLoader().listTemplates();
@@ -302,8 +302,8 @@ test "loader module loader" {
 
     // Create test module directory
     const test_dir = "test/modules";
-    try std.Io.Dir.cwd().makePath(test_dir);
-    defer std.Io.Dir.cwd().deleteTree(test_dir) catch {};
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, test_dir);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, test_dir) catch {};
 
     // Get the expected module filename using SHA1 hash (matches Python's behavior)
     const module_filename = loaders.ModuleLoader.getModuleFilename("index.html");
@@ -312,13 +312,13 @@ test "loader module loader" {
     var full_path_buf: [256]u8 = undefined;
     const full_path = try std.mem.print(&full_path_buf, "{s}/{s}", .{ test_dir, module_filename });
     
-    const file = try std.Io.Dir.cwd().createFile(full_path, .{});
-    try file.writeAll("Precompiled template content");
-    file.close();
+    const file = try std.Io.Dir.cwd().createFile(std.testing.io, full_path, .{});
+    try file.writeStreamingAll(std.testing.io, "Precompiled template content");
+    file.close(std.testing.io);
 
     // Initialize loader with search paths
     const paths = [_][]const u8{test_dir};
-    var loader = try loaders.ModuleLoader.init(allocator, &paths);
+    var loader = try loaders.ModuleLoader.init(allocator, std.testing.io, &paths);
     defer loader.deinit();
 
     try testing.expect(loader.paths.len == 1);
@@ -367,7 +367,7 @@ test "loader module loader register template" {
 
     // Test registering templates directly (alternative to file-based loading)
     const paths = [_][]const u8{};
-    var loader = try loaders.ModuleLoader.init(allocator, &paths);
+    var loader = try loaders.ModuleLoader.init(allocator, std.testing.io, &paths);
     defer loader.deinit();
 
     // Register a template
@@ -450,20 +450,19 @@ test "loader filesystem loader rejects oversized template" {
     const allocator = gpa.allocator();
 
     const test_dir = "test/templates_oversized";
-    try std.Io.Dir.cwd().makePath(test_dir);
-    defer std.Io.Dir.cwd().deleteTree(test_dir) catch |err| {
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, test_dir);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, test_dir) catch |err| {
         std.log.warn("cleanup of {s} failed: {s}", .{ test_dir, @errorName(err) });
     };
 
     const test_file = "test/templates_oversized/huge.jinja";
-    const file = try std.Io.Dir.cwd().createFile(test_file, .{});
+    const file = try std.Io.Dir.cwd().createFile(std.testing.io, test_file, .{});
     // One byte past the template size limit; seek+write keeps the file sparse.
-    try file.seekTo(vibe_jinja.defaults.MAX_TEMPLATE_SIZE_BYTES);
-    try file.writeAll("x");
-    file.close();
+    try file.writePositionalAll(std.testing.io, "x", vibe_jinja.defaults.MAX_TEMPLATE_SIZE_BYTES);
+    file.close(std.testing.io);
 
     const searchpath = [_][]const u8{test_dir};
-    var loader = try loaders.FileSystemLoader.init(allocator, &searchpath);
+    var loader = try loaders.FileSystemLoader.init(allocator, std.testing.io, &searchpath);
     defer loader.deinit();
 
     const result = loader.getLoader().load("huge.jinja");

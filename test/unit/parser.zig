@@ -11,7 +11,7 @@ test "parse plain text" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "Hello, World!";
@@ -38,7 +38,7 @@ test "parse string literal expression" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ 'hello' }}";
@@ -66,7 +66,7 @@ test "parse integer literal expression" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ 42 }}";
@@ -96,7 +96,7 @@ test "parse boolean literal expression" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ true }}";
@@ -126,7 +126,7 @@ test "parse name expression" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ name }}";
@@ -156,7 +156,7 @@ test "parse binary addition expression" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ 1 + 2 }}";
@@ -186,7 +186,7 @@ test "parse filter expression" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ 'hello' | upper }}";
@@ -216,7 +216,7 @@ test "parse comment" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{# This is a comment #}";
@@ -240,7 +240,7 @@ test "parse autoescape block" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% autoescape true %}Hello{% endautoescape %}";
@@ -276,14 +276,14 @@ test "parse survives adversarially deep expression nesting via depth budget" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // 50k nested parens would exhaust the native stack without the parser's
     // expression-depth budget (256). With it, parseOr fails the statement with
     // SyntaxError and the parser's standard error recovery drops it — parsing
     // completes with an empty body instead of crashing the process.
-    var source = std.ArrayList(u8){};
+    var source = std.ArrayList(u8).empty;
     defer source.deinit(allocator);
     try source.appendSlice(allocator, "{{ ");
     try source.appendNTimes(allocator, '(', 50_000);

@@ -20,7 +20,7 @@ test "tojson compact output (no indent)" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -61,7 +61,7 @@ test "tojson with positional indent argument" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -102,7 +102,7 @@ test "tojson with keyword argument indent=4" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -143,7 +143,7 @@ test "tojson with indent=2 kwarg" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -180,7 +180,7 @@ test "tojson with nested data structure" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -224,7 +224,7 @@ test "tojson with list" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -272,7 +272,7 @@ test "truncate with positional arguments" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -306,7 +306,7 @@ test "truncate with default behavior" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -342,7 +342,7 @@ test "truncate preserves short strings" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -379,7 +379,7 @@ test "batch with size argument" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -420,7 +420,7 @@ test "batch creates correct number of batches" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -465,7 +465,7 @@ test "filter with multiple positional arguments" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -498,7 +498,7 @@ test "filter chain with arguments" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -535,7 +535,7 @@ test "default filter with boolean argument" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -557,7 +557,7 @@ test "default filter with empty string" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -594,7 +594,7 @@ test "round filter with precision argument" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -626,7 +626,7 @@ test "round filter default (0 precision)" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -662,7 +662,7 @@ test "indent filter with width argument" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -703,7 +703,7 @@ test "center filter with width argument" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -741,7 +741,7 @@ test "wordwrap filter with width argument" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -779,7 +779,7 @@ test "join filter with separator argument" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -822,7 +822,7 @@ test "format filter with multiple arguments" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -848,7 +848,7 @@ test "slice filter with count argument" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);

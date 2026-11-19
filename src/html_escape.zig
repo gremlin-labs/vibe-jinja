@@ -25,7 +25,7 @@ pub fn escapeOwned(allocator: std.mem.Allocator, input: []const u8, escape_slash
         });
     }
 
-    var output = std.ArrayList(u8){};
+    var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
     try output.ensureTotalCapacity(allocator, capacity);
     for (input) |byte| {

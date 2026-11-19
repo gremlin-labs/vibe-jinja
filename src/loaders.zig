@@ -195,6 +195,8 @@ pub const FileSystemLoader = struct {
     loader: Loader,
     allocator: std.mem.Allocator,
     searchpath: []const []const u8,
+    /// I/O used to read template files.
+    io: std.Io,
 
     const Self = @This();
 
@@ -211,7 +213,7 @@ pub const FileSystemLoader = struct {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
         // Split template path (simple split without allocation)
-        var path_parts = std.ArrayList([]const u8){};
+        var path_parts = std.ArrayList([]const u8).empty;
         defer path_parts.deinit(self.allocator);
 
         var iter = std.mem.splitSequence(u8, name, "/");
@@ -228,7 +230,7 @@ pub const FileSystemLoader = struct {
 
         // Try each search path
         for (self.searchpath) |search_path| {
-            var full_path = std.ArrayList(u8){};
+            var full_path = std.ArrayList(u8).empty;
             defer full_path.deinit(self.allocator);
 
             full_path.appendSlice(self.allocator, search_path) catch return false;
@@ -250,11 +252,11 @@ pub const FileSystemLoader = struct {
             defer self.allocator.free(path_str);
 
             // Check file modification time
-            const file = std.Io.Dir.cwd().openFile(path_str, .{}) catch continue;
-            defer file.close();
+            const file = std.Io.Dir.cwd().openFile(self.io, path_str, .{}) catch continue;
+            defer file.close(self.io);
 
-            const stat = file.stat() catch return false;
-            const file_mtime = @as(i64, @intCast(stat.mtime));
+            const stat = file.stat(self.io) catch return false;
+            const file_mtime = @as(i64, @intCast(stat.mtime.toNanoseconds()));
 
             // File is up-to-date if modification time hasn't changed
             return file_mtime <= last_modified;
@@ -270,7 +272,7 @@ pub const FileSystemLoader = struct {
 
         // Split template path and check for security issues
         // Store slices of the original name (no allocation needed)
-        var path_parts = std.ArrayList([]const u8){};
+        var path_parts = std.ArrayList([]const u8).empty;
         defer path_parts.deinit(allocator);
 
         var iter = std.mem.splitSequence(u8, name, "/");
@@ -288,7 +290,7 @@ pub const FileSystemLoader = struct {
 
         // Try each search path
         for (self.searchpath) |search_path| {
-            var full_path = std.ArrayList(u8){};
+            var full_path = std.ArrayList(u8).empty;
             defer full_path.deinit(allocator);
 
             try full_path.appendSlice(allocator, search_path);
@@ -310,13 +312,14 @@ pub const FileSystemLoader = struct {
             defer allocator.free(path_str);
 
             // Try to open the file - convert file errors to TemplateNotFound
-            const file = std.Io.Dir.cwd().openFile(path_str, .{}) catch {
+            const file = std.Io.Dir.cwd().openFile(self.io, path_str, .{}) catch {
                 continue; // Try next search path
             };
-            defer file.close();
+            defer file.close(self.io);
+            var file_reader = file.reader(self.io, &.{});
 
             // Read file contents - convert read errors to RuntimeError
-            const contents = file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES) catch {
+            const contents = file_reader.interface.allocRemaining(allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES)) catch {
                 return exceptions.TemplateError.RuntimeError;
             };
             return contents;
@@ -329,7 +332,7 @@ pub const FileSystemLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);
@@ -339,13 +342,13 @@ pub const FileSystemLoader = struct {
 
         // List templates from all search paths
         for (self.searchpath) |search_path| {
-            var dir = std.Io.Dir.cwd().openDir(search_path, .{ .iterate = true }) catch continue;
-            defer dir.close();
+            var dir = std.Io.Dir.cwd().openDir(self.io, search_path, .{ .iterate = true }) catch continue;
+            defer dir.close(self.io);
 
             var walker = dir.walk(allocator) catch continue;
             defer walker.deinit();
 
-            while (walker.next() catch continue) |entry| {
+            while (walker.next(self.io) catch continue) |entry| {
                 if (entry.kind == .file) {
                     // Check if it's a template file (simple check - could be enhanced)
                     const template_name = try std.Io.Dir.path.join(allocator, &[_][]const u8{ search_path, entry.path });
@@ -381,7 +384,7 @@ pub const FileSystemLoader = struct {
     /// // Option 2: Recommended - use initAndGetLoader (handles impl automatically)
     /// const loader = try FileSystemLoader.initAndGetLoader(allocator, searchpath);
     /// ```
-    pub fn init(allocator: std.mem.Allocator, searchpath: []const []const u8) !Self {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, searchpath: []const []const u8) !Self {
         // Copy search paths
         const paths_copy = try allocator.alloc([]const u8, searchpath.len);
         errdefer allocator.free(paths_copy);
@@ -397,6 +400,7 @@ pub const FileSystemLoader = struct {
                 .impl = undefined, // Must be set by caller after init returns
             },
             .allocator = allocator,
+            .io = io,
             .searchpath = paths_copy,
         };
     }
@@ -456,7 +460,7 @@ pub const DictLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);
@@ -715,7 +719,7 @@ pub const PrefixLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);
@@ -872,7 +876,7 @@ pub const ChoiceLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);
@@ -953,6 +957,8 @@ pub const PackageLoader = struct {
     package_path: []const u8,
     package_name: []const u8,
     resource_path: []const u8,
+    /// I/O used to read template files.
+    io: std.Io,
 
     const Self = @This();
 
@@ -969,7 +975,7 @@ pub const PackageLoader = struct {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
         // Build full path
-        var full_path = std.ArrayList(u8){};
+        var full_path = std.ArrayList(u8).empty;
         defer full_path.deinit(self.allocator);
 
         full_path.appendSlice(self.allocator, self.package_path) catch return false;
@@ -986,11 +992,11 @@ pub const PackageLoader = struct {
         defer self.allocator.free(path_str);
 
         // Check file modification time
-        const file = std.Io.Dir.cwd().openFile(path_str, .{}) catch return false;
-        defer file.close();
+        const file = std.Io.Dir.cwd().openFile(self.io, path_str, .{}) catch return false;
+        defer file.close(self.io);
 
-        const stat = file.stat() catch return false;
-        const file_mtime = @as(i64, @intCast(stat.mtime));
+        const stat = file.stat(self.io) catch return false;
+        const file_mtime = @as(i64, @intCast(stat.mtime.toNanoseconds()));
 
         return file_mtime <= last_modified;
     }
@@ -1000,7 +1006,7 @@ pub const PackageLoader = struct {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
         // Build full path
-        var full_path = std.ArrayList(u8){};
+        var full_path = std.ArrayList(u8).empty;
         defer full_path.deinit(allocator);
 
         try full_path.appendSlice(allocator, self.package_path);
@@ -1017,13 +1023,14 @@ pub const PackageLoader = struct {
         defer allocator.free(path_str);
 
         // Try to open the file - convert file errors to template errors
-        const file = std.Io.Dir.cwd().openFile(path_str, .{}) catch {
+        const file = std.Io.Dir.cwd().openFile(self.io, path_str, .{}) catch {
             return exceptions.TemplateError.TemplateNotFound;
         };
-        defer file.close();
+        defer file.close(self.io);
+        var file_reader = file.reader(self.io, &.{});
 
         // Read file contents - convert read errors to runtime errors
-        const contents = file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES) catch {
+        const contents = file_reader.interface.allocRemaining(allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES)) catch {
             return exceptions.TemplateError.RuntimeError;
         };
         return contents;
@@ -1033,7 +1040,7 @@ pub const PackageLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);
@@ -1042,7 +1049,7 @@ pub const PackageLoader = struct {
         }
 
         // Build resource directory path
-        var resource_dir = std.ArrayList(u8){};
+        var resource_dir = std.ArrayList(u8).empty;
         defer resource_dir.deinit(allocator);
 
         try resource_dir.appendSlice(allocator, self.package_path);
@@ -1055,13 +1062,13 @@ pub const PackageLoader = struct {
         defer allocator.free(dir_path);
 
         // List templates from resource directory
-        var dir = std.Io.Dir.cwd().openDir(dir_path, .{ .iterate = true }) catch return templates.toOwnedSlice(allocator);
-        defer dir.close();
+        var dir = std.Io.Dir.cwd().openDir(self.io, dir_path, .{ .iterate = true }) catch return templates.toOwnedSlice(allocator);
+        defer dir.close(self.io);
 
         var walker = dir.walk(allocator) catch return templates.toOwnedSlice(allocator);
         defer walker.deinit();
 
-        while (walker.next() catch null) |entry| {
+        while (walker.next(self.io) catch null) |entry| {
             if (entry.kind == .file) {
                 const template_name = try allocator.dupe(u8, entry.path);
                 try templates.append(allocator, template_name);
@@ -1083,6 +1090,7 @@ pub const PackageLoader = struct {
     /// Initialize a package loader
     pub fn init(
         allocator: std.mem.Allocator,
+        io: std.Io,
         package_path: []const u8,
         package_name: []const u8,
         resource_path: []const u8,
@@ -1110,6 +1118,7 @@ pub const PackageLoader = struct {
                 .impl = undefined, // Must be set by caller or via getLoader
             },
             .allocator = allocator,
+            .io = io,
             .package_path = package_path_copy,
             .package_name = package_name_copy,
             .resource_path = resource_path_copy,
@@ -1143,6 +1152,8 @@ pub const PackageLoader = struct {
 pub const ModuleLoader = struct {
     loader: Loader,
     allocator: std.mem.Allocator,
+    /// I/O used to read module files.
+    io: std.Io,
     /// Search paths for precompiled templates (supports multiple paths like Python)
     paths: []const []const u8,
     /// Registered templates mapping (template name -> precompiled content)
@@ -1216,7 +1227,7 @@ pub const ModuleLoader = struct {
 
         // Try each search path
         for (self.paths) |search_path| {
-            var full_path = std.ArrayList(u8){};
+            var full_path = std.ArrayList(u8).empty;
             defer full_path.deinit(allocator);
 
             try full_path.appendSlice(allocator, search_path);
@@ -1229,11 +1240,12 @@ pub const ModuleLoader = struct {
             defer allocator.free(path_str);
 
             // Try to open the module file
-            const file = std.Io.Dir.cwd().openFile(path_str, .{}) catch continue;
-            defer file.close();
+            const file = std.Io.Dir.cwd().openFile(self.io, path_str, .{}) catch continue;
+            defer file.close(self.io);
+            var file_reader = file.reader(self.io, &.{});
 
             // Read file contents
-            const contents = file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES) catch {
+            const contents = file_reader.interface.allocRemaining(allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES)) catch {
                 return exceptions.TemplateError.RuntimeError;
             };
             return contents;
@@ -1246,7 +1258,7 @@ pub const ModuleLoader = struct {
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
-        var templates = std.ArrayList([]const u8){};
+        var templates = std.ArrayList([]const u8).empty;
         errdefer {
             for (templates.items) |template| {
                 allocator.free(template);
@@ -1299,6 +1311,7 @@ pub const ModuleLoader = struct {
     /// Supports multiple paths, matching Python's ModuleLoader behavior
     pub fn init(
         allocator: std.mem.Allocator,
+        io: std.Io,
         paths: []const []const u8,
     ) !Self {
         // Copy paths
@@ -1316,15 +1329,16 @@ pub const ModuleLoader = struct {
                 .impl = undefined, // Must be set by caller or via getLoader
             },
             .allocator = allocator,
+            .io = io,
             .paths = paths_copy,
             .registered_templates = std.StringHashMap([]const u8).init(allocator),
         };
     }
 
     /// Initialize with a single path (convenience method)
-    pub fn initSinglePath(allocator: std.mem.Allocator, path: []const u8) !Self {
+    pub fn initSinglePath(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !Self {
         const paths = [_][]const u8{path};
-        return try init(allocator, &paths);
+        return try init(allocator, io, &paths);
     }
 
     /// Initialize and return a pointer to the loader interface

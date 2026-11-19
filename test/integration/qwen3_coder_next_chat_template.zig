@@ -26,7 +26,7 @@ fn renderTemplate(template: []const u8, json_source: []const u8) ![]const u8 {
         try vars.put(entry.key_ptr.*, converted);
     }
 
-    var environment = vibe_jinja.Environment.init(allocator);
+    var environment = vibe_jinja.Environment.init(allocator, std.testing.io);
     defer environment.deinit();
     environment.undefined_behavior = .strict;
 
@@ -98,7 +98,7 @@ test "environment trailing newline policy matches Jinja" {
     var vars = std.StringHashMap(vibe_jinja.Value).init(allocator);
     defer vars.deinit();
 
-    var environment = vibe_jinja.Environment.init(allocator);
+    var environment = vibe_jinja.Environment.init(allocator, std.testing.io);
     defer environment.deinit();
     var runtime = vibe_jinja.runtime.Runtime.init(&environment, allocator);
     defer runtime.deinit();

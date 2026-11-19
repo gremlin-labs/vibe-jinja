@@ -23,7 +23,7 @@ test "slice: messages[1:] - skip first element" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -57,7 +57,7 @@ test "slice: messages[:-1] - skip last element" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -90,7 +90,7 @@ test "slice: messages[1:3] - range slice" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -124,7 +124,7 @@ test "slice: messages[::2] - step slice (every other)" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -158,7 +158,7 @@ test "slice: string slicing" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -193,7 +193,7 @@ test "loop.cycle: alternating odd/even" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -229,7 +229,7 @@ test "loop.cycle: three values" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -269,7 +269,7 @@ test "loop.changed: detect category changes" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -311,7 +311,7 @@ test "cycler global: creates cycler object" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -335,7 +335,7 @@ test "joiner global: creates joiner object" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -359,7 +359,7 @@ test "namespace global: creates namespace object" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -391,7 +391,7 @@ test "variable reassignment with slice - skip first element" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -418,7 +418,7 @@ test "variable reassignment with slice - skip last element" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -447,7 +447,7 @@ test "variable reassignment preserves original during evaluation" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -475,7 +475,7 @@ test "variable reassignment with external list" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -539,7 +539,7 @@ test "multiple variable reassignments in sequence" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -573,7 +573,7 @@ test "strftime_now: date format %Y-%m-%d" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -604,7 +604,7 @@ test "strftime_now: time format %H:%M:%S" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -637,7 +637,7 @@ test "strftime_now: callable and returns value" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -665,7 +665,7 @@ test "strftime_now: month abbreviation %b" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -693,7 +693,7 @@ test "strftime_now: full month name %B" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -731,7 +731,7 @@ test "strftime_now: weekday abbreviation %a" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -764,7 +764,7 @@ test "strftime_now: full weekday name %A" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -799,7 +799,7 @@ test "strftime_now: 12-hour format %I with AM/PM %p" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -827,7 +827,7 @@ test "strftime_now: year without century %y" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -852,7 +852,7 @@ test "strftime_now: day of year %j" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -882,7 +882,7 @@ test "strftime_now: weekday as decimal %w" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -908,7 +908,7 @@ test "strftime_now: literal percent %%" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -930,7 +930,7 @@ test "strftime_now: combined date/time format" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -959,7 +959,7 @@ test "strftime_now: human readable format" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);

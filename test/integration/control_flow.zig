@@ -11,7 +11,7 @@ test "for loop with list" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -48,7 +48,7 @@ test "if statement true condition" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -73,7 +73,7 @@ test "if statement false condition" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -98,7 +98,7 @@ test "if elif else chain" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -123,7 +123,7 @@ test "nested for loops" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -169,7 +169,7 @@ test "nested if statements" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -199,7 +199,7 @@ test "for loop with continue" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -235,7 +235,7 @@ test "for loop with break" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -270,7 +270,7 @@ test "for loop loop variables" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -304,7 +304,7 @@ test "if with and operator" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -334,7 +334,7 @@ test "if with or operator" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -364,7 +364,7 @@ test "nested loop depth tracking" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);

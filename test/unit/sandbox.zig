@@ -236,7 +236,7 @@ test "sandbox environment init" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator);
+    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator, std.testing.io);
     defer sandbox_env.deinit();
 
     try testing.expect(sandbox_env.sandboxed == true);
@@ -248,7 +248,7 @@ test "sandbox environment safe range check" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator);
+    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator, std.testing.io);
     defer sandbox_env.deinit();
 
     // Small range should succeed
@@ -278,7 +278,7 @@ test "sandbox safe attribute check" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator);
+    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator, std.testing.io);
     defer sandbox_env.deinit();
 
     var test_val = value.Value{ .string = try allocator.dupe(u8, "test") };
@@ -297,7 +297,7 @@ test "sandbox safe callable check" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator);
+    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator, std.testing.io);
     defer sandbox_env.deinit();
 
     // Safe callable
@@ -314,7 +314,7 @@ test "sandbox add safe attribute" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator);
+    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator, std.testing.io);
     defer sandbox_env.deinit();
 
     try sandbox_env.addSafeAttribute("custom_attr");
@@ -330,7 +330,7 @@ test "sandbox add safe function" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator);
+    var sandbox_env = try sandbox.SandboxedEnvironment.init(allocator, std.testing.io);
     defer sandbox_env.deinit();
 
     try sandbox_env.addSafeFunction("custom_func");
@@ -348,7 +348,7 @@ test "immutable sandbox environment init" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var sandbox_env = try sandbox.ImmutableSandboxedEnvironment.init(allocator);
+    var sandbox_env = try sandbox.ImmutableSandboxedEnvironment.init(allocator, std.testing.io);
     defer sandbox_env.deinit();
 
     try testing.expect(sandbox_env.inner.sandboxed == true);
@@ -360,7 +360,7 @@ test "immutable sandbox blocks mutable list operations" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var sandbox_env = try sandbox.ImmutableSandboxedEnvironment.init(allocator);
+    var sandbox_env = try sandbox.ImmutableSandboxedEnvironment.init(allocator, std.testing.io);
     defer sandbox_env.deinit();
 
     const list = try allocator.create(value.List);
@@ -386,7 +386,7 @@ test "immutable sandbox blocks mutable dict operations" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var sandbox_env = try sandbox.ImmutableSandboxedEnvironment.init(allocator);
+    var sandbox_env = try sandbox.ImmutableSandboxedEnvironment.init(allocator, std.testing.io);
     defer sandbox_env.deinit();
 
     const dict = try allocator.create(value.Dict);

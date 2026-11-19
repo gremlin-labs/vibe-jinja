@@ -525,7 +525,7 @@ pub fn extractSourceSnippet(
     lineno: usize,
     context_lines: usize,
 ) ![]const u8 {
-    var lines = std.ArrayList([]const u8){};
+    var lines = std.ArrayList([]const u8).empty;
     defer lines.deinit(allocator);
 
     var line_start: usize = 0;

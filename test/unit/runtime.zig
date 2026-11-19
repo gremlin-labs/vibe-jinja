@@ -10,7 +10,7 @@ test "runtime context initialization and local resolution" {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
     var vars = std.StringHashMap(value.Value).init(allocator);
     defer vars.deinit();
@@ -32,7 +32,7 @@ test "runtime context set, get, default, and multiple variables" {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
     var vars = std.StringHashMap(value.Value).init(allocator);
     defer vars.deinit();
@@ -53,7 +53,7 @@ test "runtime context parent resolution and shadowing" {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
     var parent_vars = std.StringHashMap(value.Value).init(allocator);
     defer parent_vars.deinit();
@@ -77,7 +77,7 @@ test "runtime undefined behavior and environment globals" {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
     env.undefined_behavior = .debug;
     try env.addGlobal("global_var", .{ .integer = 42 });
@@ -96,7 +96,7 @@ test "runtime template reference initialization" {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
     var vars = std.StringHashMap(value.Value).init(allocator);
     defer vars.deinit();
@@ -132,7 +132,7 @@ test "runtime resolves through a deep context chain without stack recursion" {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const depth = 4096;

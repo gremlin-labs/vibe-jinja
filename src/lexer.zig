@@ -351,7 +351,7 @@ pub const Lexer = struct {
 
     /// Tokenize the entire source into a token stream
     pub fn tokenize(self: *Self, allocator: std.mem.Allocator) !TokenStream {
-        var tokens = std.ArrayList(Token){};
+        var tokens = std.ArrayList(Token).empty;
         defer tokens.deinit(allocator);
         // Rough upper-bound heuristic (about one token per 4 source bytes) to
         // avoid repeated growth reallocations while tokenizing large templates.

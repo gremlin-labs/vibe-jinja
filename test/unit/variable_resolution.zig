@@ -10,7 +10,7 @@ test "variable resolution from context" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var rt = runtime.Runtime.init(&env, allocator);
@@ -43,7 +43,7 @@ test "undefined variable lenient behavior" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
     env.undefined_behavior = value.UndefinedBehavior.lenient;
 
@@ -66,7 +66,7 @@ test "undefined variable debug behavior" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
     env.undefined_behavior = value.UndefinedBehavior.debug;
 
@@ -89,7 +89,7 @@ test "variable resolution from environment globals" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     const global_key = try allocator.dupe(u8, "global_var");

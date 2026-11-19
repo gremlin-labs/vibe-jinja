@@ -159,11 +159,11 @@ pub const simd_utils = @import("simd_utils.zig");
 ///
 /// # Example
 /// ```zig
-/// const output = try jinja.eval_file(allocator, "templates/index.jinja");
+/// const output = try jinja.eval_file(allocator, io, "templates/index.jinja");
 /// defer allocator.free(output);
 /// ```
-pub fn eval_file(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
-    return _eval_file(allocator, path, false);
+pub fn eval_file(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
+    return _eval_file(allocator, io, path, false);
 }
 
 /// Evaluate a template string and return the rendered output
@@ -187,25 +187,23 @@ pub fn eval_file(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
 ///
 /// # Example
 /// ```zig
-/// const output = try jinja.eval(allocator, "Hello, {{ name }}!");
+/// const output = try jinja.eval(allocator, io, "Hello, {{ name }}!");
 /// defer allocator.free(output);
 /// ```
-pub fn eval(allocator: std.mem.Allocator, content: []const u8) ![]const u8 {
-    return _eval(allocator, content, false);
+pub fn eval(allocator: std.mem.Allocator, io: std.Io, content: []const u8) ![]const u8 {
+    return _eval(allocator, io, content, false);
 }
 
-fn _eval_file(allocator: std.mem.Allocator, path: []const u8, debug: bool) ![]const u8 {
-    const file = try std.Io.Dir.cwd().openFile(path, .{});
-    defer file.close();
+fn _eval_file(allocator: std.mem.Allocator, io: std.Io, path: []const u8, debug: bool) ![]const u8 {
+    const content = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES));
+    defer allocator.free(content);
 
-    const content = try file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);
-
-    return try _eval(allocator, content, debug);
+    return try _eval(allocator, io, content, debug);
 }
 
-fn _eval(allocator: std.mem.Allocator, content: []const u8, debug: bool) ![]const u8 {
+fn _eval(allocator: std.mem.Allocator, io: std.Io, content: []const u8, debug: bool) ![]const u8 {
     // Create a default environment
-    var env = environment_mod.Environment.init(allocator);
+    var env = environment_mod.Environment.init(allocator, io);
     defer env.deinit();
 
     // Tokenize
@@ -237,22 +235,22 @@ fn _eval(allocator: std.mem.Allocator, content: []const u8, debug: bool) ![]cons
     }
 
     // Evaluate template
-    return try evalTemplate(template, allocator);
+    return try evalTemplate(template, allocator, io);
 }
 
 /// Evaluate a template node
-fn evalTemplate(template: *nodes_mod.Template, allocator: std.mem.Allocator) ![]const u8 {
+fn evalTemplate(template: *nodes_mod.Template, allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
     // Get environment from template
     const env_ptr = template.base.environment orelse {
         // Create default environment if none
-        var default_env = environment_mod.Environment.init(allocator);
+        var default_env = environment_mod.Environment.init(allocator, io);
         defer default_env.deinit();
         var empty_vars = std.StringHashMap(context.Value).init(allocator);
         defer empty_vars.deinit();
         var ctx = try context.Context.init(&default_env, empty_vars, null, allocator);
         defer ctx.deinit();
 
-        var out = std.ArrayList(u8){};
+        var out = std.ArrayList(u8).empty;
         defer out.deinit(allocator);
 
         for (template.body.items) |stmt| {
@@ -271,7 +269,7 @@ fn evalTemplate(template: *nodes_mod.Template, allocator: std.mem.Allocator) ![]
     var ctx = try context.Context.init(env, empty_vars, null, allocator);
     defer ctx.deinit();
 
-    var out = std.ArrayList(u8){};
+    var out = std.ArrayList(u8).empty;
     defer out.deinit(allocator);
 
     for (template.body.items) |stmt| {
@@ -305,25 +303,20 @@ fn evalStmt(stmt: *nodes_mod.Stmt, ctx: *context.Context, allocator: std.mem.All
 }
 
 fn test_eval(allocator: std.mem.Allocator, path: []const u8, debug: bool) !void {
+    const io = std.testing.io;
     const source_path = try std.mem.concat(allocator, u8, &[_][]const u8{ path, "/test.jinja" });
     defer allocator.free(source_path);
 
-    const source_file = try std.Io.Dir.cwd().openFile(source_path, .{});
-    defer source_file.close();
-
-    const source = try source_file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);
+    const source = try std.Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES));
     defer allocator.free(source);
 
     const expected_path = try std.mem.concat(allocator, u8, &[_][]const u8{ path, "/test.html" });
     defer allocator.free(expected_path);
 
-    const expected_file = try std.Io.Dir.cwd().openFile(expected_path, .{});
-    defer expected_file.close();
-
-    const expected = try expected_file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);
+    const expected = try std.Io.Dir.cwd().readFileAlloc(io, expected_path, allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES));
     defer allocator.free(expected);
 
-    const actual = try _eval(allocator, source, debug);
+    const actual = try _eval(allocator, io, source, debug);
     defer allocator.free(actual);
 
     try testing.expectEqualStrings(expected, actual);

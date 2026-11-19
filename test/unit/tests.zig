@@ -350,7 +350,7 @@ test "test callable" {
     try testing.expect(tests.BuiltinTests.callable(dict_val, &[_]value.Value{}, null, null));
     
     // Test with environment and filter name
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     var filter_name = value.Value{ .string = try allocator.dupe(u8, "upper") };
@@ -427,7 +427,7 @@ test "test filter" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Test with existing filter
@@ -450,7 +450,7 @@ test "test test" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Test with existing test
@@ -782,7 +782,7 @@ test "comparison test aliases exist in environment" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Verify all comparison test aliases exist

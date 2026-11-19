@@ -26,7 +26,7 @@
 //!
 //! ```zig
 //! // Template caching is automatic when using Environment
-//! var env = jinja.Environment.init(allocator);
+//! var env = jinja.Environment.init(allocator, io);
 //! // cache_size = 400 by default
 //!
 //! // Access cache statistics
@@ -41,7 +41,7 @@
 //! # Bytecode Cache Usage
 //!
 //! ```zig
-//! var fs_cache = try jinja.cache.FileSystemBytecodeCache.init(allocator, "/tmp/jinja_cache", null);
+//! var fs_cache = try jinja.cache.FileSystemBytecodeCache.init(allocator, io, "/tmp/jinja_cache", null);
 //! defer fs_cache.deinit();
 //!
 //! // Check if bytecode exists
@@ -113,14 +113,14 @@ pub const Bucket = struct {
     pub fn loadBytecode(self: *Self, reader: anytype) !void {
         // Read and verify magic header
         var magic: [6]u8 = undefined;
-        const bytes_read = try reader.readAll(&magic);
+        const bytes_read = try reader.readSliceShort(&magic);
         if (bytes_read != 6 or !std.mem.eql(u8, &magic, &bc_magic)) {
             self.reset();
             return;
         }
 
         // Read checksum
-        const stored_checksum = try reader.readInt(u64, .little);
+        const stored_checksum = try reader.takeInt(u64, .little);
         if (stored_checksum != self.checksum) {
             self.reset();
             return;
@@ -148,16 +148,16 @@ pub const Bucket = struct {
 
     /// Load bytecode from bytes
     pub fn bytecodeFromString(self: *Self, data: []const u8) !void {
-        var stream = std.io.fixedBufferStream(data);
-        try self.loadBytecode(stream.reader());
+        var reader: std.Io.Reader = .fixed(data);
+        try self.loadBytecode(&reader);
     }
 
     /// Return bytecode as bytes
     pub fn bytecodeToString(self: *Self) ![]const u8 {
-        var buf = std.ArrayList(u8){};
-        errdefer buf.deinit(self.allocator);
-        try self.writeBytecode(buf.writer(self.allocator));
-        return try buf.toOwnedSlice(self.allocator);
+        var buf: std.Io.Writer.Allocating = .init(self.allocator);
+        errdefer buf.deinit();
+        try self.writeBytecode(&buf.writer);
+        return try buf.toOwnedSlice();
     }
 };
 /// Serialize bytecode to a writer
@@ -196,25 +196,25 @@ fn deserializeBytecode(allocator: std.mem.Allocator, reader: anytype) !bytecode_
     errdefer bc.deinit();
 
     // Read instruction count
-    const instr_count = try reader.readInt(u32, .little);
+    const instr_count = try reader.takeInt(u32, .little);
 
     // Read instructions
     var i: u32 = 0;
     while (i < instr_count) : (i += 1) {
-        const opcode_byte = try reader.readInt(u8, .little);
-        const operand = try reader.readInt(u32, .little);
+        const opcode_byte = try reader.takeInt(u8, .little);
+        const operand = try reader.takeInt(u32, .little);
         const opcode = @as(bytecode_mod.Opcode, @enumFromInt(opcode_byte));
         try bc.addInstruction(opcode, operand);
     }
 
     // Read string pool
-    const str_count = try reader.readInt(u32, .little);
+    const str_count = try reader.takeInt(u32, .little);
     var s: u32 = 0;
     while (s < str_count) : (s += 1) {
-        const str_len = try reader.readInt(u32, .little);
+        const str_len = try reader.takeInt(u32, .little);
         const str = try allocator.alloc(u8, str_len);
         errdefer allocator.free(str);
-        const bytes_read = try reader.readAll(str);
+        const bytes_read = try reader.readSliceShort(str);
         if (bytes_read != str_len) {
             allocator.free(str);
             return error.UnexpectedEof;
@@ -223,13 +223,13 @@ fn deserializeBytecode(allocator: std.mem.Allocator, reader: anytype) !bytecode_
     }
 
     // Read name pool
-    const name_count = try reader.readInt(u32, .little);
+    const name_count = try reader.takeInt(u32, .little);
     var n: u32 = 0;
     while (n < name_count) : (n += 1) {
-        const name_len = try reader.readInt(u32, .little);
+        const name_len = try reader.takeInt(u32, .little);
         const name = try allocator.alloc(u8, name_len);
         errdefer allocator.free(name);
-        const bytes_read = try reader.readAll(name);
+        const bytes_read = try reader.readSliceShort(name);
         if (bytes_read != name_len) {
             allocator.free(name);
             return error.UnexpectedEof;
@@ -238,7 +238,7 @@ fn deserializeBytecode(allocator: std.mem.Allocator, reader: anytype) !bytecode_
     }
 
     // Read constants placeholder (always 0 for now)
-    _ = try reader.readInt(u32, .little);
+    _ = try reader.takeInt(u32, .little);
 
     return bc;
 }
@@ -328,6 +328,8 @@ pub const BytecodeCache = struct {
 /// Stores bytecode files on disk for persistence across application restarts
 pub const FileSystemBytecodeCache = struct {
     allocator: std.mem.Allocator,
+    /// I/O used to read and write cache files.
+    io: std.Io,
     directory: []const u8,
     pattern: []const u8,
     cache: BytecodeCache,
@@ -339,23 +341,24 @@ pub const FileSystemBytecodeCache = struct {
 
     /// Initialize with directory and optional pattern
     /// If directory is null, uses system temp directory
-    pub fn init(allocator: std.mem.Allocator, directory: ?[]const u8, pattern: ?[]const u8) !Self {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, directory: ?[]const u8, pattern: ?[]const u8) !Self {
         const dir = if (directory) |d|
             try allocator.dupe(u8, d)
         else
-            try getDefaultCacheDir(allocator);
+            try getDefaultCacheDir(allocator, io);
         errdefer allocator.free(dir);
 
         const pat = try allocator.dupe(u8, pattern orelse DEFAULT_PATTERN);
 
         // Ensure directory exists
-        std.Io.Dir.cwd().makePath(dir) catch |err| switch (err) {
+        std.Io.Dir.cwd().createDirPath(io, dir) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => return err,
         };
 
         var self = Self{
             .allocator = allocator,
+            .io = io,
             .directory = dir,
             .pattern = pat,
             .cache = undefined,
@@ -382,12 +385,12 @@ pub const FileSystemBytecodeCache = struct {
     }
 
     /// Get default cache directory
-    fn getDefaultCacheDir(allocator: std.mem.Allocator) ![]const u8 {
+    fn getDefaultCacheDir(allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
         // Use a user-specific subdirectory in /tmp
         const dirname = "_jinja2-cache";
 
         // Check if /tmp exists by trying to access it
-        std.Io.Dir.cwd().access("/tmp", .{}) catch {
+        std.Io.Dir.cwd().access(io, "/tmp", .{}) catch {
             // Fall back to current directory
             return try allocator.dupe(u8, ".jinja2_cache");
         };
@@ -398,7 +401,7 @@ pub const FileSystemBytecodeCache = struct {
     /// Get cache filename for a bucket
     fn getCacheFilename(self: *Self, bucket: *Bucket) ![]const u8 {
         // Replace %s in pattern with bucket key
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         errdefer result.deinit(self.allocator);
         // Final size is exactly pattern minus "%s" plus the key; reserve once.
         try result.ensureTotalCapacity(self.allocator, self.pattern.len + bucket.key.len);
@@ -435,7 +438,7 @@ pub const FileSystemBytecodeCache = struct {
         defer self.allocator.free(filename);
 
         // Read entire file into memory
-        const file_data = std.Io.Dir.cwd().readFileAlloc(self.allocator, filename, 1024 * 1024) catch return;
+        const file_data = std.Io.Dir.cwd().readFileAlloc(self.io, filename, self.allocator, .limited(1024 * 1024)) catch return;
         defer self.allocator.free(file_data);
 
         bucket.bytecodeFromString(file_data) catch {
@@ -457,20 +460,20 @@ pub const FileSystemBytecodeCache = struct {
         const tmp_filename = try std.fmt.allocPrint(self.allocator, "{s}.tmp", .{filename});
         defer self.allocator.free(tmp_filename);
 
-        const file = try std.Io.Dir.cwd().createFile(tmp_filename, .{});
+        const file = try std.Io.Dir.cwd().createFile(self.io, tmp_filename, .{});
         errdefer {
-            file.close();
-            std.Io.Dir.cwd().deleteFile(tmp_filename) catch |err| {
+            file.close(self.io);
+            std.Io.Dir.cwd().deleteFile(self.io, tmp_filename) catch |err| {
                 std.log.debug("vibe-jinja: tmp cache file cleanup failed: {s}", .{@errorName(err)});
             };
         }
 
-        try file.writeAll(data);
-        file.close();
+        try file.writeStreamingAll(self.io, data);
+        file.close(self.io);
 
         // Rename to final filename
-        std.Io.Dir.cwd().rename(tmp_filename, filename) catch |err| {
-            std.Io.Dir.cwd().deleteFile(tmp_filename) catch |del_err| {
+        std.Io.Dir.rename(std.Io.Dir.cwd(), tmp_filename, std.Io.Dir.cwd(), filename, self.io) catch |err| {
+            std.Io.Dir.cwd().deleteFile(self.io, tmp_filename) catch |del_err| {
                 std.log.debug("vibe-jinja: tmp cache file cleanup failed: {s}", .{@errorName(del_err)});
             };
             return err;
@@ -480,8 +483,8 @@ pub const FileSystemBytecodeCache = struct {
     fn clearImpl(ptr: *anyopaque) void {
         const self: *Self = @ptrCast(@alignCast(ptr));
 
-        var dir = std.Io.Dir.cwd().openDir(self.directory, .{ .iterate = true }) catch return;
-        defer dir.close();
+        var dir = std.Io.Dir.cwd().openDir(self.io, self.directory, .{ .iterate = true }) catch return;
+        defer dir.close(self.io);
 
         // Build pattern for matching (replace %s with wildcard logic)
         const prefix_end = std.mem.find(u8, self.pattern, "%s") orelse return;
@@ -489,14 +492,14 @@ pub const FileSystemBytecodeCache = struct {
         const suffix = if (prefix_end + 2 < self.pattern.len) self.pattern[prefix_end + 2 ..] else "";
 
         var iter = dir.iterate();
-        while (iter.next() catch null) |entry| {
+        while (iter.next(self.io) catch null) |entry| {
             if (entry.kind != .file) continue;
 
             // Check if filename matches pattern
             if (std.mem.startsWith(u8, entry.name, prefix) and
                 std.mem.endsWith(u8, entry.name, suffix))
             {
-                dir.deleteFile(entry.name) catch |err| {
+                dir.deleteFile(self.io, entry.name) catch |err| {
                     std.log.debug("vibe-jinja: cache clear could not delete {s}: {s}", .{ entry.name, @errorName(err) });
                 };
             }

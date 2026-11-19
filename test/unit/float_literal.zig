@@ -14,7 +14,7 @@ test "parse float literal expression" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ 3.14 }}";
@@ -44,7 +44,7 @@ test "visit float literal" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const float_lit = try allocator.create(nodes.FloatLiteral);

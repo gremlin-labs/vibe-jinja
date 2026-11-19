@@ -31,11 +31,11 @@
 //! # Usage
 //!
 //! ```zig
-//! var env = jinja.Environment.init(allocator);
+//! var env = jinja.Environment.init(allocator, io);
 //! env.sandboxed = true;  // Enable sandbox mode
 //!
 //! // Use SandboxedEnvironment for full control
-//! var sandbox = try jinja.sandbox.SandboxedEnvironment.init(allocator);
+//! var sandbox = try jinja.sandbox.SandboxedEnvironment.init(allocator, io);
 //! defer sandbox.deinit();
 //!
 //! // Customize allowed attributes/methods
@@ -572,9 +572,9 @@ pub const SandboxedEnvironment = struct {
     const Self = @This();
 
     /// Initialize a sandboxed environment
-    pub fn init(allocator: std.mem.Allocator) !Self {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) !Self {
         var self = Self{
-            .base = environment.Environment.init(allocator),
+            .base = environment.Environment.init(allocator, io),
             .sandboxed = true,
             .safe_attributes = std.StringHashMap(void).init(allocator),
             .safe_functions = std.StringHashMap(void).init(allocator),
@@ -771,8 +771,8 @@ pub const ImmutableSandboxedEnvironment = struct {
     const Self = @This();
 
     /// Initialize an immutable sandboxed environment
-    pub fn init(allocator: std.mem.Allocator) !Self {
-        var inner = try SandboxedEnvironment.init(allocator);
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) !Self {
+        var inner = try SandboxedEnvironment.init(allocator, io);
         inner.block_mutable_operations = true;
         return Self{
             .inner = inner,

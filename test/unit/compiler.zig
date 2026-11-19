@@ -12,7 +12,7 @@ test "visit string literal" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const string_lit = try allocator.create(nodes.StringLiteral);
@@ -46,7 +46,7 @@ test "visit integer literal" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const int_lit = try allocator.create(nodes.IntegerLiteral);
@@ -80,7 +80,7 @@ test "visit boolean literal" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const bool_lit = try allocator.create(nodes.BooleanLiteral);
@@ -114,7 +114,7 @@ test "visit name expression resolves variable" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const name_node = try allocator.create(nodes.Name);
@@ -157,7 +157,7 @@ test "visit binary addition expression" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const left_lit = try allocator.create(nodes.IntegerLiteral);
@@ -205,7 +205,7 @@ test "visit output statement with plain text" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const output = try allocator.create(nodes.Output);
@@ -237,7 +237,7 @@ test "renderWithOptions basic rendering" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     // Note: env.deinit() will clean up cached templates
     defer env.deinit();
 
@@ -277,7 +277,7 @@ test "renderWithOptions with timeout succeeds for quick templates" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     // Note: env.deinit() will clean up cached templates
     defer env.deinit();
 

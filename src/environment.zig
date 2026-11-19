@@ -59,7 +59,7 @@ pub const AutoescapeConfig = union(enum) {
 /// # Example
 ///
 /// ```zig
-/// var env = jinja.Environment.init(allocator);
+/// var env = jinja.Environment.init(allocator, io);
 /// defer env.deinit();
 ///
 /// // Configure environment
@@ -80,6 +80,8 @@ pub const AutoescapeConfig = union(enum) {
 /// ```
 pub const Environment = struct {
     allocator: std.mem.Allocator,
+    /// I/O used for loading templates, clocks and timeouts.
+    io: std.Io,
 
     // Configuration
     block_start_string: []const u8,
@@ -147,18 +149,20 @@ pub const Environment = struct {
     ///
     /// # Arguments
     /// - `allocator`: Memory allocator to use for the environment
+    /// - `io`: I/O implementation for template loading, clocks and timeouts
     ///
     /// # Returns
     /// A new `Environment` instance with default settings
     ///
     /// # Example
     /// ```zig
-    /// var env = jinja.Environment.init(allocator);
+    /// var env = jinja.Environment.init(allocator, io);
     /// defer env.deinit();
     /// ```
-    pub fn init(allocator: std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) Self {
         var env = Self{
             .allocator = allocator,
+            .io = io,
             .block_start_string = defaults.BLOCK_START_STRING,
             .block_end_string = defaults.BLOCK_END_STRING,
             .variable_start_string = defaults.VARIABLE_START_STRING,
@@ -185,6 +189,7 @@ pub const Environment = struct {
             .template_cache = if (defaults.CACHE_SIZE > 0) blk: {
                 const lru_cache = allocator.create(LRUCache) catch return Self{
                     .allocator = allocator,
+                    .io = io,
                     .block_start_string = defaults.BLOCK_START_STRING,
                     .block_end_string = defaults.BLOCK_END_STRING,
                     .variable_start_string = defaults.VARIABLE_START_STRING,
@@ -497,7 +502,7 @@ pub const Environment = struct {
     ///
     /// # Example
     /// ```zig
-    /// var env = jinja.Environment.init(allocator);
+    /// var env = jinja.Environment.init(allocator, io);
     /// defer env.deinit(); // Automatically cleans up all resources
     /// ```
     pub fn deinit(self: *Self) void {
@@ -772,7 +777,7 @@ pub const Environment = struct {
         errdefer self.allocator.destroy(entry);
         entry.* = .{
             .template = template,
-            .last_modified = std.time.timestamp(),
+            .last_modified = std.Io.Clock.real.now(self.io).toSeconds(),
             .access_count = 0,
             .source_checksum = TemplateCacheEntry.calculateChecksum(source),
         };
@@ -1459,11 +1464,11 @@ const SpontaneousEntry = struct {
 
 var spontaneous_cache: ?std.StringHashMap(SpontaneousEntry) = null;
 var spontaneous_cache_allocator: ?std.mem.Allocator = null;
-var spontaneous_cache_mutex: std.Thread.Mutex = .{};
+var spontaneous_cache_mutex: std.Io.Mutex = .init;
 const SPONTANEOUS_CACHE_SIZE: usize = 10;
 
 fn appendSpontaneousKeyPart(allocator: std.mem.Allocator, key: *std.ArrayList(u8), value: []const u8) !void {
-    try key.writer(allocator).print("{d}:{s}|", .{ value.len, value });
+    try key.print(allocator, "{d}:{s}|", .{ value.len, value });
 }
 
 fn appendOptionalSpontaneousKeyPart(allocator: std.mem.Allocator, key: *std.ArrayList(u8), value: ?[]const u8) !void {
@@ -1489,7 +1494,7 @@ fn appendSpontaneousSyntaxKey(allocator: std.mem.Allocator, key: *std.ArrayList(
 
 fn appendSpontaneousBehaviorKey(allocator: std.mem.Allocator, key: *std.ArrayList(u8), options: Environment.OverlayOptions) !void {
     const autoescape = if (options.autoescape) |value| value.bool else defaults.AUTOESCAPE;
-    try key.writer(allocator).print("{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|", .{
+    try key.print(allocator, "{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|", .{
         @intFromBool(options.trim_blocks orelse defaults.TRIM_BLOCKS),
         @intFromBool(options.lstrip_blocks orelse defaults.LSTRIP_BLOCKS),
         @intFromBool(options.keep_trailing_newline orelse defaults.KEEP_TRAILING_NEWLINE),
@@ -1567,9 +1572,9 @@ fn applySpontaneousOptions(env: *Environment, options: Environment.OverlayOption
     try applySpontaneousCacheOptions(env, options);
 }
 
-fn createSpontaneousEnvironment(allocator: std.mem.Allocator, options: Environment.OverlayOptions, shared: bool) !*Environment {
+fn createSpontaneousEnvironment(allocator: std.mem.Allocator, io: std.Io, options: Environment.OverlayOptions, shared: bool) !*Environment {
     const environment = try allocator.create(Environment);
-    environment.* = Environment.init(allocator);
+    environment.* = Environment.init(allocator, io);
     errdefer {
         environment.deinit();
         allocator.destroy(environment);
@@ -1606,13 +1611,13 @@ fn clearSpontaneousEntries(cache_allocator: std.mem.Allocator, cache: *std.Strin
 ///
 /// # Errors
 /// - `error.OutOfMemory` - Memory allocation failed
-pub fn getSpontaneousEnvironment(allocator: std.mem.Allocator, options: Environment.OverlayOptions) !*Environment {
+pub fn getSpontaneousEnvironment(allocator: std.mem.Allocator, io: std.Io, options: Environment.OverlayOptions) !*Environment {
     if (!spontaneousOptionsAreCacheable(options)) {
-        return try createSpontaneousEnvironment(allocator, options, false);
+        return try createSpontaneousEnvironment(allocator, io, options, false);
     }
 
-    spontaneous_cache_mutex.lock();
-    defer spontaneous_cache_mutex.unlock();
+    spontaneous_cache_mutex.lockUncancelable(io);
+    defer spontaneous_cache_mutex.unlock(io);
 
     // Initialize cache if needed
     if (spontaneous_cache == null) {
@@ -1628,7 +1633,7 @@ pub fn getSpontaneousEnvironment(allocator: std.mem.Allocator, options: Environm
         return entry.environment;
     }
 
-    const environment = try createSpontaneousEnvironment(allocator, options, true);
+    const environment = try createSpontaneousEnvironment(allocator, io, options, true);
     errdefer {
         environment.deinit();
         allocator.destroy(environment);
@@ -1645,10 +1650,10 @@ pub fn getSpontaneousEnvironment(allocator: std.mem.Allocator, options: Environm
 
 /// Clear the spontaneous environment cache
 /// This should be called during application shutdown or when you want to reclaim memory
-pub fn clearSpontaneousCache(allocator: std.mem.Allocator) void {
+pub fn clearSpontaneousCache(allocator: std.mem.Allocator, io: std.Io) void {
     _ = allocator; // Entries remember the allocator that owns each environment.
-    spontaneous_cache_mutex.lock();
-    defer spontaneous_cache_mutex.unlock();
+    spontaneous_cache_mutex.lockUncancelable(io);
+    defer spontaneous_cache_mutex.unlock(io);
 
     if (spontaneous_cache) |*cache| {
         clearSpontaneousEntries(spontaneous_cache_allocator.?, cache);

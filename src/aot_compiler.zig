@@ -25,6 +25,7 @@ const environment = @import("environment.zig");
 /// AOT Compiler - generates Zig source code from Jinja templates
 pub const AotCompiler = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
     output: std.ArrayList(u8),
     indent_level: usize,
     loop_depth: usize,
@@ -37,9 +38,10 @@ pub const AotCompiler = struct {
     /// Error type for AOT compilation - explicit to support recursion
     pub const Error = error{OutOfMemory};
 
-    pub fn init(allocator: std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) Self {
         return .{
             .allocator = allocator,
+            .io = io,
             .output = std.ArrayList(u8).empty,
             .indent_level = 0,
             .loop_depth = 0,
@@ -56,7 +58,7 @@ pub const AotCompiler = struct {
     /// Compile a template source to Zig code
     pub fn compile(self: *Self, source: []const u8, template_name: []const u8) ![]const u8 {
         // Create a temporary environment for parsing
-        var env = environment.Environment.init(self.allocator);
+        var env = environment.Environment.init(self.allocator, self.io);
         defer env.deinit();
 
         // Parse the template
@@ -776,7 +778,7 @@ pub const AotCompiler = struct {
     /// Generate filter chain (value | filter1 | filter2 | filter3)
     fn generateFilterChain(self: *Self, filter: *nodes.FilterExpr, base_temp: usize) Error!void {
         // Build chain of filters
-        var filters = std.ArrayList([]const u8){};
+        var filters = std.ArrayList([]const u8).empty;
         defer filters.deinit(self.allocator);
 
         var current: nodes.Expression = nodes.Expression{ .filter = filter };
@@ -1330,8 +1332,8 @@ pub const AotCompiler = struct {
 };
 
 /// Compile a template to Zig source code
-pub fn compileToZig(allocator: std.mem.Allocator, source: []const u8, name: []const u8) ![]const u8 {
-    var compiler = AotCompiler.init(allocator);
+pub fn compileToZig(allocator: std.mem.Allocator, io: std.Io, source: []const u8, name: []const u8) ![]const u8 {
+    var compiler = AotCompiler.init(allocator, io);
     defer compiler.deinit();
     return try compiler.compile(source, name);
 }
@@ -1341,7 +1343,7 @@ test "AOT compile simple template" {
     const allocator = std.testing.allocator;
     const source = "Hello {{ name }}!";
 
-    const code = try compileToZig(allocator, source, "test");
+    const code = try compileToZig(allocator, std.testing.io, source, "test");
     defer allocator.free(code);
 
     // Check that output contains expected patterns
@@ -1353,7 +1355,7 @@ test "AOT compile template with filter" {
     const allocator = std.testing.allocator;
     const source = "{{ name | upper }}";
 
-    const code = try compileToZig(allocator, source, "test_filter");
+    const code = try compileToZig(allocator, std.testing.io, source, "test_filter");
     defer allocator.free(code);
 
     try std.testing.expect(std.mem.find(u8, code, "toUpper") != null);
@@ -1363,7 +1365,7 @@ test "AOT compile template with loop" {
     const allocator = std.testing.allocator;
     const source = "{% for item in items %}{{ item }}{% endfor %}";
 
-    const code = try compileToZig(allocator, source, "test_loop");
+    const code = try compileToZig(allocator, std.testing.io, source, "test_loop");
     defer allocator.free(code);
 
     try std.testing.expect(std.mem.find(u8, code, "for (") != null);
@@ -1374,7 +1376,7 @@ test "AOT compile template with if" {
     const allocator = std.testing.allocator;
     const source = "{% if show %}visible{% endif %}";
 
-    const code = try compileToZig(allocator, source, "test_if");
+    const code = try compileToZig(allocator, std.testing.io, source, "test_if");
     defer allocator.free(code);
 
     try std.testing.expect(std.mem.find(u8, code, "if (") != null);
@@ -1384,7 +1386,7 @@ test "AOT compile template with set statement" {
     const allocator = std.testing.allocator;
     const source = "{% set x = 5 %}{{ x }}";
 
-    const code = try compileToZig(allocator, source, "test_set");
+    const code = try compileToZig(allocator, std.testing.io, source, "test_set");
     defer allocator.free(code);
 
     try std.testing.expect(std.mem.find(u8, code, "_set_x") != null);
@@ -1394,7 +1396,7 @@ test "AOT compile template with binary expression" {
     const allocator = std.testing.allocator;
     const source = "{{ 1 + 2 }}";
 
-    const code = try compileToZig(allocator, source, "test_binexpr");
+    const code = try compileToZig(allocator, std.testing.io, source, "test_binexpr");
     defer allocator.free(code);
 
     try std.testing.expect(std.mem.find(u8, code, "_left") != null);
@@ -1405,7 +1407,7 @@ test "AOT compile template with filter chain" {
     const allocator = std.testing.allocator;
     const source = "{{ name | trim | upper }}";
 
-    const code = try compileToZig(allocator, source, "test_filter_chain");
+    const code = try compileToZig(allocator, std.testing.io, source, "test_filter_chain");
     defer allocator.free(code);
 
     // Should contain filter processing
@@ -1416,7 +1418,7 @@ test "AOT compile template with attribute access" {
     const allocator = std.testing.allocator;
     const source = "{{ user.name }}";
 
-    const code = try compileToZig(allocator, source, "test_attr");
+    const code = try compileToZig(allocator, std.testing.io, source, "test_attr");
     defer allocator.free(code);
 
     try std.testing.expect(std.mem.find(u8, code, "getAttr") != null);
@@ -1426,7 +1428,7 @@ test "AOT compile template with loop attributes" {
     const allocator = std.testing.allocator;
     const source = "{% for item in items %}{{ loop.index }}{% endfor %}";
 
-    const code = try compileToZig(allocator, source, "test_loop_attr");
+    const code = try compileToZig(allocator, std.testing.io, source, "test_loop_attr");
     defer allocator.free(code);
 
     try std.testing.expect(std.mem.find(u8, code, "_loop_idx") != null);

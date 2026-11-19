@@ -31,7 +31,7 @@
 //! These defaults are automatically applied when creating an Environment:
 //!
 //! ```zig
-//! var env = jinja.Environment.init(allocator);
+//! var env = jinja.Environment.init(allocator, io);
 //! // Uses all defaults from this module
 //! ```
 

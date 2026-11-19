@@ -207,7 +207,7 @@ test "extension bind to environment" {
     try ext.addTag("mytag");
 
     // Create environment
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Bind extension to environment

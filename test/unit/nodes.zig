@@ -47,7 +47,7 @@ test "node name expression eval" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = vibe_jinja.environment.Environment.init(allocator);
+    var env = vibe_jinja.environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     var vars = std.StringHashMap(value.Value).init(allocator);
@@ -73,7 +73,7 @@ test "node binary expression eval" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = vibe_jinja.environment.Environment.init(allocator);
+    var env = vibe_jinja.environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
     var vars = std.StringHashMap(value.Value).init(allocator);
     defer vars.deinit();

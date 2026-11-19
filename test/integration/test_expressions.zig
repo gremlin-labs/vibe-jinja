@@ -19,7 +19,7 @@ test "test expression is defined" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if value is defined %}yes{% else %}no{% endif %}";
@@ -45,7 +45,7 @@ test "test expression is undefined" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if value is undefined %}yes{% else %}no{% endif %}";
@@ -67,7 +67,7 @@ test "test expression is even" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if num is even %}even{% else %}odd{% endif %}";
@@ -92,7 +92,7 @@ test "test expression is odd" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if num is odd %}odd{% else %}even{% endif %}";
@@ -117,7 +117,7 @@ test "test expression is divisibleby" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if num is divisibleby(3) %}yes{% else %}no{% endif %}";
@@ -142,7 +142,7 @@ test "test expression is equalto" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if value is equalto(42) %}yes{% else %}no{% endif %}";
@@ -167,7 +167,7 @@ test "test expression is string" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if value is string %}yes{% else %}no{% endif %}";
@@ -193,7 +193,7 @@ test "test expression is number" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if value is number %}yes{% else %}no{% endif %}";
@@ -218,7 +218,7 @@ test "test expression is empty" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if value is empty %}yes{% else %}no{% endif %}";
@@ -244,7 +244,7 @@ test "test expression is in" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if item is in(items) %}yes{% else %}no{% endif %}";
@@ -280,7 +280,7 @@ test "test expression chain" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Test chaining: is defined and is number
@@ -306,7 +306,7 @@ test "test expression is filter" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if 'upper' is filter %}yes{% else %}no{% endif %}";
@@ -329,7 +329,7 @@ test "test expression is test" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% if 'defined' is test %}yes{% else %}no{% endif %}";
@@ -356,7 +356,7 @@ test "range global function in for loop" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% for i in range(5) %}{{ i }}{% endfor %}";
@@ -379,7 +379,7 @@ test "range global function with start and stop" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% for i in range(2, 6) %}{{ i }}{% endfor %}";
@@ -402,7 +402,7 @@ test "range global function with step" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% for i in range(0, 10, 2) %}{{ i }},{% endfor %}";
@@ -425,7 +425,7 @@ test "range global function with count filter" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Test using range with filters (Jinja2 pattern: range(10 - users|count))
@@ -449,7 +449,7 @@ test "lipsum global function generates text" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{{ lipsum(1, false) }}";

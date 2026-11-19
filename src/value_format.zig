@@ -39,7 +39,7 @@ fn appendQuoted(output: *std.ArrayList(u8), allocator: std.mem.Allocator, string
         '\t' => try output.appendSlice(allocator, "\\t"),
         0x08 => try output.appendSlice(allocator, "\\b"),
         0x0c => try output.appendSlice(allocator, "\\f"),
-        0...7, 11, 14...0x1f => try output.writer(allocator).print("\\u00{x:0>2}", .{byte}),
+        0...7, 11, 14...0x1f => try output.print(allocator, "\\u00{x:0>2}", .{byte}),
         else => try output.append(allocator, byte),
     };
     try output.append(allocator, '"');
@@ -49,10 +49,10 @@ fn appendJsonScalar(output: *std.ArrayList(u8), allocator: std.mem.Allocator, va
     switch (value) {
         .string => |string| try appendQuoted(output, allocator, string),
         .markup => |markup| try appendQuoted(output, allocator, markup.content),
-        .integer => |integer| try output.writer(allocator).print("{d}", .{integer}),
+        .integer => |integer| try output.print(allocator, "{d}", .{integer}),
         .float => |float| {
             if (!std.math.isFinite(float)) return exceptions.TemplateError.TypeError;
-            try output.writer(allocator).print("{d}", .{float});
+            try output.print(allocator, "{d}", .{float});
         },
         .boolean => |boolean| try output.appendSlice(allocator, if (boolean) "true" else "false"),
         .null, .undefined => try output.appendSlice(allocator, "null"),
@@ -150,7 +150,7 @@ fn appendJsonValue(
 }
 
 pub fn json(allocator: std.mem.Allocator, value: value_mod.Value, indent: ?usize) FormatError![]u8 {
-    var output = std.ArrayList(u8){};
+    var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
     var traversal = Traversal{};
     try appendJsonValue(&output, allocator, value, indent, 0, &traversal);
@@ -161,13 +161,13 @@ fn appendPrettyScalar(output: *std.ArrayList(u8), allocator: std.mem.Allocator, 
     switch (value) {
         .string => |string| try appendQuoted(output, allocator, string),
         .markup => |markup| try appendQuoted(output, allocator, markup.content),
-        .integer => |integer| try output.writer(allocator).print("{d}", .{integer}),
-        .float => |float| try output.writer(allocator).print("{d}", .{float}),
+        .integer => |integer| try output.print(allocator, "{d}", .{integer}),
+        .float => |float| try output.print(allocator, "{d}", .{float}),
         .boolean => |boolean| try output.appendSlice(allocator, if (boolean) "true" else "false"),
         .null => try output.appendSlice(allocator, "null"),
-        .undefined => |undefined_value| try output.writer(allocator).print("undefined({s})", .{undefined_value.name}),
-        .callable => |callable| try output.writer(allocator).print("<{s} {s}>", .{ @tagName(callable.callable_type), callable.name orelse "<anonymous>" }),
-        .custom => |custom| try output.writer(allocator).print("<{s} object>", .{custom.typeName()}),
+        .undefined => |undefined_value| try output.print(allocator, "undefined({s})", .{undefined_value.name}),
+        .callable => |callable| try output.print(allocator, "<{s} {s}>", .{ @tagName(callable.callable_type), callable.name orelse "<anonymous>" }),
+        .custom => |custom| try output.print(allocator, "<{s} object>", .{custom.typeName()}),
         .list, .dict, .async_result => unreachable,
     }
 }
@@ -180,14 +180,14 @@ fn appendPrettyValue(output: *std.ArrayList(u8), allocator: std.mem.Allocator, v
         .async_result => |result| {
             try traversal.enter(@intFromPtr(result));
             defer traversal.leave();
-            if (result.value) |resolved| try appendPrettyValue(output, allocator, resolved, indent, depth + 1, traversal) else try output.writer(allocator).print("<async pending:{d}>", .{result.id});
+            if (result.value) |resolved| try appendPrettyValue(output, allocator, resolved, indent, depth + 1, traversal) else try output.print(allocator, "<async pending:{d}>", .{result.id});
         },
         else => try appendPrettyScalar(output, allocator, value),
     }
 }
 
 pub fn pretty(allocator: std.mem.Allocator, value: value_mod.Value, indent: usize) FormatError![]u8 {
-    var output = std.ArrayList(u8){};
+    var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
     var traversal = Traversal{};
     try appendPrettyValue(&output, allocator, value, indent, 0, &traversal);

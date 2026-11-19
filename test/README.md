@@ -133,7 +133,7 @@ Do not compare a new Zig run with a Python JSON file produced on another machine
 Minimal render shape:
 
 ```zig
-var env = vibe_jinja.Environment.init(allocator);
+var env = vibe_jinja.Environment.init(allocator, io);
 defer env.deinit();
 
 const template = try env.fromString("Hello, {{ name }}!", "test");

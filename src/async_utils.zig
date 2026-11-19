@@ -133,7 +133,7 @@
 //! and async filter/test execution:
 //!
 //! ```zig
-//! var env = jinja.Environment.init(allocator);
+//! var env = jinja.Environment.init(allocator, io);
 //! env.enable_async = true;
 //! ```
 //!

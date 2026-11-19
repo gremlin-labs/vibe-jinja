@@ -11,7 +11,7 @@ test "autoescape block parses correctly with true" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% autoescape true %}Hello{% endautoescape %}";
@@ -47,7 +47,7 @@ test "autoescape block parses correctly with false" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% autoescape false %}World{% endautoescape %}";
@@ -76,7 +76,7 @@ test "autoescape block parses with expression output inside" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% autoescape true %}{{ name }}{% endautoescape %}";
@@ -107,7 +107,7 @@ test "autoescape block parses with mixed content" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     const source = "{% autoescape true %}Hello {{ name }}!{% endautoescape %}";

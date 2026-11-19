@@ -97,7 +97,7 @@ pub const RenderArena = struct {
         _ = estimated_output_size;
         return Self{
             .arena = std.heap.ArenaAllocator.init(backing),
-            .output_buffer = std.ArrayList(u8){},
+            .output_buffer = std.ArrayList(u8).empty,
         };
     }
 

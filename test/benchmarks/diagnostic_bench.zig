@@ -21,6 +21,7 @@
 //! - **context_derive**: Context derivation cost
 
 const std = @import("std");
+const bench = @import("bench_io.zig");
 const vibe_jinja = @import("vibe_jinja");
 const environment = vibe_jinja.environment;
 const runtime = vibe_jinja.runtime;
@@ -259,7 +260,7 @@ fn runScenario(
     scenario: *const Scenario,
     diag: *diagnostics.RenderDiagnostics,
 ) !void {
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, bench.io);
     defer env.deinit();
 
     // Build context for this scenario
@@ -285,7 +286,7 @@ fn runScenario(
     var max_ns: u64 = 0;
 
     for (0..scenario.iterations) |_| {
-        const start = std.time.nanoTimestamp();
+        const start = bench.nanoTimestamp();
 
         var rt = runtime.Runtime.init(&env, allocator);
         defer rt.deinit();
@@ -296,7 +297,7 @@ fn runScenario(
         };
         allocator.free(result);
 
-        const elapsed: u64 = @intCast(@max(0, std.time.nanoTimestamp() - start));
+        const elapsed: u64 = @intCast(@max(0, bench.nanoTimestamp() - start));
         total_ns += elapsed;
         min_ns = @min(min_ns, elapsed);
         max_ns = @max(max_ns, elapsed);
@@ -308,7 +309,7 @@ fn runScenario(
 
 /// Check if bytecode is generated for a template
 fn checkBytecodeGeneration(allocator: std.mem.Allocator) !bool {
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, bench.io);
     defer env.deinit();
 
     const template = try env.fromString("Hello {{ name }}", "bytecode_test");
@@ -481,6 +482,7 @@ pub fn runDiagnostics() !void {
     , .{});
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    bench.io = init.io;
     try runDiagnostics();
 }

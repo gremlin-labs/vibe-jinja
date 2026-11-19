@@ -23,7 +23,7 @@ fn renderCase(json_source: []const u8) ![]const u8 {
         try vars.put(entry.key_ptr.*, converted);
     }
 
-    var environment = vibe_jinja.Environment.init(allocator);
+    var environment = vibe_jinja.Environment.init(allocator, std.testing.io);
     defer environment.deinit();
     environment.undefined_behavior = .strict;
 

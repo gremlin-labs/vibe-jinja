@@ -17,7 +17,7 @@ fn destroyOverlay(allocator: std.mem.Allocator, overlay: *Environment) void {
 test "environment overlay clones registries and uses ordinary cleanup" {
     const allocator = testing.allocator;
     
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     // Add a custom filter to parent
@@ -40,7 +40,7 @@ test "environment overlay clones registries and uses ordinary cleanup" {
 
 test "environment overlay remains valid when parent is destroyed first" {
     const allocator = testing.allocator;
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     try env.addFilter("custom_filter", customTestFilter);
     const overlay_env = try env.overlay(.{});
 
@@ -55,7 +55,7 @@ test "environment overlay remains valid when parent is destroyed first" {
 test "environment overlay can override settings" {
     const allocator = testing.allocator;
     
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     // Parent has trim_blocks = false (default)
@@ -82,7 +82,7 @@ test "environment overlay can override settings" {
 test "environment overlay has its own cache" {
     const allocator = testing.allocator;
     
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     // Create overlay
@@ -100,7 +100,7 @@ test "environment overlay has its own cache" {
 test "environment overlay can override cache size" {
     const allocator = testing.allocator;
     
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     // Create overlay with no cache
@@ -117,7 +117,7 @@ test "environment overlay can override cache size" {
 test "environment overlay can override delimiters" {
     const allocator = testing.allocator;
     
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     // Create overlay with custom delimiters
@@ -168,7 +168,7 @@ fn uppercaseFinalize(allocator: std.mem.Allocator, val: jinja.Value) jinja.Value
 test "environment finalize callback is initially null" {
     const allocator = testing.allocator;
     
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     try testing.expect(env.finalize == null);
@@ -177,7 +177,7 @@ test "environment finalize callback is initially null" {
 test "environment finalize callback can be set" {
     const allocator = testing.allocator;
     
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     env.finalize = nullToEmptyFinalize;
@@ -187,7 +187,7 @@ test "environment finalize callback can be set" {
 test "environment applyFinalize returns value unchanged when no callback" {
     const allocator = testing.allocator;
     
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     const val = jinja.Value{ .string = "test" };
@@ -199,7 +199,7 @@ test "environment applyFinalize returns value unchanged when no callback" {
 test "environment applyFinalize applies callback when set" {
     const allocator = testing.allocator;
     
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     env.finalize = nullToEmptyFinalize;
@@ -214,7 +214,7 @@ test "environment applyFinalize applies callback when set" {
 test "environment overlay inherits finalize from parent" {
     const allocator = testing.allocator;
     
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     env.finalize = nullToEmptyFinalize;
@@ -230,7 +230,7 @@ test "environment overlay inherits finalize from parent" {
 test "environment overlay can override finalize" {
     const allocator = testing.allocator;
     
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
     
     env.finalize = nullToEmptyFinalize;
@@ -252,9 +252,9 @@ test "environment overlay can override finalize" {
 
 test "spontaneous environment is created with default settings" {
     const allocator = testing.allocator;
-    defer clearSpontaneousCache(allocator);
+    defer clearSpontaneousCache(allocator, std.testing.io);
     
-    const env = try getSpontaneousEnvironment(allocator, .{});
+    const env = try getSpontaneousEnvironment(allocator, std.testing.io, .{});
     
     // Should be marked as shared
     try testing.expect(env.shared);
@@ -266,10 +266,10 @@ test "spontaneous environment is created with default settings" {
 
 test "spontaneous environment is cached and reused" {
     const allocator = testing.allocator;
-    defer clearSpontaneousCache(allocator);
+    defer clearSpontaneousCache(allocator, std.testing.io);
     
-    const env1 = try getSpontaneousEnvironment(allocator, .{});
-    const env2 = try getSpontaneousEnvironment(allocator, .{});
+    const env1 = try getSpontaneousEnvironment(allocator, std.testing.io, .{});
+    const env2 = try getSpontaneousEnvironment(allocator, std.testing.io, .{});
     
     // Should return the same instance
     try testing.expectEqual(env1, env2);
@@ -277,10 +277,10 @@ test "spontaneous environment is cached and reused" {
 
 test "spontaneous environment with different options creates different instances" {
     const allocator = testing.allocator;
-    defer clearSpontaneousCache(allocator);
+    defer clearSpontaneousCache(allocator, std.testing.io);
     
-    const env1 = try getSpontaneousEnvironment(allocator, .{});
-    const env2 = try getSpontaneousEnvironment(allocator, .{
+    const env1 = try getSpontaneousEnvironment(allocator, std.testing.io, .{});
+    const env2 = try getSpontaneousEnvironment(allocator, std.testing.io, .{
         .trim_blocks = true,
     });
     
@@ -290,9 +290,9 @@ test "spontaneous environment with different options creates different instances
 
 test "spontaneous environment can have custom delimiters" {
     const allocator = testing.allocator;
-    defer clearSpontaneousCache(allocator);
+    defer clearSpontaneousCache(allocator, std.testing.io);
     
-    const env = try getSpontaneousEnvironment(allocator, .{
+    const env = try getSpontaneousEnvironment(allocator, std.testing.io, .{
         .block_start_string = "<%",
         .block_end_string = "%>",
     });
@@ -305,28 +305,28 @@ test "clear spontaneous cache removes all cached environments" {
     const allocator = testing.allocator;
     
     // Create some spontaneous environments
-    _ = try getSpontaneousEnvironment(allocator, .{});
-    _ = try getSpontaneousEnvironment(allocator, .{ .trim_blocks = true });
+    _ = try getSpontaneousEnvironment(allocator, std.testing.io, .{});
+    _ = try getSpontaneousEnvironment(allocator, std.testing.io, .{ .trim_blocks = true });
     
     // Clear cache
-    clearSpontaneousCache(allocator);
+    clearSpontaneousCache(allocator, std.testing.io);
     
     // Creating a new one should succeed (cache is cleared)
-    const env = try getSpontaneousEnvironment(allocator, .{});
+    const env = try getSpontaneousEnvironment(allocator, std.testing.io, .{});
     try testing.expect(env.shared);
     
     // Clean up
-    clearSpontaneousCache(allocator);
+    clearSpontaneousCache(allocator, std.testing.io);
 }
 
 test "spontaneous cache destroys entries with their creating allocators" {
-    clearSpontaneousCache(testing.allocator);
+    clearSpontaneousCache(testing.allocator, std.testing.io);
     var first_gpa = std.heap.DebugAllocator(.{}){};
     var second_gpa = std.heap.DebugAllocator(.{}){};
 
-    _ = try getSpontaneousEnvironment(first_gpa.allocator(), .{ .trim_blocks = true });
-    _ = try getSpontaneousEnvironment(second_gpa.allocator(), .{ .enable_async = true });
-    clearSpontaneousCache(testing.allocator);
+    _ = try getSpontaneousEnvironment(first_gpa.allocator(), std.testing.io, .{ .trim_blocks = true });
+    _ = try getSpontaneousEnvironment(second_gpa.allocator(), std.testing.io, .{ .enable_async = true });
+    clearSpontaneousCache(testing.allocator, std.testing.io);
 
     try testing.expectEqual(.ok, first_gpa.deinit());
     try testing.expectEqual(.ok, second_gpa.deinit());
@@ -334,13 +334,13 @@ test "spontaneous cache destroys entries with their creating allocators" {
 
 test "spontaneous cache key includes behavior-bearing options" {
     const allocator = testing.allocator;
-    defer clearSpontaneousCache(allocator);
+    defer clearSpontaneousCache(allocator, std.testing.io);
 
-    const base = try getSpontaneousEnvironment(allocator, .{});
-    const newline = try getSpontaneousEnvironment(allocator, .{ .newline_sequence = "\r\n" });
-    const async_env = try getSpontaneousEnvironment(allocator, .{ .enable_async = true });
-    const no_cache = try getSpontaneousEnvironment(allocator, .{ .cache_size = 0 });
-    const no_reload = try getSpontaneousEnvironment(allocator, .{ .auto_reload = false });
+    const base = try getSpontaneousEnvironment(allocator, std.testing.io, .{});
+    const newline = try getSpontaneousEnvironment(allocator, std.testing.io, .{ .newline_sequence = "\r\n" });
+    const async_env = try getSpontaneousEnvironment(allocator, std.testing.io, .{ .enable_async = true });
+    const no_cache = try getSpontaneousEnvironment(allocator, std.testing.io, .{ .cache_size = 0 });
+    const no_reload = try getSpontaneousEnvironment(allocator, std.testing.io, .{ .auto_reload = false });
 
     try testing.expect(base != newline);
     try testing.expect(base != async_env);
@@ -352,8 +352,8 @@ test "spontaneous cache key includes behavior-bearing options" {
 
 test "dynamic spontaneous options bypass the shared cache" {
     const allocator = testing.allocator;
-    const first = try getSpontaneousEnvironment(allocator, .{ .finalize = uppercaseFinalize });
-    const second = try getSpontaneousEnvironment(allocator, .{ .finalize = uppercaseFinalize });
+    const first = try getSpontaneousEnvironment(allocator, std.testing.io, .{ .finalize = uppercaseFinalize });
+    const second = try getSpontaneousEnvironment(allocator, std.testing.io, .{ .finalize = uppercaseFinalize });
     defer destroyOverlay(allocator, first);
     defer destroyOverlay(allocator, second);
 
@@ -364,9 +364,9 @@ test "dynamic spontaneous options bypass the shared cache" {
 
 test "spontaneous environments own custom configuration strings" {
     const allocator = testing.allocator;
-    defer clearSpontaneousCache(allocator);
+    defer clearSpontaneousCache(allocator, std.testing.io);
     const delimiter = try allocator.dupe(u8, "<%");
-    const env = try getSpontaneousEnvironment(allocator, .{ .block_start_string = delimiter });
+    const env = try getSpontaneousEnvironment(allocator, std.testing.io, .{ .block_start_string = delimiter });
     allocator.free(delimiter);
 
     try testing.expectEqualStrings("<%", env.block_start_string);
@@ -374,10 +374,10 @@ test "spontaneous environments own custom configuration strings" {
 
 test "spontaneous cache eviction cleans all recorded entries" {
     const allocator = testing.allocator;
-    defer clearSpontaneousCache(allocator);
+    defer clearSpontaneousCache(allocator, std.testing.io);
     const delimiters = [_][]const u8{ "<%0", "<%1", "<%2", "<%3", "<%4", "<%5", "<%6", "<%7", "<%8", "<%9", "<%10" };
     for (delimiters) |delimiter| {
-        _ = try getSpontaneousEnvironment(allocator, .{ .block_start_string = delimiter });
+        _ = try getSpontaneousEnvironment(allocator, std.testing.io, .{ .block_start_string = delimiter });
     }
 }
 
@@ -388,7 +388,7 @@ test "spontaneous cache eviction cleans all recorded entries" {
 test "environment has builtin global functions" {
     const allocator = testing.allocator;
 
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Check that builtin globals are registered
@@ -400,7 +400,7 @@ test "environment has builtin global functions" {
 test "range global function with single argument" {
     const allocator = testing.allocator;
 
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Get range global
@@ -423,7 +423,7 @@ test "range global function with single argument" {
 test "range global function with two arguments" {
     const allocator = testing.allocator;
 
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Get range global
@@ -447,7 +447,7 @@ test "range global function with two arguments" {
 test "range global function with three arguments (step)" {
     const allocator = testing.allocator;
 
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Get range global
@@ -473,7 +473,7 @@ test "range global function with three arguments (step)" {
 test "range global function with negative step" {
     const allocator = testing.allocator;
 
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Get range global
@@ -498,7 +498,7 @@ test "range global function with negative step" {
 test "dict global function returns empty dict" {
     const allocator = testing.allocator;
 
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Get dict global
@@ -518,7 +518,7 @@ test "dict global function returns empty dict" {
 test "lipsum global function returns lorem ipsum text" {
     const allocator = testing.allocator;
 
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Get lipsum global
@@ -542,7 +542,7 @@ test "lipsum global function returns lorem ipsum text" {
 test "lipsum global function with HTML wrapping" {
     const allocator = testing.allocator;
 
-    var env = Environment.init(allocator);
+    var env = Environment.init(allocator, std.testing.io);
     defer env.deinit();
 
     // Get lipsum global

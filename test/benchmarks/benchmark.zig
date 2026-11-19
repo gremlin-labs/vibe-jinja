@@ -1,4 +1,5 @@
 const std = @import("std");
+const bench = @import("bench_io.zig");
 const vibe_jinja = @import("vibe_jinja");
 const environment = vibe_jinja.environment;
 const runtime = vibe_jinja.runtime;
@@ -142,7 +143,7 @@ pub fn runBenchmark(allocator: std.mem.Allocator) !void {
 }
 
 fn benchmarkSimpleTemplate(allocator: std.mem.Allocator) !void {
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, bench.io);
     defer env.deinit();
 
     const source = "Hello {{ name }}!";
@@ -154,7 +155,7 @@ fn benchmarkSimpleTemplate(allocator: std.mem.Allocator) !void {
         defer samples.deinit();
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = try bench.Timer.start();
 
             var rt = runtime.Runtime.init(&env, allocator);
             defer rt.deinit();
@@ -187,7 +188,7 @@ fn benchmarkSimpleTemplate(allocator: std.mem.Allocator) !void {
         defer compiled.deinit();
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = try bench.Timer.start();
 
             var vars = std.StringHashMap(context.Value).init(allocator);
             defer vars.deinit();
@@ -213,14 +214,14 @@ fn benchmarkLoopTemplate(allocator: std.mem.Allocator) !void {
     var samples = TimingSamples.init(allocator);
     defer samples.deinit();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, bench.io);
     defer env.deinit();
 
     const source = "{% for item in items %}{{ item }}{% endfor %}";
     const iterations: usize = 100;
 
     for (0..iterations) |_| {
-        var timer = try std.time.Timer.start();
+        var timer = try bench.Timer.start();
 
         var rt = runtime.Runtime.init(&env, allocator);
         defer rt.deinit();
@@ -253,14 +254,14 @@ fn benchmarkConditionalTemplate(allocator: std.mem.Allocator) !void {
     var samples = TimingSamples.init(allocator);
     defer samples.deinit();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, bench.io);
     defer env.deinit();
 
     const source = "{% if condition %}True{% else %}False{% endif %}";
     const iterations: usize = 1000;
 
     for (0..iterations) |_| {
-        var timer = try std.time.Timer.start();
+        var timer = try bench.Timer.start();
 
         var rt = runtime.Runtime.init(&env, allocator);
         defer rt.deinit();
@@ -283,7 +284,7 @@ fn benchmarkNestedTemplates(allocator: std.mem.Allocator) !void {
     var samples = TimingSamples.init(allocator);
     defer samples.deinit();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, bench.io);
     defer env.deinit();
 
     // Simpler nested template without range() which may have issues
@@ -291,7 +292,7 @@ fn benchmarkNestedTemplates(allocator: std.mem.Allocator) !void {
     const iterations: usize = 1000;
 
     for (0..iterations) |_| {
-        var timer = try std.time.Timer.start();
+        var timer = try bench.Timer.start();
 
         var rt = runtime.Runtime.init(&env, allocator);
         defer rt.deinit();
@@ -315,14 +316,14 @@ fn benchmarkFilters(allocator: std.mem.Allocator) !void {
     var samples = TimingSamples.init(allocator);
     defer samples.deinit();
 
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, bench.io);
     defer env.deinit();
 
     const source = "{{ text|upper|lower|trim|length }}";
     const iterations: usize = 500;
 
     for (0..iterations) |_| {
-        var timer = try std.time.Timer.start();
+        var timer = try bench.Timer.start();
 
         var rt = runtime.Runtime.init(&env, allocator);
         defer rt.deinit();
@@ -351,7 +352,7 @@ fn benchmarkFilters(allocator: std.mem.Allocator) !void {
 
 /// Benchmark filter lookup performance (comptime vs dynamic)
 fn benchmarkFilterLookup(allocator: std.mem.Allocator) !void {
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, bench.io);
     defer env.deinit();
 
     const iterations: usize = 100_000;
@@ -364,7 +365,7 @@ fn benchmarkFilterLookup(allocator: std.mem.Allocator) !void {
         const filter_names = [_][]const u8{ "escape", "upper", "lower", "trim", "default", "length" };
 
         for (0..iterations) |i| {
-            var timer = try std.time.Timer.start();
+            var timer = try bench.Timer.start();
 
             // Look up filter using comptime interned map
             const name = filter_names[i % filter_names.len];
@@ -386,7 +387,7 @@ fn benchmarkFilterLookup(allocator: std.mem.Allocator) !void {
         const filter_names = [_][]const u8{ "escape", "upper", "lower", "trim", "default", "length" };
 
         for (0..iterations) |i| {
-            var timer = try std.time.Timer.start();
+            var timer = try bench.Timer.start();
 
             // Look up filter using dynamic hashmap
             const name = filter_names[i % filter_names.len];
@@ -414,7 +415,7 @@ fn benchmarkValueComparison(allocator: std.mem.Allocator) !void {
         const val2 = context.Value{ .integer = 42 };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = try bench.Timer.start();
 
             const result = try val1.isEqual(val2);
             std.mem.doNotOptimizeAway(result);
@@ -440,7 +441,7 @@ fn benchmarkValueComparison(allocator: std.mem.Allocator) !void {
         const val2 = context.Value{ .string = str2 };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = try bench.Timer.start();
 
             const result = try val1.isEqual(val2);
             std.mem.doNotOptimizeAway(result);
@@ -461,7 +462,7 @@ fn benchmarkValueComparison(allocator: std.mem.Allocator) !void {
         const val2 = context.Value{ .float = 42.0 };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = try bench.Timer.start();
 
             const result = try val1.isEqual(val2);
             std.mem.doNotOptimizeAway(result);
@@ -486,7 +487,7 @@ fn benchmarkValueConversion(allocator: std.mem.Allocator) !void {
         const val = context.Value{ .integer = 12345 };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = try bench.Timer.start();
 
             const str = try val.toString(allocator);
             allocator.free(str);
@@ -508,7 +509,7 @@ fn benchmarkValueConversion(allocator: std.mem.Allocator) !void {
         const val = context.Value{ .string = str };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = try bench.Timer.start();
 
             const int_val = val.toInteger();
             std.mem.doNotOptimizeAway(int_val);
@@ -528,7 +529,7 @@ fn benchmarkValueConversion(allocator: std.mem.Allocator) !void {
         const val = context.Value{ .integer = 42 };
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = try bench.Timer.start();
 
             const truthy = val.isTruthy() catch false;
             std.mem.doNotOptimizeAway(truthy);
@@ -542,7 +543,7 @@ fn benchmarkValueConversion(allocator: std.mem.Allocator) !void {
 }
 
 fn benchmarkCache(allocator: std.mem.Allocator) !void {
-    var env = environment.Environment.init(allocator);
+    var env = environment.Environment.init(allocator, bench.io);
     defer env.deinit();
 
     const source = "Hello {{ name }}!";
@@ -557,7 +558,7 @@ fn benchmarkCache(allocator: std.mem.Allocator) !void {
     try vars1.put("name", context.Value{ .string = name_str1 });
     defer allocator.free(name_str1);
 
-    var timer1 = try std.time.Timer.start();
+    var timer1 = try bench.Timer.start();
     const result1 = try rt1.renderString(source, vars1, "test");
     const first_render_time = timer1.read();
     allocator.free(result1);
@@ -572,7 +573,7 @@ fn benchmarkCache(allocator: std.mem.Allocator) !void {
     try vars2.put("name", context.Value{ .string = name_str2 });
     defer allocator.free(name_str2);
 
-    var timer2 = try std.time.Timer.start();
+    var timer2 = try bench.Timer.start();
     const result2 = try rt2.renderString(source, vars2, "test");
     const second_render_time = timer2.read();
     allocator.free(result2);
@@ -598,11 +599,11 @@ fn benchmarkAllocators(allocator: std.mem.Allocator) !void {
         var samples = TimingSamples.init(allocator);
         defer samples.deinit();
 
-        var env = environment.Environment.init(allocator);
+        var env = environment.Environment.init(allocator, bench.io);
         defer env.deinit();
 
         for (0..iterations) |_| {
-            var timer = try std.time.Timer.start();
+            var timer = try bench.Timer.start();
 
             var rt = runtime.Runtime.init(&env, allocator);
             defer rt.deinit();
@@ -635,7 +636,8 @@ fn benchmarkAllocators(allocator: std.mem.Allocator) !void {
     std.debug.print("    (Arena provides bulk deallocation - use utils.RenderArena)\n\n", .{});
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    bench.io = init.io;
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();

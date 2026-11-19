@@ -6,7 +6,7 @@ const value_mod = @import("value.zig");
 const lexer = @import("lexer.zig");
 
 const token_binary_ops = blk: {
-    var operations = [_]?BinaryOp{null} ** @typeInfo(lexer.TokenKind).@"enum".fields.len;
+    var operations: [@typeInfo(lexer.TokenKind).@"enum".field_names.len]?BinaryOp = @splat(null);
     operations[@intFromEnum(lexer.TokenKind.ADD)] = .add;
     operations[@intFromEnum(lexer.TokenKind.SUB)] = .sub;
     operations[@intFromEnum(lexer.TokenKind.MUL)] = .mul;

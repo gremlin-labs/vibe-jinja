@@ -2,6 +2,7 @@
 //! Compares ahead-of-time compiled templates vs runtime interpreted templates
 
 const std = @import("std");
+const bench = @import("bench_io.zig");
 const vibe_jinja = @import("vibe_jinja");
 const aot = vibe_jinja.aot_compiler;
 
@@ -9,11 +10,11 @@ const Timer = struct {
     start_time: i128,
 
     pub fn start() Timer {
-        return .{ .start_time = std.time.nanoTimestamp() };
+        return .{ .start_time = bench.nanoTimestamp() };
     }
 
     pub fn elapsed_ns(self: Timer) u64 {
-        const end = std.time.nanoTimestamp();
+        const end = bench.nanoTimestamp();
         return @intCast(end - self.start_time);
     }
 
@@ -41,7 +42,7 @@ fn runAotBenchmark(allocator: std.mem.Allocator, template: []const u8, name: []c
 
 fn runJitBenchmark(allocator: std.mem.Allocator, template: []const u8, iterations: usize) !f64 {
     // Create environment
-    var env = vibe_jinja.Environment.init(allocator);
+    var env = vibe_jinja.Environment.init(allocator, bench.io);
     defer env.deinit();
 
     // Parse and compile template once
@@ -78,7 +79,8 @@ fn runJitBenchmark(allocator: std.mem.Allocator, template: []const u8, iteration
     return timer.elapsed_us() / @as(f64, @floatFromInt(iterations));
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    bench.io = init.io;
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
