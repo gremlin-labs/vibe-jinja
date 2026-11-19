@@ -113,7 +113,7 @@ fn contains(allocator: std.mem.Allocator, needle: Value, haystack: Value) !bool 
         .string => |string| blk: {
             const substring = try needle.toString(allocator);
             defer allocator.free(substring);
-            break :blk std.mem.indexOf(u8, string, substring) != null;
+            break :blk std.mem.find(u8, string, substring) != null;
         },
         else => exceptions.TemplateError.TypeError,
     };

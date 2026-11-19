@@ -6,7 +6,7 @@ const runtime = vibe_jinja.runtime;
 const context = vibe_jinja.context;
 
 test "set statement" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -27,11 +27,11 @@ test "set statement" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "42") != null);
+    try testing.expect(std.mem.find(u8, result, "42") != null);
 }
 
 test "set block" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -54,11 +54,11 @@ test "set block" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Hello World") != null);
+    try testing.expect(std.mem.find(u8, result, "Hello World") != null);
 }
 
 test "with statement" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -80,11 +80,11 @@ test "with statement" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "30") != null);
+    try testing.expect(std.mem.find(u8, result, "30") != null);
 }
 
 test "with statement scoping" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -110,8 +110,8 @@ test "with statement scoping" {
     defer allocator.free(result);
 
     // Should show 5, 10, 5 (with creates new scope)
-    try testing.expect(std.mem.indexOf(u8, result, "5") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "10") != null);
+    try testing.expect(std.mem.find(u8, result, "5") != null);
+    try testing.expect(std.mem.find(u8, result, "10") != null);
 }
 
 // ============================================================================
@@ -119,7 +119,7 @@ test "with statement scoping" {
 // ============================================================================
 
 test "namespace creation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -137,12 +137,12 @@ test "namespace creation" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "NS_EXISTS") != null);
+    try testing.expect(std.mem.find(u8, result, "NS_EXISTS") != null);
 }
 
 test "namespace dict access" {
     // Test that a dict's attribute can be accessed with dot notation
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -180,7 +180,7 @@ test "namespace dict access" {
 }
 
 test "namespace attribute assignment" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -203,5 +203,5 @@ test "namespace attribute assignment" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "FOUND") != null);
+    try testing.expect(std.mem.find(u8, result, "FOUND") != null);
 }

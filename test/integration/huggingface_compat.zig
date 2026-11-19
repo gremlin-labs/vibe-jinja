@@ -13,7 +13,7 @@ const value = vibe_jinja.value;
 // Tests 1-6 already verified passing
 
 test "HF 7: in operator for dict key check" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -52,7 +52,7 @@ test "HF 7: in operator for dict key check" {
 }
 
 test "HF 8: tojson filter" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -84,12 +84,12 @@ test "HF 8: tojson filter" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "\"name\"") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "42") != null);
+    try testing.expect(std.mem.find(u8, result, "\"name\"") != null);
+    try testing.expect(std.mem.find(u8, result, "42") != null);
 }
 
 test "HF 9: strftime_now direct call" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -109,11 +109,11 @@ test "HF 9: strftime_now direct call" {
     defer allocator.free(result);
 
     // Should output current year
-    try testing.expect(std.mem.indexOf(u8, result, "202") != null);
+    try testing.expect(std.mem.find(u8, result, "202") != null);
 }
 
 test "HF 10: mapping test" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -148,7 +148,7 @@ test "HF 10: mapping test" {
 }
 
 test "HF 11: complex nested condition" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -189,7 +189,7 @@ test "HF 11: complex nested condition" {
 // ----------------------------------------------------------------------------
 
 test "Llama: bos_token rendering" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -221,7 +221,7 @@ test "Llama: bos_token rendering" {
 }
 
 test "Llama: basic chat format with system extraction" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -288,8 +288,8 @@ test "Llama: basic chat format with system extraction" {
     defer allocator.free(result);
 
     // Verify structure
-    try testing.expect(std.mem.indexOf(u8, result, "<BOS>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "[SYS]You are helpful.[/SYS]") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "[USER]Hello![/USER]") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "[ASSISTANT]") != null);
+    try testing.expect(std.mem.find(u8, result, "<BOS>") != null);
+    try testing.expect(std.mem.find(u8, result, "[SYS]You are helpful.[/SYS]") != null);
+    try testing.expect(std.mem.find(u8, result, "[USER]Hello![/USER]") != null);
+    try testing.expect(std.mem.find(u8, result, "[ASSISTANT]") != null);
 }

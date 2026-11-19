@@ -530,7 +530,7 @@ pub const BuiltinTests = struct {
             .string => |s| {
                 const val_str = val.toString(std.heap.page_allocator) catch return false;
                 defer std.heap.page_allocator.free(val_str);
-                return std.mem.indexOf(u8, s, val_str) != null;
+                return std.mem.find(u8, s, val_str) != null;
             },
             else => false,
         };

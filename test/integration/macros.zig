@@ -6,7 +6,7 @@ const runtime = vibe_jinja.runtime;
 const context = vibe_jinja.context;
 
 test "macro definition and call" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -29,11 +29,11 @@ test "macro definition and call" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Hello, World!") != null);
+    try testing.expect(std.mem.find(u8, result, "Hello, World!") != null);
 }
 
 test "macro with arguments" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -56,11 +56,11 @@ test "macro with arguments" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "8") != null);
+    try testing.expect(std.mem.find(u8, result, "8") != null);
 }
 
 test "macro with default arguments" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -84,12 +84,12 @@ test "macro with default arguments" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Hello, World!") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Hi, World!") != null);
+    try testing.expect(std.mem.find(u8, result, "Hello, World!") != null);
+    try testing.expect(std.mem.find(u8, result, "Hi, World!") != null);
 }
 
 test "macro call with keyword arguments" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -112,11 +112,11 @@ test "macro call with keyword arguments" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Hi, World!") != null);
+    try testing.expect(std.mem.find(u8, result, "Hi, World!") != null);
 }
 
 test "call block" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -144,14 +144,14 @@ test "call block" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Test") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Body content") != null);
+    try testing.expect(std.mem.find(u8, result, "Test") != null);
+    try testing.expect(std.mem.find(u8, result, "Body content") != null);
 }
 
 test "macro with varargs" {
     // In Jinja2, varargs is a special tuple that captures extra positional arguments
     // It becomes available when the macro body references 'varargs'
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -172,13 +172,13 @@ test "macro with varargs" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "1|2|3") != null);
+    try testing.expect(std.mem.find(u8, result, "1|2|3") != null);
 }
 
 test "macro with kwargs" {
     // In Jinja2, kwargs is a special dict that captures extra keyword arguments
     // It becomes available when the macro body references 'kwargs'
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -199,12 +199,12 @@ test "macro with kwargs" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "foo") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "bar") != null);
+    try testing.expect(std.mem.find(u8, result, "foo") != null);
+    try testing.expect(std.mem.find(u8, result, "bar") != null);
 }
 
 test "macro caller variable" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -231,11 +231,11 @@ test "macro caller variable" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Content from caller") != null);
+    try testing.expect(std.mem.find(u8, result, "Content from caller") != null);
 }
 
 test "macro nested calls" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -257,11 +257,11 @@ test "macro nested calls" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "42") != null);
+    try testing.expect(std.mem.find(u8, result, "42") != null);
 }
 
 test "macro with complex arguments" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -289,7 +289,7 @@ test "macro with complex arguments" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "My List") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "a") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "b") != null);
+    try testing.expect(std.mem.find(u8, result, "My List") != null);
+    try testing.expect(std.mem.find(u8, result, "a") != null);
+    try testing.expect(std.mem.find(u8, result, "b") != null);
 }

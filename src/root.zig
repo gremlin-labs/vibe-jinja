@@ -195,7 +195,7 @@ pub fn eval(allocator: std.mem.Allocator, content: []const u8) ![]const u8 {
 }
 
 fn _eval_file(allocator: std.mem.Allocator, path: []const u8, debug: bool) ![]const u8 {
-    const file = try std.fs.cwd().openFile(path, .{});
+    const file = try std.Io.Dir.cwd().openFile(path, .{});
     defer file.close();
 
     const content = try file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);
@@ -308,7 +308,7 @@ fn test_eval(allocator: std.mem.Allocator, path: []const u8, debug: bool) !void 
     const source_path = try std.mem.concat(allocator, u8, &[_][]const u8{ path, "/test.jinja" });
     defer allocator.free(source_path);
 
-    const source_file = try std.fs.cwd().openFile(source_path, .{});
+    const source_file = try std.Io.Dir.cwd().openFile(source_path, .{});
     defer source_file.close();
 
     const source = try source_file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);
@@ -317,7 +317,7 @@ fn test_eval(allocator: std.mem.Allocator, path: []const u8, debug: bool) !void 
     const expected_path = try std.mem.concat(allocator, u8, &[_][]const u8{ path, "/test.html" });
     defer allocator.free(expected_path);
 
-    const expected_file = try std.fs.cwd().openFile(expected_path, .{});
+    const expected_file = try std.Io.Dir.cwd().openFile(expected_path, .{});
     defer expected_file.close();
 
     const expected = try expected_file.readToEndAlloc(allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);

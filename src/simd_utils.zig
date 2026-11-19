@@ -41,7 +41,7 @@ pub fn findOpenBrace(input: []const u8) ?usize {
     }
 
     // Scalar fallback for small inputs
-    return std.mem.indexOfScalar(u8, input, '{');
+    return std.mem.findScalar(u8, input, '{');
 }
 
 /// SIMD-accelerated scan for closing braces
@@ -52,7 +52,7 @@ pub fn findCloseBrace(input: []const u8) ?usize {
         return findCloseBraceSimd(input);
     }
 
-    return std.mem.indexOfScalar(u8, input, '}');
+    return std.mem.findScalar(u8, input, '}');
 }
 
 /// Find all delimiter markers in the input using SIMD

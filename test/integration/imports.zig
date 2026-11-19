@@ -7,7 +7,7 @@ const context = vibe_jinja.context;
 const loaders = vibe_jinja.loaders;
 
 test "import basic" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -42,11 +42,11 @@ test "import basic" {
     const result = try rt.renderString(main_source, vars, "main.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Hello, World!") != null);
+    try testing.expect(std.mem.find(u8, result, "Hello, World!") != null);
 }
 
 test "from import" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -84,11 +84,11 @@ test "from import" {
     const result = try rt.renderString(main_source, vars, "main.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Hello, World!") != null);
+    try testing.expect(std.mem.find(u8, result, "Hello, World!") != null);
 }
 
 test "from import multiple" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -127,12 +127,12 @@ test "from import multiple" {
     const result = try rt.renderString(main_source, vars, "main.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Hello, World!") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Goodbye, World!") != null);
+    try testing.expect(std.mem.find(u8, result, "Hello, World!") != null);
+    try testing.expect(std.mem.find(u8, result, "Goodbye, World!") != null);
 }
 
 test "import namespace access" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -167,12 +167,12 @@ test "import namespace access" {
     const result = try rt.renderString(main_source, vars, "main.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Function 1") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Function 2") != null);
+    try testing.expect(std.mem.find(u8, result, "Function 1") != null);
+    try testing.expect(std.mem.find(u8, result, "Function 2") != null);
 }
 
 test "import with context" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -218,11 +218,11 @@ test "import with context" {
     const result = try rt.renderString(main_source, vars, "main.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Hello, World!") != null);
+    try testing.expect(std.mem.find(u8, result, "Hello, World!") != null);
 }
 
 test "import without context" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -258,5 +258,5 @@ test "import without context" {
     defer allocator.free(result);
 
     // Without context, name should be undefined/default
-    try testing.expect(std.mem.indexOf(u8, result, "Hello") != null);
+    try testing.expect(std.mem.find(u8, result, "Hello") != null);
 }

@@ -7,7 +7,7 @@ const context = vibe_jinja.context;
 const value = vibe_jinja.value;
 
 test "runtime context initialization and local resolution" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var env = environment.Environment.init(allocator);
@@ -29,7 +29,7 @@ test "runtime context initialization and local resolution" {
 }
 
 test "runtime context set, get, default, and multiple variables" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var env = environment.Environment.init(allocator);
@@ -50,7 +50,7 @@ test "runtime context set, get, default, and multiple variables" {
 }
 
 test "runtime context parent resolution and shadowing" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var env = environment.Environment.init(allocator);
@@ -74,7 +74,7 @@ test "runtime context parent resolution and shadowing" {
 }
 
 test "runtime undefined behavior and environment globals" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var env = environment.Environment.init(allocator);
@@ -93,7 +93,7 @@ test "runtime undefined behavior and environment globals" {
 }
 
 test "runtime template reference initialization" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var env = environment.Environment.init(allocator);
@@ -116,7 +116,7 @@ test "runtime template reference initialization" {
 }
 
 test "runtime list allocation lifecycle" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     const list = try allocator.create(value.List);
@@ -129,7 +129,7 @@ test "runtime list allocation lifecycle" {
 }
 
 test "runtime resolves through a deep context chain without stack recursion" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var env = environment.Environment.init(allocator);

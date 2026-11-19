@@ -342,7 +342,7 @@ fn checkBytecodeGeneration(allocator: std.mem.Allocator) !bool {
 
 /// Main diagnostic benchmark entry point
 pub fn runDiagnostics() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const base_allocator = gpa.allocator();
 
@@ -369,11 +369,11 @@ pub fn runDiagnostics() !void {
         "Per-iter (µs)",
     });
     std.debug.print("{s}─{s}─{s}─{s}─{s}\n", .{
-        "─" ** 25,
-        "─" ** 12,
-        "─" ** 12,
-        "─" ** 12,
-        "─" ** 12,
+        &@as([25:0]u8, @splat('─')),
+        &@as([12:0]u8, @splat('─')),
+        &@as([12:0]u8, @splat('─')),
+        &@as([12:0]u8, @splat('─')),
+        &@as([12:0]u8, @splat('─')),
     });
 
     // Track loop scaling for analysis
@@ -408,7 +408,7 @@ pub fn runDiagnostics() !void {
             });
 
             var buf: [32]u8 = undefined;
-            const len = (std.fmt.bufPrint(&buf, "{d:.2}", .{per_iter}) catch "?").len;
+            const len = (std.mem.print(&buf, "{d:.2}", .{per_iter}) catch "?").len;
             break :blk buf[0..len];
         } else "-";
 

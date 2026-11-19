@@ -5,7 +5,7 @@ const loaders = vibe_jinja.loaders;
 const exceptions = vibe_jinja.exceptions;
 
 test "loader filesystem loader init" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -18,17 +18,17 @@ test "loader filesystem loader init" {
 }
 
 test "loader filesystem loader load existing file" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     // Create a temporary test file
     const test_dir = "test/templates";
-    try std.fs.cwd().makePath(test_dir);
-    defer std.fs.cwd().deleteTree(test_dir) catch {};
+    try std.Io.Dir.cwd().makePath(test_dir);
+    defer std.Io.Dir.cwd().deleteTree(test_dir) catch {};
 
     const test_file = "test/templates/test.jinja";
-    const file = try std.fs.cwd().createFile(test_file, .{});
+    const file = try std.Io.Dir.cwd().createFile(test_file, .{});
     try file.writeAll("Hello {{ name }}!");
     file.close();
 
@@ -43,7 +43,7 @@ test "loader filesystem loader load existing file" {
 }
 
 test "loader filesystem loader load non-existent file" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -56,7 +56,7 @@ test "loader filesystem loader load non-existent file" {
 }
 
 test "loader dict loader init" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -75,7 +75,7 @@ test "loader dict loader init" {
 }
 
 test "loader dict loader load non-existent" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -90,7 +90,7 @@ test "loader dict loader load non-existent" {
 }
 
 test "loader function loader" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -117,7 +117,7 @@ test "loader function loader" {
 }
 
 test "loader function loader not found" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -137,7 +137,7 @@ test "loader function loader not found" {
 }
 
 test "loader function loader with uptodate from result" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -173,7 +173,7 @@ test "loader function loader with uptodate from result" {
 }
 
 test "loader function loader with legacy uptodate" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -205,7 +205,7 @@ test "loader function loader with legacy uptodate" {
 }
 
 test "loader function loader with filename" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -233,17 +233,17 @@ test "loader function loader with filename" {
 }
 
 test "loader package loader" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     // Create test directory structure
     const test_dir = "test/pkg_templates";
-    try std.fs.cwd().makePath(test_dir);
-    defer std.fs.cwd().deleteTree(test_dir) catch {};
+    try std.Io.Dir.cwd().makePath(test_dir);
+    defer std.Io.Dir.cwd().deleteTree(test_dir) catch {};
 
     const test_file = "test/pkg_templates/hello.jinja";
-    const test_file_handle = try std.fs.cwd().createFile(test_file, .{});
+    const test_file_handle = try std.Io.Dir.cwd().createFile(test_file, .{});
     try test_file_handle.writeAll("Hello from package!");
     test_file_handle.close();
 
@@ -262,21 +262,21 @@ test "loader package loader" {
 }
 
 test "loader package loader list templates" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     // Create test directory structure
     const test_dir = "test/pkg_list_templates";
-    try std.fs.cwd().makePath(test_dir);
-    defer std.fs.cwd().deleteTree(test_dir) catch {};
+    try std.Io.Dir.cwd().makePath(test_dir);
+    defer std.Io.Dir.cwd().deleteTree(test_dir) catch {};
 
     // Create multiple test files
     const files = [_][]const u8{ "index.jinja", "about.jinja" };
     for (files) |filename| {
-        const full_path = try std.fs.path.join(allocator, &[_][]const u8{ test_dir, filename });
+        const full_path = try std.Io.Dir.path.join(allocator, &[_][]const u8{ test_dir, filename });
         defer allocator.free(full_path);
-        const file = try std.fs.cwd().createFile(full_path, .{});
+        const file = try std.Io.Dir.cwd().createFile(full_path, .{});
         try file.writeAll("Template content");
         file.close();
     }
@@ -296,23 +296,23 @@ test "loader package loader list templates" {
 }
 
 test "loader module loader" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     // Create test module directory
     const test_dir = "test/modules";
-    try std.fs.cwd().makePath(test_dir);
-    defer std.fs.cwd().deleteTree(test_dir) catch {};
+    try std.Io.Dir.cwd().makePath(test_dir);
+    defer std.Io.Dir.cwd().deleteTree(test_dir) catch {};
 
     // Get the expected module filename using SHA1 hash (matches Python's behavior)
     const module_filename = loaders.ModuleLoader.getModuleFilename("index.html");
     
     // Create the module file with the hashed name
     var full_path_buf: [256]u8 = undefined;
-    const full_path = try std.fmt.bufPrint(&full_path_buf, "{s}/{s}", .{ test_dir, module_filename });
+    const full_path = try std.mem.print(&full_path_buf, "{s}/{s}", .{ test_dir, module_filename });
     
-    const file = try std.fs.cwd().createFile(full_path, .{});
+    const file = try std.Io.Dir.cwd().createFile(full_path, .{});
     try file.writeAll("Precompiled template content");
     file.close();
 
@@ -361,7 +361,7 @@ test "loader module loader get_module_filename" {
 }
 
 test "loader module loader register template" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -386,7 +386,7 @@ test "loader module loader has_source_access" {
 }
 
 test "loader choice loader" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -416,7 +416,7 @@ test "loader choice loader" {
 }
 
 test "loader choice loader fallback" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -445,18 +445,18 @@ test "loader choice loader fallback" {
 }
 
 test "loader filesystem loader rejects oversized template" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     const test_dir = "test/templates_oversized";
-    try std.fs.cwd().makePath(test_dir);
-    defer std.fs.cwd().deleteTree(test_dir) catch |err| {
+    try std.Io.Dir.cwd().makePath(test_dir);
+    defer std.Io.Dir.cwd().deleteTree(test_dir) catch |err| {
         std.log.warn("cleanup of {s} failed: {s}", .{ test_dir, @errorName(err) });
     };
 
     const test_file = "test/templates_oversized/huge.jinja";
-    const file = try std.fs.cwd().createFile(test_file, .{});
+    const file = try std.Io.Dir.cwd().createFile(test_file, .{});
     // One byte past the template size limit; seek+write keeps the file sparse.
     try file.seekTo(vibe_jinja.defaults.MAX_TEMPLATE_SIZE_BYTES);
     try file.writeAll("x");

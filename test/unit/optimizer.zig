@@ -42,7 +42,7 @@ fn plainOutput(allocator: std.mem.Allocator, content: []const u8) !*nodes.Output
 }
 
 test "optimizer constant folds integer and string addition" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var opt = optimizer.Optimizer.init(allocator);
@@ -61,7 +61,7 @@ test "optimizer constant folds integer and string addition" {
 }
 
 test "optimizer transfers constant branches before destroying the if node" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var opt = optimizer.Optimizer.init(allocator);
@@ -83,7 +83,7 @@ test "optimizer transfers constant branches before destroying the if node" {
 }
 
 test "optimizer eliminates false branch and merges adjacent output" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var opt = optimizer.Optimizer.init(allocator);

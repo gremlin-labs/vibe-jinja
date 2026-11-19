@@ -1302,7 +1302,7 @@ pub const AotCompiler = struct {
 
     fn writeFmt(self: *Self, comptime fmt: []const u8, args: anytype) Error!void {
         var buf: [128]u8 = undefined;
-        const result = std.fmt.bufPrint(&buf, fmt, args) catch return;
+        const result = std.mem.print(&buf, fmt, args) catch return;
         try self.write(result);
     }
 
@@ -1345,8 +1345,8 @@ test "AOT compile simple template" {
     defer allocator.free(code);
 
     // Check that output contains expected patterns
-    try std.testing.expect(std.mem.indexOf(u8, code, "pub fn render") != null);
-    try std.testing.expect(std.mem.indexOf(u8, code, "writeAll") != null);
+    try std.testing.expect(std.mem.find(u8, code, "pub fn render") != null);
+    try std.testing.expect(std.mem.find(u8, code, "writeAll") != null);
 }
 
 test "AOT compile template with filter" {
@@ -1356,7 +1356,7 @@ test "AOT compile template with filter" {
     const code = try compileToZig(allocator, source, "test_filter");
     defer allocator.free(code);
 
-    try std.testing.expect(std.mem.indexOf(u8, code, "toUpper") != null);
+    try std.testing.expect(std.mem.find(u8, code, "toUpper") != null);
 }
 
 test "AOT compile template with loop" {
@@ -1366,8 +1366,8 @@ test "AOT compile template with loop" {
     const code = try compileToZig(allocator, source, "test_loop");
     defer allocator.free(code);
 
-    try std.testing.expect(std.mem.indexOf(u8, code, "for (") != null);
-    try std.testing.expect(std.mem.indexOf(u8, code, "getList") != null);
+    try std.testing.expect(std.mem.find(u8, code, "for (") != null);
+    try std.testing.expect(std.mem.find(u8, code, "getList") != null);
 }
 
 test "AOT compile template with if" {
@@ -1377,7 +1377,7 @@ test "AOT compile template with if" {
     const code = try compileToZig(allocator, source, "test_if");
     defer allocator.free(code);
 
-    try std.testing.expect(std.mem.indexOf(u8, code, "if (") != null);
+    try std.testing.expect(std.mem.find(u8, code, "if (") != null);
 }
 
 test "AOT compile template with set statement" {
@@ -1387,7 +1387,7 @@ test "AOT compile template with set statement" {
     const code = try compileToZig(allocator, source, "test_set");
     defer allocator.free(code);
 
-    try std.testing.expect(std.mem.indexOf(u8, code, "_set_x") != null);
+    try std.testing.expect(std.mem.find(u8, code, "_set_x") != null);
 }
 
 test "AOT compile template with binary expression" {
@@ -1397,8 +1397,8 @@ test "AOT compile template with binary expression" {
     const code = try compileToZig(allocator, source, "test_binexpr");
     defer allocator.free(code);
 
-    try std.testing.expect(std.mem.indexOf(u8, code, "_left") != null);
-    try std.testing.expect(std.mem.indexOf(u8, code, "_right") != null);
+    try std.testing.expect(std.mem.find(u8, code, "_left") != null);
+    try std.testing.expect(std.mem.find(u8, code, "_right") != null);
 }
 
 test "AOT compile template with filter chain" {
@@ -1409,7 +1409,7 @@ test "AOT compile template with filter chain" {
     defer allocator.free(code);
 
     // Should contain filter processing
-    try std.testing.expect(std.mem.indexOf(u8, code, "filter") != null);
+    try std.testing.expect(std.mem.find(u8, code, "filter") != null);
 }
 
 test "AOT compile template with attribute access" {
@@ -1419,7 +1419,7 @@ test "AOT compile template with attribute access" {
     const code = try compileToZig(allocator, source, "test_attr");
     defer allocator.free(code);
 
-    try std.testing.expect(std.mem.indexOf(u8, code, "getAttr") != null);
+    try std.testing.expect(std.mem.find(u8, code, "getAttr") != null);
 }
 
 test "AOT compile template with loop attributes" {
@@ -1429,5 +1429,5 @@ test "AOT compile template with loop attributes" {
     const code = try compileToZig(allocator, source, "test_loop_attr");
     defer allocator.free(code);
 
-    try std.testing.expect(std.mem.indexOf(u8, code, "_loop_idx") != null);
+    try std.testing.expect(std.mem.find(u8, code, "_loop_idx") != null);
 }

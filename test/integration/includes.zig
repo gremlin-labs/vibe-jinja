@@ -7,7 +7,7 @@ const context = vibe_jinja.context;
 const loaders = vibe_jinja.loaders;
 
 test "include basic" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -34,12 +34,12 @@ test "include basic" {
     const result = try rt.renderString(main_source, vars, "main.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Main content") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Header Content") != null);
+    try testing.expect(std.mem.find(u8, result, "Main content") != null);
+    try testing.expect(std.mem.find(u8, result, "Header Content") != null);
 }
 
 test "include with context" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -77,11 +77,11 @@ test "include with context" {
     const result = try rt.renderString(main_source, vars, "main.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Hello World!") != null);
+    try testing.expect(std.mem.find(u8, result, "Hello World!") != null);
 }
 
 test "include nested" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -110,12 +110,12 @@ test "include nested" {
     const result = try rt.renderString(main_source, vars, "main.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Header") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Footer") != null);
+    try testing.expect(std.mem.find(u8, result, "Header") != null);
+    try testing.expect(std.mem.find(u8, result, "Footer") != null);
 }
 
 test "include with ignore missing" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -142,14 +142,14 @@ test "include with ignore missing" {
     // Result may be error or success depending on implementation
     if (result) |res| {
         defer allocator.free(res);
-        try testing.expect(std.mem.indexOf(u8, res, "Main") != null);
+        try testing.expect(std.mem.find(u8, res, "Main") != null);
     } else |_| {
         // If ignore missing not implemented, this is expected
     }
 }
 
 test "include variable template name" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -176,5 +176,5 @@ test "include variable template name" {
     const result = try rt.renderString(main_source, vars, "main.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Partial content") != null);
+    try testing.expect(std.mem.find(u8, result, "Partial content") != null);
 }

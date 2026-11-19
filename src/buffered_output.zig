@@ -248,7 +248,7 @@ test "BufferedOutput large write" {
     var buf = BufferedOutput.init(allocator, &output);
 
     // Write more than buffer size
-    const large = "x" ** 5000;
+    const large = &@as([5000:0]u8, @splat('x'));
     try buf.write(large);
     try buf.flush();
 

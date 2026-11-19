@@ -219,7 +219,7 @@ pub const FileSystemLoader = struct {
             if (part.len == 0 or std.mem.eql(u8, part, ".")) {
                 continue;
             }
-            if (std.mem.eql(u8, part, "..") or std.mem.indexOf(u8, part, std.fs.path.sep_str) != null) {
+            if (std.mem.eql(u8, part, "..") or std.mem.find(u8, part, std.Io.Dir.path.sep_str) != null) {
                 return false; // Invalid path
             }
             // Store reference to part (no allocation needed)
@@ -232,13 +232,13 @@ pub const FileSystemLoader = struct {
             defer full_path.deinit(self.allocator);
 
             full_path.appendSlice(self.allocator, search_path) catch return false;
-            if (!std.mem.endsWith(u8, search_path, std.fs.path.sep_str)) {
-                full_path.appendSlice(self.allocator, std.fs.path.sep_str) catch return false;
+            if (!std.mem.endsWith(u8, search_path, std.Io.Dir.path.sep_str)) {
+                full_path.appendSlice(self.allocator, std.Io.Dir.path.sep_str) catch return false;
             }
 
             for (path_parts.items) |part| {
                 full_path.appendSlice(self.allocator, part) catch return false;
-                full_path.appendSlice(self.allocator, std.fs.path.sep_str) catch return false;
+                full_path.appendSlice(self.allocator, std.Io.Dir.path.sep_str) catch return false;
             }
 
             // Remove trailing separator
@@ -250,7 +250,7 @@ pub const FileSystemLoader = struct {
             defer self.allocator.free(path_str);
 
             // Check file modification time
-            const file = std.fs.cwd().openFile(path_str, .{}) catch continue;
+            const file = std.Io.Dir.cwd().openFile(path_str, .{}) catch continue;
             defer file.close();
 
             const stat = file.stat() catch return false;
@@ -279,7 +279,7 @@ pub const FileSystemLoader = struct {
                 continue;
             }
             // Check for path traversal attempts
-            if (std.mem.eql(u8, part, "..") or std.mem.indexOf(u8, part, std.fs.path.sep_str) != null) {
+            if (std.mem.eql(u8, part, "..") or std.mem.find(u8, part, std.Io.Dir.path.sep_str) != null) {
                 return exceptions.TemplateError.TemplateNotFound;
             }
             // Store reference to part (no allocation needed since it's a slice of name)
@@ -292,13 +292,13 @@ pub const FileSystemLoader = struct {
             defer full_path.deinit(allocator);
 
             try full_path.appendSlice(allocator, search_path);
-            if (!std.mem.endsWith(u8, search_path, std.fs.path.sep_str)) {
-                try full_path.appendSlice(allocator, std.fs.path.sep_str);
+            if (!std.mem.endsWith(u8, search_path, std.Io.Dir.path.sep_str)) {
+                try full_path.appendSlice(allocator, std.Io.Dir.path.sep_str);
             }
 
             for (path_parts.items) |part| {
                 try full_path.appendSlice(allocator, part);
-                try full_path.appendSlice(allocator, std.fs.path.sep_str);
+                try full_path.appendSlice(allocator, std.Io.Dir.path.sep_str);
             }
 
             // Remove trailing separator
@@ -310,7 +310,7 @@ pub const FileSystemLoader = struct {
             defer allocator.free(path_str);
 
             // Try to open the file - convert file errors to TemplateNotFound
-            const file = std.fs.cwd().openFile(path_str, .{}) catch {
+            const file = std.Io.Dir.cwd().openFile(path_str, .{}) catch {
                 continue; // Try next search path
             };
             defer file.close();
@@ -339,7 +339,7 @@ pub const FileSystemLoader = struct {
 
         // List templates from all search paths
         for (self.searchpath) |search_path| {
-            var dir = std.fs.cwd().openDir(search_path, .{ .iterate = true }) catch continue;
+            var dir = std.Io.Dir.cwd().openDir(search_path, .{ .iterate = true }) catch continue;
             defer dir.close();
 
             var walker = dir.walk(allocator) catch continue;
@@ -348,7 +348,7 @@ pub const FileSystemLoader = struct {
             while (walker.next() catch continue) |entry| {
                 if (entry.kind == .file) {
                     // Check if it's a template file (simple check - could be enhanced)
-                    const template_name = try std.fs.path.join(allocator, &[_][]const u8{ search_path, entry.path });
+                    const template_name = try std.Io.Dir.path.join(allocator, &[_][]const u8{ search_path, entry.path });
                     try templates.append(allocator, template_name);
                 }
             }
@@ -681,7 +681,7 @@ pub const PrefixLoader = struct {
         const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
 
         // Split name by delimiter
-        if (std.mem.indexOf(u8, name, self.delimiter)) |delim_pos| {
+        if (std.mem.find(u8, name, self.delimiter)) |delim_pos| {
             const prefix = name[0..delim_pos];
             const remaining = name[delim_pos + self.delimiter.len ..];
 
@@ -699,7 +699,7 @@ pub const PrefixLoader = struct {
         _ = allocator; // Suppress unused warning
 
         // Split name by delimiter
-        if (std.mem.indexOf(u8, name, self.delimiter)) |delim_pos| {
+        if (std.mem.find(u8, name, self.delimiter)) |delim_pos| {
             const prefix = name[0..delim_pos];
             const remaining = name[delim_pos + self.delimiter.len ..];
 
@@ -973,12 +973,12 @@ pub const PackageLoader = struct {
         defer full_path.deinit(self.allocator);
 
         full_path.appendSlice(self.allocator, self.package_path) catch return false;
-        if (!std.mem.endsWith(u8, self.package_path, std.fs.path.sep_str)) {
-            full_path.appendSlice(self.allocator, std.fs.path.sep_str) catch return false;
+        if (!std.mem.endsWith(u8, self.package_path, std.Io.Dir.path.sep_str)) {
+            full_path.appendSlice(self.allocator, std.Io.Dir.path.sep_str) catch return false;
         }
         full_path.appendSlice(self.allocator, self.resource_path) catch return false;
-        if (!std.mem.endsWith(u8, self.resource_path, std.fs.path.sep_str)) {
-            full_path.appendSlice(self.allocator, std.fs.path.sep_str) catch return false;
+        if (!std.mem.endsWith(u8, self.resource_path, std.Io.Dir.path.sep_str)) {
+            full_path.appendSlice(self.allocator, std.Io.Dir.path.sep_str) catch return false;
         }
         full_path.appendSlice(self.allocator, name) catch return false;
 
@@ -986,7 +986,7 @@ pub const PackageLoader = struct {
         defer self.allocator.free(path_str);
 
         // Check file modification time
-        const file = std.fs.cwd().openFile(path_str, .{}) catch return false;
+        const file = std.Io.Dir.cwd().openFile(path_str, .{}) catch return false;
         defer file.close();
 
         const stat = file.stat() catch return false;
@@ -1004,12 +1004,12 @@ pub const PackageLoader = struct {
         defer full_path.deinit(allocator);
 
         try full_path.appendSlice(allocator, self.package_path);
-        if (!std.mem.endsWith(u8, self.package_path, std.fs.path.sep_str)) {
-            try full_path.appendSlice(allocator, std.fs.path.sep_str);
+        if (!std.mem.endsWith(u8, self.package_path, std.Io.Dir.path.sep_str)) {
+            try full_path.appendSlice(allocator, std.Io.Dir.path.sep_str);
         }
         try full_path.appendSlice(allocator, self.resource_path);
-        if (!std.mem.endsWith(u8, self.resource_path, std.fs.path.sep_str)) {
-            try full_path.appendSlice(allocator, std.fs.path.sep_str);
+        if (!std.mem.endsWith(u8, self.resource_path, std.Io.Dir.path.sep_str)) {
+            try full_path.appendSlice(allocator, std.Io.Dir.path.sep_str);
         }
         try full_path.appendSlice(allocator, name);
 
@@ -1017,7 +1017,7 @@ pub const PackageLoader = struct {
         defer allocator.free(path_str);
 
         // Try to open the file - convert file errors to template errors
-        const file = std.fs.cwd().openFile(path_str, .{}) catch {
+        const file = std.Io.Dir.cwd().openFile(path_str, .{}) catch {
             return exceptions.TemplateError.TemplateNotFound;
         };
         defer file.close();
@@ -1046,8 +1046,8 @@ pub const PackageLoader = struct {
         defer resource_dir.deinit(allocator);
 
         try resource_dir.appendSlice(allocator, self.package_path);
-        if (!std.mem.endsWith(u8, self.package_path, std.fs.path.sep_str)) {
-            try resource_dir.appendSlice(allocator, std.fs.path.sep_str);
+        if (!std.mem.endsWith(u8, self.package_path, std.Io.Dir.path.sep_str)) {
+            try resource_dir.appendSlice(allocator, std.Io.Dir.path.sep_str);
         }
         try resource_dir.appendSlice(allocator, self.resource_path);
 
@@ -1055,7 +1055,7 @@ pub const PackageLoader = struct {
         defer allocator.free(dir_path);
 
         // List templates from resource directory
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return templates.toOwnedSlice(allocator);
+        var dir = std.Io.Dir.cwd().openDir(dir_path, .{ .iterate = true }) catch return templates.toOwnedSlice(allocator);
         defer dir.close();
 
         var walker = dir.walk(allocator) catch return templates.toOwnedSlice(allocator);
@@ -1220,8 +1220,8 @@ pub const ModuleLoader = struct {
             defer full_path.deinit(allocator);
 
             try full_path.appendSlice(allocator, search_path);
-            if (!std.mem.endsWith(u8, search_path, std.fs.path.sep_str)) {
-                try full_path.appendSlice(allocator, std.fs.path.sep_str);
+            if (!std.mem.endsWith(u8, search_path, std.Io.Dir.path.sep_str)) {
+                try full_path.appendSlice(allocator, std.Io.Dir.path.sep_str);
             }
             try full_path.appendSlice(allocator, &module_filename);
 
@@ -1229,7 +1229,7 @@ pub const ModuleLoader = struct {
             defer allocator.free(path_str);
 
             // Try to open the module file
-            const file = std.fs.cwd().openFile(path_str, .{}) catch continue;
+            const file = std.Io.Dir.cwd().openFile(path_str, .{}) catch continue;
             defer file.close();
 
             // Read file contents

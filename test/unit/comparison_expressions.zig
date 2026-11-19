@@ -16,7 +16,7 @@ fn cleanupVars(vars: *std.StringHashMap(value.Value), allocator: std.mem.Allocat
 }
 
 test "in operator with list" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -38,7 +38,7 @@ test "in operator with list" {
 }
 
 test "not in operator with list" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -60,7 +60,7 @@ test "not in operator with list" {
 }
 
 test "in operator with string" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -82,7 +82,7 @@ test "in operator with string" {
 }
 
 test "in operator with dict keys" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -116,7 +116,7 @@ test "in operator with dict keys" {
 }
 
 test "comparison operators" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

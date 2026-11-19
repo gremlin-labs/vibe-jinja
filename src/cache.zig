@@ -349,7 +349,7 @@ pub const FileSystemBytecodeCache = struct {
         const pat = try allocator.dupe(u8, pattern orelse DEFAULT_PATTERN);
 
         // Ensure directory exists
-        std.fs.cwd().makePath(dir) catch |err| switch (err) {
+        std.Io.Dir.cwd().makePath(dir) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => return err,
         };
@@ -387,7 +387,7 @@ pub const FileSystemBytecodeCache = struct {
         const dirname = "_jinja2-cache";
 
         // Check if /tmp exists by trying to access it
-        std.fs.cwd().access("/tmp", .{}) catch {
+        std.Io.Dir.cwd().access("/tmp", .{}) catch {
             // Fall back to current directory
             return try allocator.dupe(u8, ".jinja2_cache");
         };
@@ -417,7 +417,7 @@ pub const FileSystemBytecodeCache = struct {
         const filename = try result.toOwnedSlice(self.allocator);
         defer self.allocator.free(filename);
 
-        return try std.fs.path.join(self.allocator, &[_][]const u8{ self.directory, filename });
+        return try std.Io.Dir.path.join(self.allocator, &[_][]const u8{ self.directory, filename });
     }
 
     /// VTable implementation
@@ -435,7 +435,7 @@ pub const FileSystemBytecodeCache = struct {
         defer self.allocator.free(filename);
 
         // Read entire file into memory
-        const file_data = std.fs.cwd().readFileAlloc(self.allocator, filename, 1024 * 1024) catch return;
+        const file_data = std.Io.Dir.cwd().readFileAlloc(self.allocator, filename, 1024 * 1024) catch return;
         defer self.allocator.free(file_data);
 
         bucket.bytecodeFromString(file_data) catch {
@@ -457,10 +457,10 @@ pub const FileSystemBytecodeCache = struct {
         const tmp_filename = try std.fmt.allocPrint(self.allocator, "{s}.tmp", .{filename});
         defer self.allocator.free(tmp_filename);
 
-        const file = try std.fs.cwd().createFile(tmp_filename, .{});
+        const file = try std.Io.Dir.cwd().createFile(tmp_filename, .{});
         errdefer {
             file.close();
-            std.fs.cwd().deleteFile(tmp_filename) catch |err| {
+            std.Io.Dir.cwd().deleteFile(tmp_filename) catch |err| {
                 std.log.debug("vibe-jinja: tmp cache file cleanup failed: {s}", .{@errorName(err)});
             };
         }
@@ -469,8 +469,8 @@ pub const FileSystemBytecodeCache = struct {
         file.close();
 
         // Rename to final filename
-        std.fs.cwd().rename(tmp_filename, filename) catch |err| {
-            std.fs.cwd().deleteFile(tmp_filename) catch |del_err| {
+        std.Io.Dir.cwd().rename(tmp_filename, filename) catch |err| {
+            std.Io.Dir.cwd().deleteFile(tmp_filename) catch |del_err| {
                 std.log.debug("vibe-jinja: tmp cache file cleanup failed: {s}", .{@errorName(del_err)});
             };
             return err;
@@ -480,11 +480,11 @@ pub const FileSystemBytecodeCache = struct {
     fn clearImpl(ptr: *anyopaque) void {
         const self: *Self = @ptrCast(@alignCast(ptr));
 
-        var dir = std.fs.cwd().openDir(self.directory, .{ .iterate = true }) catch return;
+        var dir = std.Io.Dir.cwd().openDir(self.directory, .{ .iterate = true }) catch return;
         defer dir.close();
 
         // Build pattern for matching (replace %s with wildcard logic)
-        const prefix_end = std.mem.indexOf(u8, self.pattern, "%s") orelse return;
+        const prefix_end = std.mem.find(u8, self.pattern, "%s") orelse return;
         const prefix = self.pattern[0..prefix_end];
         const suffix = if (prefix_end + 2 < self.pattern.len) self.pattern[prefix_end + 2 ..] else "";
 

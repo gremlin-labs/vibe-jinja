@@ -331,7 +331,7 @@ pub const Lexer = struct {
         if (!pending.*) return false;
         pending.* = false;
         if (token.kind != .DATA) return false;
-        token.value = std.mem.trimLeft(u8, token.value, " \t\r\n");
+        token.value = std.mem.trimStart(u8, token.value, " \t\r\n");
         return token.value.len == 0;
     }
 
@@ -341,7 +341,7 @@ pub const Lexer = struct {
         while (index > 0) {
             index -= 1;
             if (tokens.items[index].kind == .DATA) {
-                tokens.items[index].value = std.mem.trimRight(u8, tokens.items[index].value, " \t\r\n");
+                tokens.items[index].value = std.mem.trimEnd(u8, tokens.items[index].value, " \t\r\n");
                 if (tokens.items[index].value.len == 0) _ = tokens.orderedRemove(index);
                 return;
             }

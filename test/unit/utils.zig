@@ -5,7 +5,7 @@ const utils = vibe_jinja.utils;
 const value = vibe_jinja.value;
 
 test "Cycler" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -43,7 +43,7 @@ test "Cycler" {
 }
 
 test "Cycler reset" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -66,7 +66,7 @@ test "Cycler reset" {
 }
 
 test "Joiner" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -91,7 +91,7 @@ test "Joiner" {
 }
 
 test "Joiner empty" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -105,7 +105,7 @@ test "Joiner empty" {
 }
 
 test "Namespace" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -127,7 +127,7 @@ test "Namespace" {
 }
 
 test "Namespace toDict" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -149,7 +149,7 @@ test "Namespace toDict" {
 }
 
 test "generateLoremIpsum" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -158,5 +158,5 @@ test "generateLoremIpsum" {
 
     try testing.expect(text.len > 0);
     // Should contain some lorem words
-    try testing.expect(std.mem.indexOf(u8, text, "lorem") != null or std.mem.indexOf(u8, text, "ipsum") != null);
+    try testing.expect(std.mem.find(u8, text, "lorem") != null or std.mem.find(u8, text, "ipsum") != null);
 }

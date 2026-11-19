@@ -6,7 +6,7 @@ const runtime = vibe_jinja.runtime;
 const context = vibe_jinja.context;
 
 test "raw block" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -31,13 +31,13 @@ test "raw block" {
     defer allocator.free(result);
 
     // Raw content should be output as-is without processing
-    try testing.expect(std.mem.indexOf(u8, result, "{{ variable }}") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "{% for item in items %}") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "{% endfor %}") != null);
+    try testing.expect(std.mem.find(u8, result, "{{ variable }}") != null);
+    try testing.expect(std.mem.find(u8, result, "{% for item in items %}") != null);
+    try testing.expect(std.mem.find(u8, result, "{% endfor %}") != null);
 }
 
 test "raw block with variables outside" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -64,8 +64,8 @@ test "raw block with variables outside" {
     defer allocator.free(result);
 
     // Variables outside raw block should be processed
-    try testing.expect(std.mem.indexOf(u8, result, "Before: World") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "After: World") != null);
+    try testing.expect(std.mem.find(u8, result, "Before: World") != null);
+    try testing.expect(std.mem.find(u8, result, "After: World") != null);
     // Variable inside raw block should be literal
-    try testing.expect(std.mem.indexOf(u8, result, "{{ name }}") != null);
+    try testing.expect(std.mem.find(u8, result, "{{ name }}") != null);
 }

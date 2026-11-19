@@ -573,7 +573,7 @@ pub fn build(b: *std.Build) void {
         .name = "benchmark",
         .root_module = benchmark_module,
     });
-    benchmarks.linkLibC();
+    benchmarks.root_module.link_libc = true;
     const run_benchmarks = b.addRunArtifact(benchmarks);
     const benchmark_step = b.step("benchmark", "Run performance benchmarks");
     benchmark_step.dependOn(&run_benchmarks.step);
@@ -589,7 +589,7 @@ pub fn build(b: *std.Build) void {
         .name = "diagnostic_bench",
         .root_module = diagnostic_bench_module,
     });
-    diagnostic_bench.linkLibC();
+    diagnostic_bench.root_module.link_libc = true;
     const run_diagnostic_bench = b.addRunArtifact(diagnostic_bench);
     const diagnostic_bench_step = b.step("bench-diagnostic", "Run diagnostic benchmarks for performance profiling");
     diagnostic_bench_step.dependOn(&run_diagnostic_bench.step);
@@ -605,7 +605,7 @@ pub fn build(b: *std.Build) void {
         .name = "comparison_bench",
         .root_module = comparison_bench_module,
     });
-    comparison_bench.linkLibC();
+    comparison_bench.root_module.link_libc = true;
     const run_comparison_bench = b.addRunArtifact(comparison_bench);
     // The bench reads test/benchmarks/python_reference.json relative to the repo root.
     run_comparison_bench.setCwd(b.path("."));
@@ -632,7 +632,7 @@ pub fn build(b: *std.Build) void {
         .name = "aot_bench",
         .root_module = aot_bench_module,
     });
-    aot_bench.linkLibC();
+    aot_bench.root_module.link_libc = true;
     const run_aot_bench = b.addRunArtifact(aot_bench);
     const aot_bench_step = b.step("bench-aot", "Run AOT vs JIT benchmark (Phase 7)");
     aot_bench_step.dependOn(&run_aot_bench.step);

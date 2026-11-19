@@ -6,7 +6,7 @@ const runtime = vibe_jinja.runtime;
 const value = vibe_jinja.value;
 
 test "variable resolution from context" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -39,7 +39,7 @@ test "variable resolution from context" {
 }
 
 test "undefined variable lenient behavior" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -62,7 +62,7 @@ test "undefined variable lenient behavior" {
 }
 
 test "undefined variable debug behavior" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -81,11 +81,11 @@ test "undefined variable debug behavior" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "undefined variable") != null);
+    try testing.expect(std.mem.find(u8, result, "undefined variable") != null);
 }
 
 test "variable resolution from environment globals" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

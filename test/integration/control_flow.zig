@@ -7,7 +7,7 @@ const context = vibe_jinja.context;
 const value = vibe_jinja.value;
 
 test "for loop with list" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -44,7 +44,7 @@ test "for loop with list" {
 }
 
 test "if statement true condition" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -69,7 +69,7 @@ test "if statement true condition" {
 }
 
 test "if statement false condition" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -94,7 +94,7 @@ test "if statement false condition" {
 }
 
 test "if elif else chain" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -119,7 +119,7 @@ test "if elif else chain" {
 }
 
 test "nested for loops" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -160,12 +160,12 @@ test "nested for loops" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "ab") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "cd") != null);
+    try testing.expect(std.mem.find(u8, result, "ab") != null);
+    try testing.expect(std.mem.find(u8, result, "cd") != null);
 }
 
 test "nested if statements" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -191,11 +191,11 @@ test "nested if statements" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "both") != null);
+    try testing.expect(std.mem.find(u8, result, "both") != null);
 }
 
 test "for loop with continue" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -224,14 +224,14 @@ test "for loop with continue" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "1") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "3") != null);
+    try testing.expect(std.mem.find(u8, result, "1") != null);
+    try testing.expect(std.mem.find(u8, result, "3") != null);
     // Should not contain 2 (skipped by continue)
-    try testing.expect(std.mem.indexOf(u8, result, "2") == null or std.mem.indexOf(u8, result, "13") != null);
+    try testing.expect(std.mem.find(u8, result, "2") == null or std.mem.find(u8, result, "13") != null);
 }
 
 test "for loop with break" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -260,13 +260,13 @@ test "for loop with break" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "1") != null);
+    try testing.expect(std.mem.find(u8, result, "1") != null);
     // Should not contain 2 or 3 (loop breaks at 2)
-    try testing.expect(std.mem.indexOf(u8, result, "3") == null);
+    try testing.expect(std.mem.find(u8, result, "3") == null);
 }
 
 test "for loop loop variables" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -295,12 +295,12 @@ test "for loop loop variables" {
     defer allocator.free(result);
 
     // Should show index and item
-    try testing.expect(std.mem.indexOf(u8, result, "a") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "b") != null);
+    try testing.expect(std.mem.find(u8, result, "a") != null);
+    try testing.expect(std.mem.find(u8, result, "b") != null);
 }
 
 test "if with and operator" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -326,11 +326,11 @@ test "if with and operator" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "both") != null);
+    try testing.expect(std.mem.find(u8, result, "both") != null);
 }
 
 test "if with or operator" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -356,11 +356,11 @@ test "if with or operator" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "either") != null);
+    try testing.expect(std.mem.find(u8, result, "either") != null);
 }
 
 test "nested loop depth tracking" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -407,7 +407,7 @@ test "nested loop depth tracking" {
     defer allocator.free(result);
 
     // Outer loop: depth=1, depth0=0
-    try testing.expect(std.mem.indexOf(u8, result, "outer=1/0") != null);
+    try testing.expect(std.mem.find(u8, result, "outer=1/0") != null);
     // Inner loop: depth=2, depth0=1
-    try testing.expect(std.mem.indexOf(u8, result, "inner=2/1") != null);
+    try testing.expect(std.mem.find(u8, result, "inner=2/1") != null);
 }

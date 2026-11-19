@@ -7,7 +7,7 @@ const context = vibe_jinja.context;
 const loaders = vibe_jinja.loaders;
 
 test "template inheritance basic" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -49,13 +49,13 @@ test "template inheritance basic" {
     const result = try rt.renderString(child_source, vars, "child.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Child Title") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Child content") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Default Title") == null);
+    try testing.expect(std.mem.find(u8, result, "Child Title") != null);
+    try testing.expect(std.mem.find(u8, result, "Child content") != null);
+    try testing.expect(std.mem.find(u8, result, "Default Title") == null);
 }
 
 test "template inheritance with super" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -90,12 +90,12 @@ test "template inheritance with super" {
     const result = try rt.renderString(child_source, vars, "child.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Custom Header") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Default Header") != null);
+    try testing.expect(std.mem.find(u8, result, "Custom Header") != null);
+    try testing.expect(std.mem.find(u8, result, "Default Header") != null);
 }
 
 test "template inheritance multiple levels" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -136,13 +136,13 @@ test "template inheritance multiple levels" {
     const result = try rt.renderString(child_source, vars, "child.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Child") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Parent") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Grandparent") != null);
+    try testing.expect(std.mem.find(u8, result, "Child") != null);
+    try testing.expect(std.mem.find(u8, result, "Parent") != null);
+    try testing.expect(std.mem.find(u8, result, "Grandparent") != null);
 }
 
 test "template inheritance block scoping" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -177,12 +177,12 @@ test "template inheritance block scoping" {
     const result = try rt.renderString(child_source, vars, "child.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Inner override") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Inner default") == null);
+    try testing.expect(std.mem.find(u8, result, "Inner override") != null);
+    try testing.expect(std.mem.find(u8, result, "Inner default") == null);
 }
 
 test "template inheritance multiple blocks" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -221,13 +221,13 @@ test "template inheritance multiple blocks" {
     const result = try rt.renderString(child_source, vars, "child.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Child Title") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Child body") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Body default") == null);
+    try testing.expect(std.mem.find(u8, result, "Child Title") != null);
+    try testing.expect(std.mem.find(u8, result, "Child body") != null);
+    try testing.expect(std.mem.find(u8, result, "Body default") == null);
 }
 
 test "template inheritance required block overridden" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -265,11 +265,11 @@ test "template inheritance required block overridden" {
     const result = try rt.renderString(child_source, vars, "child.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "Child content") != null);
+    try testing.expect(std.mem.find(u8, result, "Child content") != null);
 }
 
 test "template inheritance scoped block" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -320,7 +320,7 @@ test "template inheritance scoped block" {
     const result = try rt.renderString(child_source, vars, "child.jinja");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "[1]") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "[2]") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "[3]") != null);
+    try testing.expect(std.mem.find(u8, result, "[1]") != null);
+    try testing.expect(std.mem.find(u8, result, "[2]") != null);
+    try testing.expect(std.mem.find(u8, result, "[3]") != null);
 }

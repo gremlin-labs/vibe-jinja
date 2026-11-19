@@ -42,7 +42,7 @@ const PythonRefs = struct {
 const reference_path = "test/benchmarks/python_reference.json";
 
 fn loadPythonRefs(allocator: std.mem.Allocator) PythonRefs {
-    const data = std.fs.cwd().readFileAlloc(allocator, reference_path, 1 << 20) catch {
+    const data = std.Io.Dir.cwd().readFileAlloc(allocator, reference_path, 1 << 20) catch {
         std.debug.print("(python_reference.json not found; using stale fallback constants — run benchmark_python.py to refresh)\n\n", .{});
         return PythonRefs.fallback();
     };
@@ -161,7 +161,7 @@ const CheckOutcome = struct {
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

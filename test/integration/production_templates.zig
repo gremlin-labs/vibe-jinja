@@ -81,7 +81,7 @@ const vicuna = @embedFile("templates/vicuna.jinja");
 // ----------------------------------------------------------------------------
 
 test "llama3-instruct: basic user message" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -117,11 +117,11 @@ test "llama3-instruct: basic user message" {
     defer allocator.free(result);
 
     // Verify expected tokens
-    try testing.expect(std.mem.indexOf(u8, result, "<|begin_of_text|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|start_header_id|>user<|end_header_id|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Hello!") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|eot_id|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|start_header_id|>assistant<|end_header_id|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|begin_of_text|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|start_header_id|>user<|end_header_id|>") != null);
+    try testing.expect(std.mem.find(u8, result, "Hello!") != null);
+    try testing.expect(std.mem.find(u8, result, "<|eot_id|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|start_header_id|>assistant<|end_header_id|>") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -129,7 +129,7 @@ test "llama3-instruct: basic user message" {
 // ----------------------------------------------------------------------------
 
 test "chatml: basic conversation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -162,10 +162,10 @@ test "chatml: basic conversation" {
     const result = try rt.renderString(chatml, vars, "chatml");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "<|im_start|>system") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|im_end|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|im_start|>user") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|im_start|>assistant") != null);
+    try testing.expect(std.mem.find(u8, result, "<|im_start|>system") != null);
+    try testing.expect(std.mem.find(u8, result, "<|im_end|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|im_start|>user") != null);
+    try testing.expect(std.mem.find(u8, result, "<|im_start|>assistant") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -173,7 +173,7 @@ test "chatml: basic conversation" {
 // ----------------------------------------------------------------------------
 
 test "qwen2-instruct: with system message extraction" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -205,8 +205,8 @@ test "qwen2-instruct: with system message extraction" {
     defer allocator.free(result);
 
     // Should extract system and put it first
-    try testing.expect(std.mem.indexOf(u8, result, "<|im_start|>system") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "You are a helpful assistant.") != null);
+    try testing.expect(std.mem.find(u8, result, "<|im_start|>system") != null);
+    try testing.expect(std.mem.find(u8, result, "You are a helpful assistant.") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -214,7 +214,7 @@ test "qwen2-instruct: with system message extraction" {
 // ----------------------------------------------------------------------------
 
 test "mistral-instruct: multi-turn conversation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -249,11 +249,11 @@ test "mistral-instruct: multi-turn conversation" {
     const result = try rt.renderString(mistral_instruct, vars, "mistral");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "<s>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "[INST]") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "[/INST]") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "What is 2+2?") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "</s>") != null);
+    try testing.expect(std.mem.find(u8, result, "<s>") != null);
+    try testing.expect(std.mem.find(u8, result, "[INST]") != null);
+    try testing.expect(std.mem.find(u8, result, "[/INST]") != null);
+    try testing.expect(std.mem.find(u8, result, "What is 2+2?") != null);
+    try testing.expect(std.mem.find(u8, result, "</s>") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -261,7 +261,7 @@ test "mistral-instruct: multi-turn conversation" {
 // ----------------------------------------------------------------------------
 
 test "phi-3: basic format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -300,11 +300,11 @@ test "phi-3: basic format" {
     const result = try rt.renderString(phi_3, vars, "phi3");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "<s>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|system|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|user|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|end|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|assistant|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<s>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|system|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|user|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|end|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|assistant|>") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -312,7 +312,7 @@ test "phi-3: basic format" {
 // ----------------------------------------------------------------------------
 
 test "zephyr: basic format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -347,9 +347,9 @@ test "zephyr: basic format" {
     const result = try rt.renderString(zephyr, vars, "zephyr");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "<|system|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|user|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "</s>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|system|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|user|>") != null);
+    try testing.expect(std.mem.find(u8, result, "</s>") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -357,7 +357,7 @@ test "zephyr: basic format" {
 // ----------------------------------------------------------------------------
 
 test "granite-instruct: question/answer format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -388,9 +388,9 @@ test "granite-instruct: question/answer format" {
     const result = try rt.renderString(granite_instruct, vars, "granite");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "System:") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Question:") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Answer:") != null);
+    try testing.expect(std.mem.find(u8, result, "System:") != null);
+    try testing.expect(std.mem.find(u8, result, "Question:") != null);
+    try testing.expect(std.mem.find(u8, result, "Answer:") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -398,7 +398,7 @@ test "granite-instruct: question/answer format" {
 // ----------------------------------------------------------------------------
 
 test "falcon-instruct: basic format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -429,9 +429,9 @@ test "falcon-instruct: basic format" {
     const result = try rt.renderString(falcon_instruct, vars, "falcon");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "System:") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "User:") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Falcon:") != null);
+    try testing.expect(std.mem.find(u8, result, "System:") != null);
+    try testing.expect(std.mem.find(u8, result, "User:") != null);
+    try testing.expect(std.mem.find(u8, result, "Falcon:") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -439,7 +439,7 @@ test "falcon-instruct: basic format" {
 // ----------------------------------------------------------------------------
 
 test "solar-instruct: basic format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -470,9 +470,9 @@ test "solar-instruct: basic format" {
     const result = try rt.renderString(solar_instruct, vars, "solar");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "### System:") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "### User:") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "### Assistant:") != null);
+    try testing.expect(std.mem.find(u8, result, "### System:") != null);
+    try testing.expect(std.mem.find(u8, result, "### User:") != null);
+    try testing.expect(std.mem.find(u8, result, "### Assistant:") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -480,7 +480,7 @@ test "solar-instruct: basic format" {
 // ----------------------------------------------------------------------------
 
 test "chatqa: basic format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -519,8 +519,8 @@ test "chatqa: basic format" {
     const result = try rt.renderString(chatqa, vars, "chatqa");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "User:") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Assistant:") != null);
+    try testing.expect(std.mem.find(u8, result, "User:") != null);
+    try testing.expect(std.mem.find(u8, result, "Assistant:") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -528,7 +528,7 @@ test "chatqa: basic format" {
 // ----------------------------------------------------------------------------
 
 test "openchat: GPT4 Correct format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -563,9 +563,9 @@ test "openchat: GPT4 Correct format" {
     const result = try rt.renderString(openchat, vars, "openchat");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "GPT4 Correct User:") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|end_of_turn|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "GPT4 Correct Assistant:") != null);
+    try testing.expect(std.mem.find(u8, result, "GPT4 Correct User:") != null);
+    try testing.expect(std.mem.find(u8, result, "<|end_of_turn|>") != null);
+    try testing.expect(std.mem.find(u8, result, "GPT4 Correct Assistant:") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -573,7 +573,7 @@ test "openchat: GPT4 Correct format" {
 // ----------------------------------------------------------------------------
 
 test "vicuna: USER/ASSISTANT format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -608,8 +608,8 @@ test "vicuna: USER/ASSISTANT format" {
     const result = try rt.renderString(vicuna, vars, "vicuna");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "USER:") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "ASSISTANT:") != null);
+    try testing.expect(std.mem.find(u8, result, "USER:") != null);
+    try testing.expect(std.mem.find(u8, result, "ASSISTANT:") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -617,7 +617,7 @@ test "vicuna: USER/ASSISTANT format" {
 // ----------------------------------------------------------------------------
 
 test "llama2-chat: multi-turn conversation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -652,10 +652,10 @@ test "llama2-chat: multi-turn conversation" {
     const result = try rt.renderString(llama2_chat, vars, "llama2");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "<s>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "[INST]") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "[/INST]") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "</s>") != null);
+    try testing.expect(std.mem.find(u8, result, "<s>") != null);
+    try testing.expect(std.mem.find(u8, result, "[INST]") != null);
+    try testing.expect(std.mem.find(u8, result, "[/INST]") != null);
+    try testing.expect(std.mem.find(u8, result, "</s>") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -663,7 +663,7 @@ test "llama2-chat: multi-turn conversation" {
 // ----------------------------------------------------------------------------
 
 test "gemma-instruct: user/model format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -698,10 +698,10 @@ test "gemma-instruct: user/model format" {
     const result = try rt.renderString(gemma_instruct, vars, "gemma");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "<bos>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<start_of_turn>user") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<start_of_turn>model") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<end_of_turn>") != null);
+    try testing.expect(std.mem.find(u8, result, "<bos>") != null);
+    try testing.expect(std.mem.find(u8, result, "<start_of_turn>user") != null);
+    try testing.expect(std.mem.find(u8, result, "<start_of_turn>model") != null);
+    try testing.expect(std.mem.find(u8, result, "<end_of_turn>") != null);
 }
 
 // ----------------------------------------------------------------------------
@@ -709,7 +709,7 @@ test "gemma-instruct: user/model format" {
 // ----------------------------------------------------------------------------
 
 test "command-r: Cohere format" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -744,11 +744,11 @@ test "command-r: Cohere format" {
     const result = try rt.renderString(command_r, vars, "command-r");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "<BOS_TOKEN>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|START_OF_TURN_TOKEN|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|USER_TOKEN|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|CHATBOT_TOKEN|>") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "<|END_OF_TURN_TOKEN|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<BOS_TOKEN>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|START_OF_TURN_TOKEN|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|USER_TOKEN|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|CHATBOT_TOKEN|>") != null);
+    try testing.expect(std.mem.find(u8, result, "<|END_OF_TURN_TOKEN|>") != null);
 }
 
 // ----------------------------------------------------------------------------

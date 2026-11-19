@@ -79,7 +79,7 @@ fn runJitBenchmark(allocator: std.mem.Allocator, template: []const u8, iteration
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -181,7 +181,7 @@ pub fn main() !void {
         // Compare with std.mem.indexOfScalar
         timer = Timer.start();
         for (0..simd_iterations) |_| {
-            _ = std.mem.indexOfScalar(u8, &large_template, '{');
+            _ = std.mem.findScalar(u8, &large_template, '{');
         }
         const std_time = timer.elapsed_us() / @as(f64, @floatFromInt(simd_iterations));
 

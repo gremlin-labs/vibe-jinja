@@ -8,7 +8,7 @@ const nodes = vibe_jinja.nodes;
 const value = vibe_jinja.value;
 
 test "visit string literal" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -42,7 +42,7 @@ test "visit string literal" {
 }
 
 test "visit integer literal" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -76,7 +76,7 @@ test "visit integer literal" {
 }
 
 test "visit boolean literal" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -110,7 +110,7 @@ test "visit boolean literal" {
 }
 
 test "visit name expression resolves variable" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -153,7 +153,7 @@ test "visit name expression resolves variable" {
 }
 
 test "visit binary addition expression" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -201,7 +201,7 @@ test "visit binary addition expression" {
 }
 
 test "visit output statement with plain text" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -233,7 +233,7 @@ test "visit output statement with plain text" {
 }
 
 test "renderWithOptions basic rendering" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -273,7 +273,7 @@ test "renderWithOptions basic rendering" {
 }
 
 test "renderWithOptions with timeout succeeds for quick templates" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

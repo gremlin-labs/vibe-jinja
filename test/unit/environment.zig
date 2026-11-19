@@ -321,8 +321,8 @@ test "clear spontaneous cache removes all cached environments" {
 
 test "spontaneous cache destroys entries with their creating allocators" {
     clearSpontaneousCache(testing.allocator);
-    var first_gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var second_gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var first_gpa = std.heap.DebugAllocator(.{}){};
+    var second_gpa = std.heap.DebugAllocator(.{}){};
 
     _ = try getSpontaneousEnvironment(first_gpa.allocator(), .{ .trim_blocks = true });
     _ = try getSpontaneousEnvironment(second_gpa.allocator(), .{ .enable_async = true });
@@ -536,7 +536,7 @@ test "lipsum global function returns lorem ipsum text" {
     // Check result is a string containing lorem ipsum
     try testing.expect(result == .string);
     try testing.expect(result.string.len > 0);
-    try testing.expect(std.mem.indexOf(u8, result.string, "lorem") != null);
+    try testing.expect(std.mem.find(u8, result.string, "lorem") != null);
 }
 
 test "lipsum global function with HTML wrapping" {
@@ -558,8 +558,8 @@ test "lipsum global function with HTML wrapping" {
 
     // Check result contains HTML paragraph tags
     try testing.expect(result == .string);
-    try testing.expect(std.mem.indexOf(u8, result.string, "<p>") != null);
-    try testing.expect(std.mem.indexOf(u8, result.string, "</p>") != null);
+    try testing.expect(std.mem.find(u8, result.string, "<p>") != null);
+    try testing.expect(std.mem.find(u8, result.string, "</p>") != null);
 }
 
 // ============================================================================

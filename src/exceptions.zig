@@ -270,7 +270,7 @@ pub const ErrorContext = struct {
     pub fn format(
         self: Self,
         comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
+        options: std.fmt.Options,
         writer: anytype,
     ) !void {
         _ = fmt;

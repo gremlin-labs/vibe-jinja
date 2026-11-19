@@ -16,7 +16,7 @@ fn cleanupVars(vars: *std.StringHashMap(value.Value), allocator: std.mem.Allocat
 }
 
 test "dict attribute access" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -50,7 +50,7 @@ test "dict attribute access" {
 }
 
 test "list subscript access" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -84,7 +84,7 @@ test "list subscript access" {
 }
 
 test "dict subscript access" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -117,7 +117,7 @@ test "dict subscript access" {
 }
 
 test "string subscript access" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -142,7 +142,7 @@ test "string subscript access" {
 }
 
 test "chained attribute and subscript access" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

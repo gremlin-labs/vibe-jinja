@@ -33,11 +33,11 @@ fn renderCase(json_source: []const u8) ![]const u8 {
 }
 
 fn expectContainsAll(output: []const u8, expected: []const []const u8) !void {
-    for (expected) |needle| try testing.expect(std.mem.indexOf(u8, output, needle) != null);
+    for (expected) |needle| try testing.expect(std.mem.find(u8, output, needle) != null);
 }
 
 fn expectContainsNone(output: []const u8, unexpected: []const []const u8) !void {
-    for (unexpected) |needle| try testing.expect(std.mem.indexOf(u8, output, needle) == null);
+    for (unexpected) |needle| try testing.expect(std.mem.find(u8, output, needle) == null);
 }
 
 test "Qwen 3.5/3.6 auto-disables thinking with tools when requested" {

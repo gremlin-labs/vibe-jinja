@@ -509,7 +509,7 @@ pub const BuiltinFilters = struct {
 
         var splits: i64 = 0;
         var start: usize = 0;
-        while (std.mem.indexOfPos(u8, str, start, sep)) |idx| {
+        while (std.mem.findPos(u8, str, start, sep)) |idx| {
             if (maxsplit >= 0 and splits >= maxsplit) break;
             try appendOwnedString(allocator, result_list, str[start..idx]);
             start = idx + sep.len;
@@ -539,7 +539,7 @@ pub const BuiltinFilters = struct {
         var iter = std.mem.tokenizeAny(u8, str, " \t\n\r");
         while (iter.next()) |token| {
             if (maxsplit >= 0 and splits >= maxsplit) {
-                const rest = std.mem.trimLeft(u8, str[iter.index - token.len ..], " \t\n\r");
+                const rest = std.mem.trimStart(u8, str[iter.index - token.len ..], " \t\n\r");
                 try appendOwnedString(allocator, result_list, rest);
                 break;
             }
@@ -647,7 +647,7 @@ pub const BuiltinFilters = struct {
         const str = try val.toString(allocator);
         defer allocator.free(str);
 
-        const trimmed = std.mem.trimLeft(u8, str, " \t\n\r");
+        const trimmed = std.mem.trimStart(u8, str, " \t\n\r");
         return Value{ .string = try allocator.dupe(u8, trimmed) };
     }
 
@@ -661,7 +661,7 @@ pub const BuiltinFilters = struct {
         const str = try val.toString(allocator);
         defer allocator.free(str);
 
-        const trimmed = std.mem.trimRight(u8, str, " \t\n\r");
+        const trimmed = std.mem.trimEnd(u8, str, " \t\n\r");
         return Value{ .string = try allocator.dupe(u8, trimmed) };
     }
 

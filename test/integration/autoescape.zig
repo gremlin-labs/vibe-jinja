@@ -7,7 +7,7 @@ const lexer = vibe_jinja.lexer;
 const nodes = vibe_jinja.nodes;
 
 test "autoescape block parses correctly with true" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -43,7 +43,7 @@ test "autoescape block parses correctly with true" {
 }
 
 test "autoescape block parses correctly with false" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -72,7 +72,7 @@ test "autoescape block parses correctly with false" {
 }
 
 test "autoescape block parses with expression output inside" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -103,7 +103,7 @@ test "autoescape block parses with expression output inside" {
 }
 
 test "autoescape block parses with mixed content" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

@@ -6,7 +6,7 @@ const runtime = vibe_jinja.runtime;
 const context = vibe_jinja.context;
 
 test "filter block" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -28,11 +28,11 @@ test "filter block" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "HELLO WORLD") != null);
+    try testing.expect(std.mem.find(u8, result, "HELLO WORLD") != null);
 }
 
 test "filter block with trim" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -54,5 +54,5 @@ test "filter block with trim" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "hello world") != null);
+    try testing.expect(std.mem.find(u8, result, "hello world") != null);
 }

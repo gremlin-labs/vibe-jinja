@@ -15,7 +15,7 @@ fn deinitVars(allocator: std.mem.Allocator, vars: *std.StringHashMap(context.Val
 }
 
 test "filter chain basic" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -38,11 +38,11 @@ test "filter chain basic" {
     defer allocator.free(result);
 
     // Should be "OLLEH" (upper then reverse)
-    try testing.expect(std.mem.indexOf(u8, result, "OLLEH") != null);
+    try testing.expect(std.mem.find(u8, result, "OLLEH") != null);
 }
 
 test "filter chain with arguments" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -65,11 +65,11 @@ test "filter chain with arguments" {
     defer allocator.free(result);
 
     // Should be "HELLO ZIG" (replace then upper)
-    try testing.expect(std.mem.indexOf(u8, result, "HELLO ZIG") != null);
+    try testing.expect(std.mem.find(u8, result, "HELLO ZIG") != null);
 }
 
 test "filter chain multiple filters" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -92,11 +92,11 @@ test "filter chain multiple filters" {
     defer allocator.free(result);
 
     // Should be "OLLEH" (trim, upper, reverse)
-    try testing.expect(std.mem.indexOf(u8, result, "OLLEH") != null);
+    try testing.expect(std.mem.find(u8, result, "OLLEH") != null);
 }
 
 test "filter with default argument" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -120,11 +120,11 @@ test "filter with default argument" {
     defer allocator.free(result);
 
     // Should be "N/A" (default then upper)
-    try testing.expect(std.mem.indexOf(u8, result, "N/A") != null);
+    try testing.expect(std.mem.find(u8, result, "N/A") != null);
 }
 
 test "filter error handling" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -149,11 +149,11 @@ test "filter error handling" {
     defer allocator.free(result);
 
     // Should use default value
-    try testing.expect(std.mem.indexOf(u8, result, "safe") != null);
+    try testing.expect(std.mem.find(u8, result, "safe") != null);
 }
 
 test "filter with list operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -182,5 +182,5 @@ test "filter with list operations" {
     defer allocator.free(result);
 
     // Should show length as string
-    try testing.expect(std.mem.indexOf(u8, result, "3") != null);
+    try testing.expect(std.mem.find(u8, result, "3") != null);
 }

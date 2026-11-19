@@ -15,7 +15,7 @@ fn deinitVars(allocator: std.mem.Allocator, vars: *std.StringHashMap(context.Val
 }
 
 test "test expression is defined" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -37,11 +37,11 @@ test "test expression is defined" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "yes") != null);
+    try testing.expect(std.mem.find(u8, result, "yes") != null);
 }
 
 test "test expression is undefined" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -59,11 +59,11 @@ test "test expression is undefined" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "yes") != null);
+    try testing.expect(std.mem.find(u8, result, "yes") != null);
 }
 
 test "test expression is even" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -84,11 +84,11 @@ test "test expression is even" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "even") != null);
+    try testing.expect(std.mem.find(u8, result, "even") != null);
 }
 
 test "test expression is odd" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -109,11 +109,11 @@ test "test expression is odd" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "odd") != null);
+    try testing.expect(std.mem.find(u8, result, "odd") != null);
 }
 
 test "test expression is divisibleby" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -134,11 +134,11 @@ test "test expression is divisibleby" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "yes") != null);
+    try testing.expect(std.mem.find(u8, result, "yes") != null);
 }
 
 test "test expression is equalto" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -159,11 +159,11 @@ test "test expression is equalto" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "yes") != null);
+    try testing.expect(std.mem.find(u8, result, "yes") != null);
 }
 
 test "test expression is string" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -185,11 +185,11 @@ test "test expression is string" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "yes") != null);
+    try testing.expect(std.mem.find(u8, result, "yes") != null);
 }
 
 test "test expression is number" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -210,11 +210,11 @@ test "test expression is number" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "yes") != null);
+    try testing.expect(std.mem.find(u8, result, "yes") != null);
 }
 
 test "test expression is empty" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -236,11 +236,11 @@ test "test expression is empty" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "yes") != null);
+    try testing.expect(std.mem.find(u8, result, "yes") != null);
 }
 
 test "test expression is in" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -272,11 +272,11 @@ test "test expression is in" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "yes") != null);
+    try testing.expect(std.mem.find(u8, result, "yes") != null);
 }
 
 test "test expression chain" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -298,11 +298,11 @@ test "test expression chain" {
     const result = try rt.renderString(source, vars, "test");
     defer allocator.free(result);
 
-    try testing.expect(std.mem.indexOf(u8, result, "yes") != null);
+    try testing.expect(std.mem.find(u8, result, "yes") != null);
 }
 
 test "test expression is filter" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -321,11 +321,11 @@ test "test expression is filter" {
     defer allocator.free(result);
 
     // Should detect that 'upper' is a filter
-    try testing.expect(std.mem.indexOf(u8, result, "yes") != null);
+    try testing.expect(std.mem.find(u8, result, "yes") != null);
 }
 
 test "test expression is test" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -344,7 +344,7 @@ test "test expression is test" {
     defer allocator.free(result);
 
     // Should detect that 'defined' is a test
-    try testing.expect(std.mem.indexOf(u8, result, "yes") != null);
+    try testing.expect(std.mem.find(u8, result, "yes") != null);
 }
 
 // ============================================================================
@@ -352,7 +352,7 @@ test "test expression is test" {
 // ============================================================================
 
 test "range global function in for loop" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -375,7 +375,7 @@ test "range global function in for loop" {
 }
 
 test "range global function with start and stop" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -398,7 +398,7 @@ test "range global function with start and stop" {
 }
 
 test "range global function with step" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -421,7 +421,7 @@ test "range global function with step" {
 }
 
 test "range global function with count filter" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -445,7 +445,7 @@ test "range global function with count filter" {
 }
 
 test "lipsum global function generates text" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -465,5 +465,5 @@ test "lipsum global function generates text" {
 
     // Should contain lorem ipsum text
     try testing.expect(result.len > 0);
-    try testing.expect(std.mem.indexOf(u8, result, "lorem") != null);
+    try testing.expect(std.mem.find(u8, result, "lorem") != null);
 }

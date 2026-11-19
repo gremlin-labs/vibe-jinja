@@ -10,7 +10,7 @@ const context = vibe_jinja.context;
 const value = vibe_jinja.value;
 
 test "parse float literal expression" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -40,7 +40,7 @@ test "parse float literal expression" {
 }
 
 test "visit float literal" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
