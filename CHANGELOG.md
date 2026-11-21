@@ -6,22 +6,52 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-### Changed
+## [2.0.0] - 2026-11-20
 
-- Build on Zig 0.17.1. Public entry points take an explicit `std.Io`; the README quick start uses `main(init: std.process.Init)`, `init.gpa` and `Environment.init(allocator, io)`.
-- Move the `strftime_now` global callback to `strftimeNowGlobal` in the root module. It reads the clock through the rendering environment and returns `error.InvalidArgument` without one; direct callers use `utils.strftimeNow(allocator, io, args)`.
-- The `random` filter no longer reads the clock or the environment, so it also picks a random item when called without an environment.
+Vibe Jinja now builds on Zig 0.17.1. Zig 0.16 routed file, clock and lock operations through `std.Io`, so the library takes an `io` from its caller. Projects on Zig 0.15.2 should stay on 1.3.1.
+
+### Breaking changes
+
+- Require Zig 0.17.1 (`minimum_zig_version`).
+- `Environment.init(allocator, io)` takes the I/O backend the environment uses for files, clocks and locks.
+- `FileSystemLoader`, `PackageLoader`, `ModuleLoader` and `FileSystemBytecodeCache` take `io` at `init`. `SandboxedEnvironment`, `ImmutableSandboxedEnvironment`, `AotCompiler`, `compileToZig`, `eval` and `eval_file` take it too.
+- `getSpontaneousEnvironment(allocator, io, options)` and `clearSpontaneousCache(allocator, io)` take `io`.
+- `RenderDiagnostics` start and end methods take `io` and read the monotonic `std.Io.Clock.awake`.
+- The `strftime_now` callback moved from `utils.strftimeNowGlobal` to the root `strftimeNowGlobal`. It reads the clock through the rendering environment and returns `error.InvalidArgument` without one. Direct callers use the new `utils.strftimeNow(allocator, io, args)`.
+- `tojson` output now matches Python's `json.dumps` defaults: object keys are sorted and compact output uses `", "` and `": "` separators.
+- A single trailing newline is dropped from template source unless `keep_trailing_newline` is set, as in Jinja2.
+
+Migrating a 1.x host:
+
+```zig
+pub fn main(init: std.process.Init) !void {
+    var env = jinja.Environment.init(init.gpa, init.io);
+    defer env.deinit();
+    // ...
+}
+```
 
 ### Added
 
+- Inline loop filters: `{% for item in items if predicate %}`, in both the AST and bytecode paths.
+- Iterating a mapping yields its keys, consistently in the AST and bytecode paths.
 - `releaseSpontaneousEnvironments(io)` destroys the shared spontaneous environments that use one I/O backend.
+- `utils.strftimeNow(allocator, io, args)` formats the current time with a caller-supplied clock.
+- The official Qwen3 Coder Next chat template, with a dedicated `zig build test:qwen3-coder-next` suite.
+
+### Changed
+
+- Benchmarks and the chat-template CLI take `main(init: std.process.Init)`. Benchmarks time with the monotonic `std.Io.Clock.awake` through `test/benchmarks/bench_io.zig`.
+- The `random` filter no longer reads the clock or the environment, so it also picks a random item when called without an environment.
+- Refresh the README and test guide for Zig 0.17.1, document the benchmark protocol, and publish current measurements.
 
 ### Fixed
 
 - Key shared spontaneous environments by allocator and I/O backend so distinct hosts never receive each other's `std.Io`.
-- Accept `eval_file` templates of exactly the 10 MiB limit and reload on-disk bytecode buckets of exactly 1 MiB (Zig 0.17 `readFileAlloc` limits are exclusive).
-- Built-in loaders resolve themselves from the embedded `Loader`, so `&loader.loader` works without `getLoader()` in every optimization mode; the ReleaseFast test gate passes.
+- Accept `eval_file` templates of exactly the 10 MiB limit and reload on-disk bytecode buckets of exactly 1 MiB. Zig 0.17 `readFileAlloc` limits are exclusive, so a new `fs_read` helper keeps the caps inclusive.
+- Built-in loaders resolve themselves from the embedded `Loader`, so `&loader.loader` works without `getLoader()` in every optimization mode. The ReleaseFast test build now passes.
 - Generated AOT `renderToString` compiles on Zig 0.17, and the AOT compiler frees its parsed template.
+- Read `if` after a `for` iterable as an inline loop filter instead of the start of a conditional expression; parenthesized iterables still accept conditional expressions.
 
 ## [1.3.1] - 2026-07-25
 
