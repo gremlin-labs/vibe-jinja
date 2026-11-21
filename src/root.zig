@@ -9,13 +9,11 @@
 //! const std = @import("std");
 //! const jinja = @import("vibe_jinja");
 //!
-//! pub fn main() !void {
-//!     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-//!     defer _ = gpa.deinit();
-//!     const allocator = gpa.allocator();
+//! pub fn main(init: std.process.Init) !void {
+//!     const allocator = init.gpa;
 //!
 //!     // Quick evaluation from file
-//!     const output = try jinja.eval_file(allocator, "template.jinja");
+//!     const output = try jinja.eval_file(allocator, init.io, "template.jinja");
 //!     defer allocator.free(output);
 //!     std.debug.print("{s}\n", .{output});
 //! }
@@ -39,6 +37,7 @@
 //! - `optimizer` - AST optimization passes
 
 const std = @import("std");
+const fs_read = @import("fs_read.zig");
 const testing = std.testing;
 const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
@@ -80,6 +79,10 @@ pub const RenderOptions = environment_mod.RenderOptions;
 pub const getSpontaneousEnvironment = environment_mod.getSpontaneousEnvironment;
 /// Clear the spontaneous environment cache
 pub const clearSpontaneousCache = environment_mod.clearSpontaneousCache;
+/// Destroy cached spontaneous environments that use a given I/O backend
+pub const releaseSpontaneousEnvironments = environment_mod.releaseSpontaneousEnvironments;
+/// `strftime_now` global callback (needs the rendering environment; see `utils.strftimeNow`)
+pub const strftimeNowGlobal = environment_mod.strftimeNowGlobal;
 /// Context module - template variable resolution and scoping
 pub const context = @import("context.zig");
 /// Value module - value types for template variables
@@ -195,7 +198,7 @@ pub fn eval(allocator: std.mem.Allocator, io: std.Io, content: []const u8) ![]co
 }
 
 fn _eval_file(allocator: std.mem.Allocator, io: std.Io, path: []const u8, debug: bool) ![]const u8 {
-    const content = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES));
+    const content = try fs_read.readFileAllocAtMost(std.Io.Dir.cwd(), io, path, allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);
     defer allocator.free(content);
 
     return try _eval(allocator, io, content, debug);
@@ -307,13 +310,13 @@ fn test_eval(allocator: std.mem.Allocator, path: []const u8, debug: bool) !void 
     const source_path = try std.mem.concat(allocator, u8, &[_][]const u8{ path, "/test.jinja" });
     defer allocator.free(source_path);
 
-    const source = try std.Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES));
+    const source = try fs_read.readFileAllocAtMost(std.Io.Dir.cwd(), io, source_path, allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);
     defer allocator.free(source);
 
     const expected_path = try std.mem.concat(allocator, u8, &[_][]const u8{ path, "/test.html" });
     defer allocator.free(expected_path);
 
-    const expected = try std.Io.Dir.cwd().readFileAlloc(io, expected_path, allocator, .limited(defaults.MAX_TEMPLATE_SIZE_BYTES));
+    const expected = try fs_read.readFileAllocAtMost(std.Io.Dir.cwd(), io, expected_path, allocator, defaults.MAX_TEMPLATE_SIZE_BYTES);
     defer allocator.free(expected);
 
     const actual = try _eval(allocator, io, source, debug);

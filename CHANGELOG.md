@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Build on Zig 0.17.1. Public entry points take an explicit `std.Io`; the README quick start uses `main(init: std.process.Init)`, `init.gpa` and `Environment.init(allocator, io)`.
+- Move the `strftime_now` global callback to `strftimeNowGlobal` in the root module. It reads the clock through the rendering environment and returns `error.InvalidArgument` without one; direct callers use `utils.strftimeNow(allocator, io, args)`.
+- The `random` filter no longer reads the clock or the environment, so it also picks a random item when called without an environment.
+
+### Added
+
+- `releaseSpontaneousEnvironments(io)` destroys the shared spontaneous environments that use one I/O backend.
+
+### Fixed
+
+- Key shared spontaneous environments by allocator and I/O backend so distinct hosts never receive each other's `std.Io`.
+- Accept `eval_file` templates of exactly the 10 MiB limit and reload on-disk bytecode buckets of exactly 1 MiB (Zig 0.17 `readFileAlloc` limits are exclusive).
+- Built-in loaders resolve themselves from the embedded `Loader`, so `&loader.loader` works without `getLoader()` in every optimization mode; the ReleaseFast test gate passes.
+- Generated AOT `renderToString` compiles on Zig 0.17, and the AOT compiler frees its parsed template.
+
 ## [1.3.1] - 2026-07-25
 
 ### Added

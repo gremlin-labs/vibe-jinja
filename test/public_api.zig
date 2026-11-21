@@ -14,6 +14,7 @@ test "retained 1.1 public declarations compile through the package root" {
         _ = jinja.diagnostics.recordBytecodeInstruction;
         _ = jinja.getSpontaneousEnvironment;
         _ = jinja.clearSpontaneousCache;
+        _ = jinja.releaseSpontaneousEnvironments;
         _ = jinja.exceptions.TemplateNotFoundError;
         _ = jinja.exceptions.extractSourceSnippet;
         _ = jinja.exceptions.findColumn;

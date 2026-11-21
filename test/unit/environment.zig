@@ -577,3 +577,51 @@ fn customTestFilter(
     _ = value;
     return jinja.Value{ .string = "filtered" };
 }
+
+test "spontaneous environments are keyed by I/O backend" {
+    const allocator = testing.allocator;
+    var first: std.Io.Threaded = .init_single_threaded;
+    var second: std.Io.Threaded = .init_single_threaded;
+    defer clearSpontaneousCache(allocator, std.testing.io);
+
+    const env1 = try getSpontaneousEnvironment(allocator, first.io(), .{});
+    const env2 = try getSpontaneousEnvironment(allocator, second.io(), .{});
+    const again = try getSpontaneousEnvironment(allocator, first.io(), .{});
+
+    try testing.expect(env1 != env2);
+    try testing.expectEqual(env1, again);
+    try testing.expectEqual(first.io().userdata, env1.io.userdata);
+    try testing.expectEqual(second.io().userdata, env2.io.userdata);
+}
+
+test "spontaneous environments are keyed by allocator" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    defer clearSpontaneousCache(testing.allocator, std.testing.io);
+
+    const env1 = try getSpontaneousEnvironment(testing.allocator, std.testing.io, .{});
+    const env2 = try getSpontaneousEnvironment(arena.allocator(), std.testing.io, .{});
+    try testing.expect(env1 != env2);
+}
+
+test "releasing one I/O backend keeps other hosts' spontaneous environments" {
+    const allocator = testing.allocator;
+    var first: std.Io.Threaded = .init_single_threaded;
+    var second: std.Io.Threaded = .init_single_threaded;
+    defer clearSpontaneousCache(allocator, std.testing.io);
+
+    _ = try getSpontaneousEnvironment(allocator, first.io(), .{});
+    _ = try getSpontaneousEnvironment(allocator, first.io(), .{ .trim_blocks = true });
+    const kept = try getSpontaneousEnvironment(allocator, second.io(), .{});
+
+    jinja.releaseSpontaneousEnvironments(first.io());
+
+    try testing.expectEqual(kept, try getSpontaneousEnvironment(allocator, second.io(), .{}));
+    const recreated = try getSpontaneousEnvironment(allocator, first.io(), .{});
+    try testing.expectEqual(first.io().userdata, recreated.io.userdata);
+
+    jinja.releaseSpontaneousEnvironments(first.io());
+    jinja.releaseSpontaneousEnvironments(second.io());
+    // Releasing an I/O backend with no entries is a no-op.
+    jinja.releaseSpontaneousEnvironments(second.io());
+}

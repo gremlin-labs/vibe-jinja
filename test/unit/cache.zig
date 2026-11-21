@@ -381,3 +381,46 @@ test "bytecode serialization roundtrip" {
     try testing.expectEqual(@as(usize, 1), bc2.names.items.len);
     try testing.expectEqualStrings("variable", bc2.names.items[0]);
 }
+
+test "filesystem bytecode cache reloads buckets up to and including the size limit" {
+    const allocator = testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer allocator.free(dir);
+
+    var fs_cache = try cache_mod.FileSystemBytecodeCache.init(allocator, std.testing.io, dir, null);
+    defer fs_cache.deinit();
+    const cache = fs_cache.getCache();
+    const limit = cache_mod.max_bytecode_file_bytes;
+
+    // Encoded size of a bucket whose only string is empty.
+    var probe = try cache_mod.Bucket.init(allocator, "limit", 42);
+    defer probe.deinit();
+    var empty = bytecode_mod.Bytecode.init(allocator);
+    _ = try empty.addString("");
+    probe.bytecode = empty;
+    const encoded_empty = try probe.bytecodeToString();
+    defer allocator.free(encoded_empty);
+    const overhead = encoded_empty.len;
+
+    inline for (.{ limit - 1, limit, limit + 1 }) |size| {
+        var bucket = try cache_mod.Bucket.init(allocator, "limit", 42);
+        defer bucket.deinit();
+        var filled = bytecode_mod.Bytecode.init(allocator);
+        const data = try allocator.alloc(u8, size - overhead);
+        defer allocator.free(data);
+        @memset(data, 'x');
+        _ = try filled.addString(data);
+        bucket.bytecode = filled;
+
+        const encoded = try bucket.bytecodeToString();
+        defer allocator.free(encoded);
+        try testing.expectEqual(@as(usize, size), encoded.len);
+
+        try cache.dumpBytecode(&bucket);
+        bucket.reset();
+        cache.loadBytecode(&bucket);
+        try testing.expectEqual(size <= limit, bucket.bytecode != null);
+    }
+}

@@ -1614,3 +1614,24 @@ test "filter truncate clamps negative length instead of crashing" {
     try testing.expect(result == .string);
     try testing.expectEqualStrings("...", result.string);
 }
+
+test "random filter picks a list item without an environment" {
+    const allocator = testing.allocator;
+    const list = try allocator.create(value.List);
+    list.* = value.List.init(allocator);
+    defer list.deinit(allocator);
+    try list.append(.{ .integer = 1 });
+    try list.append(.{ .integer = 2 });
+    try list.append(.{ .integer = 3 });
+    var kwargs = std.StringHashMap(value.Value).init(allocator);
+    defer kwargs.deinit();
+
+    var seen = [_]bool{ false, false, false };
+    for (0..64) |_| {
+        const picked = try filters.BuiltinFilters.random(allocator, .{ .list = list }, &.{}, &kwargs, null, null);
+        const item: usize = @intCast(picked.integer);
+        try testing.expect(item >= 1 and item <= 3);
+        seen[item - 1] = true;
+    }
+    try testing.expect(seen[0] and seen[1] and seen[2]);
+}

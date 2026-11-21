@@ -160,3 +160,53 @@ test "generateLoremIpsum" {
     // Should contain some lorem words
     try testing.expect(std.mem.find(u8, text, "lorem") != null or std.mem.find(u8, text, "ipsum") != null);
 }
+
+test "strftimeNow formats the current year with a caller-supplied io" {
+    var args = [_]value.Value{.{ .string = "%Y" }};
+    const result = try utils.strftimeNow(testing.allocator, std.testing.io, &args);
+    defer result.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 4), result.string.len);
+    const year = try std.fmt.parseInt(u32, result.string, 10);
+    try testing.expect(year >= 2026);
+}
+
+test "strftime_now global callback requires the rendering environment" {
+    var args = [_]value.Value{.{ .string = "%Y" }};
+    try testing.expectError(error.InvalidArgument, vibe_jinja.strftimeNowGlobal(testing.allocator, &args, null, null));
+
+    var env = vibe_jinja.Environment.init(testing.allocator, std.testing.io);
+    defer env.deinit();
+    const result = try vibe_jinja.strftimeNowGlobal(testing.allocator, &args, null, @ptrCast(&env));
+    defer result.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 4), result.string.len);
+}
+
+fn writePaddedTemplate(dir: std.Io.Dir, name: []const u8, size: usize) !void {
+    // "{#" + padding + "#}ok" renders as "ok".
+    const buffer = try testing.allocator.alloc(u8, size);
+    defer testing.allocator.free(buffer);
+    @memset(buffer, 'x');
+    @memcpy(buffer[0..2], "{#");
+    @memcpy(buffer[size - 4 ..], "#}ok");
+    try dir.writeFile(std.testing.io, .{ .sub_path = name, .data = buffer });
+}
+
+test "eval_file accepts templates up to and including the size limit" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const limit = vibe_jinja.defaults.MAX_TEMPLATE_SIZE_BYTES;
+
+    inline for (.{ .{ "below", limit - 1 }, .{ "at", limit }, .{ "above", limit + 1 } }) |case| {
+        try writePaddedTemplate(tmp.dir, case[0], case[1]);
+        const path = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, case[0] });
+        defer testing.allocator.free(path);
+
+        if (case[1] <= limit) {
+            const output = try vibe_jinja.eval_file(testing.allocator, std.testing.io, path);
+            defer testing.allocator.free(output);
+            try testing.expectEqualStrings("ok", output);
+        } else {
+            try testing.expectError(error.StreamTooLong, vibe_jinja.eval_file(testing.allocator, std.testing.io, path));
+        }
+    }
+}

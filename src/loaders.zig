@@ -142,7 +142,10 @@ pub const Loader = struct {
 
     vtable: *const VTable,
     allocator: std.mem.Allocator,
-    /// Pointer to the concrete loader implementation
+    /// Pointer to the concrete loader implementation, for custom loaders.
+    /// Built-in loaders embed this struct as their `loader` field and recover
+    /// themselves with `@fieldParentPtr`, so `&x.loader` and `x.getLoader()`
+    /// are interchangeable and `impl` may stay unset for them.
     impl: *anyopaque,
 
     const Self = @This();
@@ -210,7 +213,7 @@ pub const FileSystemLoader = struct {
 
     /// Uptodate implementation - check file modification time
     fn uptodateImpl(loader_ptr: *Loader, name: []const u8, last_modified: i64) bool {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         // Split template path (simple split without allocation)
         var path_parts = std.ArrayList([]const u8).empty;
@@ -268,7 +271,7 @@ pub const FileSystemLoader = struct {
 
     /// Load implementation
     fn loadImpl(loader_ptr: *Loader, name: []const u8, allocator: std.mem.Allocator) LoaderError![]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         // Split template path and check for security issues
         // Store slices of the original name (no allocation needed)
@@ -330,7 +333,7 @@ pub const FileSystemLoader = struct {
 
     /// List templates implementation
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         var templates = std.ArrayList([]const u8).empty;
         errdefer {
@@ -362,7 +365,7 @@ pub const FileSystemLoader = struct {
 
     /// Deinit implementation
     fn deinitImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) void {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         // Free search paths
         for (self.searchpath) |path| {
@@ -373,16 +376,13 @@ pub const FileSystemLoader = struct {
 
     /// Initialize a file system loader with search paths
     ///
-    /// **Important:** After calling init, you must set the impl pointer. This is
-    /// handled automatically when using `getLoader()` or `initAndGetLoader()`.
+    /// Keep the returned value at a stable address, then pass `loader.getLoader()`
+    /// (or `&loader.loader`) to the environment.
     ///
     /// ```zig
-    /// // Option 1: Manual setup (advanced)
-    /// var loader = try FileSystemLoader.init(allocator, searchpath);
-    /// loader.loader.impl = @ptrCast(&loader);
-    ///
-    /// // Option 2: Recommended - use initAndGetLoader (handles impl automatically)
-    /// const loader = try FileSystemLoader.initAndGetLoader(allocator, searchpath);
+    /// var loader = try FileSystemLoader.init(allocator, io, searchpath);
+    /// defer loader.deinit();
+    /// env.loader = loader.getLoader();
     /// ```
     pub fn init(allocator: std.mem.Allocator, io: std.Io, searchpath: []const []const u8) !Self {
         // Copy search paths
@@ -447,7 +447,7 @@ pub const DictLoader = struct {
 
     /// Load implementation
     fn loadImpl(loader_ptr: *Loader, name: []const u8, allocator: std.mem.Allocator) LoaderError![]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         if (self.templates.get(name)) |content| {
             return try allocator.dupe(u8, content);
@@ -458,7 +458,7 @@ pub const DictLoader = struct {
 
     /// List templates implementation
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         var templates = std.ArrayList([]const u8).empty;
         errdefer {
@@ -479,7 +479,7 @@ pub const DictLoader = struct {
 
     /// Deinit implementation
     fn deinitImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) void {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         // Free template names and values
         var iter = self.templates.iterator();
@@ -550,7 +550,7 @@ pub const FunctionLoader = struct {
     /// Checks if template is still up to date using the uptodate function
     /// returned by the load function, or falls back to legacy uptodate func
     fn uptodateImpl(loader_ptr: *Loader, name: []const u8, last_modified: i64) bool {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         // First check if we have a cached uptodate function from load_func
         if (self.uptodate_cache.get(name)) |uptodate_fn| {
@@ -569,7 +569,7 @@ pub const FunctionLoader = struct {
 
     /// Load implementation
     fn loadImpl(loader_ptr: *Loader, name: []const u8, allocator: std.mem.Allocator) LoaderError![]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         const result = self.load_func(name, allocator) catch return exceptions.TemplateError.RuntimeError;
 
@@ -600,7 +600,7 @@ pub const FunctionLoader = struct {
 
     /// Deinit implementation
     fn deinitImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) void {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
         _ = allocator;
 
         // Free cached uptodate keys
@@ -682,7 +682,7 @@ pub const PrefixLoader = struct {
 
     /// Uptodate implementation
     fn uptodateImpl(loader_ptr: *Loader, name: []const u8, last_modified: i64) bool {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         // Split name by delimiter
         if (std.mem.find(u8, name, self.delimiter)) |delim_pos| {
@@ -699,7 +699,7 @@ pub const PrefixLoader = struct {
 
     /// Load implementation
     fn loadImpl(loader_ptr: *Loader, name: []const u8, allocator: std.mem.Allocator) LoaderError![]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
         _ = allocator; // Suppress unused warning
 
         // Split name by delimiter
@@ -717,7 +717,7 @@ pub const PrefixLoader = struct {
 
     /// List templates implementation
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         var templates = std.ArrayList([]const u8).empty;
         errdefer {
@@ -757,7 +757,7 @@ pub const PrefixLoader = struct {
 
     /// Deinit implementation
     fn deinitImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) void {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         // Free prefix strings
         var iter = self.mapping.iterator();
@@ -840,7 +840,7 @@ pub const ChoiceLoader = struct {
 
     /// Uptodate implementation
     fn uptodateImpl(loader_ptr: *Loader, name: []const u8, last_modified: i64) bool {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         // Try each loader until one succeeds
         for (self.loaders.items) |sub_loader| {
@@ -854,7 +854,7 @@ pub const ChoiceLoader = struct {
 
     /// Load implementation
     fn loadImpl(loader_ptr: *Loader, name: []const u8, allocator: std.mem.Allocator) LoaderError![]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
         _ = allocator; // Suppress unused warning
 
         // Try each loader until one succeeds
@@ -874,7 +874,7 @@ pub const ChoiceLoader = struct {
 
     /// List templates implementation
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         var templates = std.ArrayList([]const u8).empty;
         errdefer {
@@ -972,7 +972,7 @@ pub const PackageLoader = struct {
 
     /// Uptodate implementation - check file modification time
     fn uptodateImpl(loader_ptr: *Loader, name: []const u8, last_modified: i64) bool {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         // Build full path
         var full_path = std.ArrayList(u8).empty;
@@ -1003,7 +1003,7 @@ pub const PackageLoader = struct {
 
     /// Load implementation
     fn loadImpl(loader_ptr: *Loader, name: []const u8, allocator: std.mem.Allocator) LoaderError![]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         // Build full path
         var full_path = std.ArrayList(u8).empty;
@@ -1038,7 +1038,7 @@ pub const PackageLoader = struct {
 
     /// List templates implementation
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         var templates = std.ArrayList([]const u8).empty;
         errdefer {
@@ -1080,7 +1080,7 @@ pub const PackageLoader = struct {
 
     /// Deinit implementation
     fn deinitImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) void {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         allocator.free(self.package_path);
         allocator.free(self.package_name);
@@ -1215,7 +1215,7 @@ pub const ModuleLoader = struct {
 
     /// Load implementation
     fn loadImpl(loader_ptr: *Loader, name: []const u8, allocator: std.mem.Allocator) LoaderError![]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         // First check registered templates
         if (self.registered_templates.get(name)) |content| {
@@ -1256,7 +1256,7 @@ pub const ModuleLoader = struct {
 
     /// List templates implementation
     fn listTemplatesImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) LoaderError![][]const u8 {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
 
         var templates = std.ArrayList([]const u8).empty;
         errdefer {
@@ -1289,7 +1289,7 @@ pub const ModuleLoader = struct {
 
     /// Deinit implementation
     fn deinitImpl(loader_ptr: *Loader, allocator: std.mem.Allocator) void {
-        const self = @as(*Self, @ptrCast(@alignCast(loader_ptr.impl)));
+        const self: *Self = @fieldParentPtr("loader", loader_ptr);
         _ = allocator;
 
         // Free paths

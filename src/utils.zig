@@ -972,15 +972,15 @@ pub fn namespaceGlobal(
 ///   {{ strftime_now("%Y-%m-%d %H:%M:%S") }}  -> "2026-01-01 12:30:45"
 ///
 /// This is for HuggingFace template compatibility.
-pub fn strftimeNowGlobal(
+///
+/// This is the clock-taking API for direct callers: pass the host's `std.Io`.
+/// Templates reach it through the `strftime_now` global, whose callback
+/// (`environment.strftimeNowGlobal`) supplies the environment's `io`.
+pub fn strftimeNow(
     allocator: std.mem.Allocator,
-    args: []Value,
-    ctx: ?*anyopaque,
-    env: ?*anyopaque,
+    io: std.Io,
+    args: []const Value,
 ) GlobalError!Value {
-    _ = ctx;
-    const environment: *const @import("environment.zig").Environment = @ptrCast(@alignCast(env orelse return error.InvalidArgument));
-
     if (args.len < 1) {
         return error.InvalidArgument;
     }
@@ -992,7 +992,7 @@ pub fn strftimeNowGlobal(
     };
 
     // Get current timestamp
-    const timestamp = std.Io.Clock.real.now(environment.io).toSeconds();
+    const timestamp = std.Io.Clock.real.now(io).toSeconds();
     const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @intCast(timestamp) };
     const day_seconds = epoch_seconds.getDaySeconds();
     const epoch_day = epoch_seconds.getEpochDay();

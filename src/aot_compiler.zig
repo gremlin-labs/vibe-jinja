@@ -68,7 +68,10 @@ pub const AotCompiler = struct {
 
         var psr = parser.Parser.init(&env, stream, template_name, self.allocator);
         const template = try psr.parse();
-        defer template.deinit(self.allocator);
+        defer {
+            template.deinit(self.allocator);
+            self.allocator.destroy(template);
+        }
 
         // Generate Zig header
         try self.writeHeader(template_name);
@@ -113,9 +116,9 @@ pub const AotCompiler = struct {
     fn writeFooter(self: *Self) !void {
         try self.write("\n/// Render to a string (allocates)\n");
         try self.write("pub fn renderToString(ctx: anytype, allocator: std.mem.Allocator) ![]u8 {\n");
-        try self.write("    var output = std.ArrayList(u8).init(allocator);\n");
+        try self.write("    var output: std.Io.Writer.Allocating = .init(allocator);\n");
         try self.write("    errdefer output.deinit();\n");
-        try self.write("    try render(ctx, output.writer());\n");
+        try self.write("    try render(ctx, &output.writer);\n");
         try self.write("    return output.toOwnedSlice();\n");
         try self.write("}\n");
     }

@@ -284,6 +284,18 @@ pub inline fn getBuiltinFilter(name: []const u8) ?FilterFn {
     return BuiltinFilterMap.get(name);
 }
 
+var random_filter_state = std.atomic.Value(u64).init(0x853c49e6748fea9b);
+
+/// Pick an index in `[0, len)` for the `random` filter (len > 0).
+fn randomIndex(salt: usize, len: usize) usize {
+    const golden: u64 = 0x9e3779b97f4a7c15;
+    var z = random_filter_state.fetchAdd(golden, .monotonic) +% golden +% @as(u64, salt);
+    z = (z ^ (z >> 30)) *% 0xbf58476d1ce4e5b9;
+    z = (z ^ (z >> 27)) *% 0x94d049bb133111eb;
+    z ^= z >> 31;
+    return @intCast(z % @as(u64, len));
+}
+
 /// Built-in filters
 pub const BuiltinFilters = struct {
     /// Return the absolute value of a number
@@ -1986,21 +1998,23 @@ pub const BuiltinFilters = struct {
         return .{ .string = try value_format.pretty(allocator, val, indent_size) };
     }
 
-    /// Random item
+    /// Random item (non-cryptographic, like Python's `random.choice`).
+    ///
+    /// Needs no clock or environment: each call advances a shared splitmix64
+    /// sequence mixed with the list's address, so it works with a null `env`
+    /// and keeps filters free of an `environment.zig` import.
     pub fn random(_: std.mem.Allocator, val: Value, args: []Value, kwargs: *const std.StringHashMap(Value), ctx: ?*anyopaque, env: ?*anyopaque) !Value {
         _ = args;
         _ = kwargs;
         _ = ctx;
+        _ = env;
 
         return switch (val) {
             .list => |l| {
                 if (l.items.items.len == 0) {
                     return Value{ .null = {} };
                 }
-                const environment: *const @import("environment.zig").Environment = @ptrCast(@alignCast(env orelse return l.items.items[0]));
-                // Simple random - use index based on current time
-                const now = std.Io.Clock.real.now(environment.io).toSeconds();
-                const index = @as(usize, @intCast(@mod(now, @as(i64, @intCast(l.items.items.len)))));
+                const index = randomIndex(@intFromPtr(l.items.items.ptr), l.items.items.len);
                 return l.items.items[index];
             },
             else => val,

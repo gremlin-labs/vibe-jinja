@@ -468,3 +468,18 @@ test "loader filesystem loader rejects oversized template" {
     const result = loader.getLoader().load("huge.jinja");
     try testing.expectError(exceptions.TemplateError.RuntimeError, result);
 }
+
+test "built-in loaders work through the embedded interface without getLoader" {
+    const allocator = testing.allocator;
+    var mapping = std.StringHashMap([]const u8).init(allocator);
+    try mapping.put(try allocator.dupe(u8, "page.jinja"), try allocator.dupe(u8, "Hi"));
+
+    var loader = loaders.DictLoader.init(allocator, mapping);
+    defer loader.deinit();
+
+    // Taking the field address directly (as several integration tests do) must
+    // reach the same loader as getLoader(), in every optimization mode.
+    const content = try (&loader.loader).load("page.jinja");
+    defer allocator.free(content);
+    try testing.expectEqualStrings("Hi", content);
+}

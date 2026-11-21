@@ -306,3 +306,10 @@ test "renderWithOptions with timeout succeeds for quick templates" {
 
     try testing.expectEqualStrings("Quick: 3", result);
 }
+
+test "AOT renderToString uses the Zig 0.17 allocating writer" {
+    const generated = try vibe_jinja.aot_compiler.compileToZig(testing.allocator, std.testing.io, "Hi {{ name }}", "fixture");
+    defer testing.allocator.free(generated);
+    try testing.expect(std.mem.indexOf(u8, generated, "std.Io.Writer.Allocating") != null);
+    try testing.expect(std.mem.indexOf(u8, generated, "ArrayList(u8).init(") == null);
+}

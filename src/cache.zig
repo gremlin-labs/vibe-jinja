@@ -54,8 +54,13 @@
 //! ```
 
 const std = @import("std");
+const fs_read = @import("fs_read.zig");
 const bytecode_mod = @import("bytecode.zig");
 const template_cache = @import("template_cache.zig");
+
+/// Largest on-disk bytecode bucket the filesystem cache reloads (inclusive).
+/// Larger files are treated as a cache miss.
+pub const max_bytecode_file_bytes: usize = 1024 * 1024;
 
 /// Canonical template-cache types. Bytecode caches remain implemented below.
 pub const TemplateCacheEntry = template_cache.TemplateCacheEntry;
@@ -438,7 +443,7 @@ pub const FileSystemBytecodeCache = struct {
         defer self.allocator.free(filename);
 
         // Read entire file into memory
-        const file_data = std.Io.Dir.cwd().readFileAlloc(self.io, filename, self.allocator, .limited(1024 * 1024)) catch return;
+        const file_data = fs_read.readFileAllocAtMost(std.Io.Dir.cwd(), self.io, filename, self.allocator, max_bytecode_file_bytes) catch return;
         defer self.allocator.free(file_data);
 
         bucket.bytecodeFromString(file_data) catch {

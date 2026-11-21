@@ -484,7 +484,7 @@ pub const Environment = struct {
         const strftime_name = try self.allocator.dupe(u8, "strftime_now");
         errdefer self.allocator.free(strftime_name);
         const strftime_callable = try self.allocator.create(value_mod.Callable);
-        strftime_callable.* = value_mod.Callable.initWithFunc(strftime_name, utils.strftimeNowGlobal, false);
+        strftime_callable.* = value_mod.Callable.initWithFunc(strftime_name, strftimeNowGlobal, false);
         try self.addGlobal("strftime_now", Value{ .callable = strftime_callable });
     }
 
@@ -1451,6 +1451,23 @@ pub const Environment = struct {
     }
 };
 
+/// `strftime_now(format)` global callback.
+///
+/// Reads the current time through the calling environment's `io`, so `env`
+/// must point at the `Environment` rendering the template (the VM always
+/// passes it). Returns `error.InvalidArgument` when `env` is null; direct
+/// callers without an environment should use `utils.strftimeNow(allocator, io, args)`.
+pub fn strftimeNowGlobal(
+    allocator: std.mem.Allocator,
+    args: []Value,
+    ctx: ?*anyopaque,
+    env: ?*anyopaque,
+) utils.GlobalError!Value {
+    _ = ctx;
+    const environment: *const Environment = @ptrCast(@alignCast(env orelse return error.InvalidArgument));
+    return utils.strftimeNow(allocator, environment.io, args);
+}
+
 // ============================================================================
 // Spontaneous Environments
 // ============================================================================
@@ -1506,9 +1523,22 @@ fn appendSpontaneousBehaviorKey(allocator: std.mem.Allocator, key: *std.ArrayLis
     });
 }
 
-fn buildSpontaneousKey(allocator: std.mem.Allocator, options: Environment.OverlayOptions) ![]const u8 {
+/// Shared environments keep the allocator and I/O backend they were created with,
+/// so both identities are part of the key. Two hosts with distinct `std.Io`
+/// instances (or allocators) never receive each other's environment.
+fn appendSpontaneousOwnerKey(allocator: std.mem.Allocator, key: *std.ArrayList(u8), owner_allocator: std.mem.Allocator, io: std.Io) !void {
+    try key.print(allocator, "{x}:{x}:{x}:{x}|", .{
+        @intFromPtr(owner_allocator.ptr),
+        @intFromPtr(owner_allocator.vtable),
+        @intFromPtr(io.userdata),
+        @intFromPtr(io.vtable),
+    });
+}
+
+fn buildSpontaneousKey(allocator: std.mem.Allocator, owner_allocator: std.mem.Allocator, io: std.Io, options: Environment.OverlayOptions) ![]const u8 {
     var key = std.ArrayList(u8).empty;
     errdefer key.deinit(allocator);
+    try appendSpontaneousOwnerKey(allocator, &key, owner_allocator, io);
     try appendSpontaneousSyntaxKey(allocator, &key, options);
     try appendSpontaneousBehaviorKey(allocator, &key, options);
     return try key.toOwnedSlice(allocator);
@@ -1602,9 +1632,17 @@ fn clearSpontaneousEntries(cache_allocator: std.mem.Allocator, cache: *std.Strin
 /// rather than through an existing environment. This matches Python's behavior
 /// where `Template("...")` uses a shared environment.
 ///
+/// Entries are keyed by configuration, allocator identity and I/O backend
+/// identity, so each host gets an environment that uses its own `io`.
+///
 /// # Arguments
 /// - `allocator`: Memory allocator
+/// - `io`: I/O backend the environment uses; must outlive the cached entry
 /// - `options`: Environment configuration options
+///
+/// # Lifetime
+/// Call `releaseSpontaneousEnvironments(io)` (or `clearSpontaneousCache`) before
+/// deinitializing the `std.Io` backend passed here.
 ///
 /// # Returns
 /// A shared spontaneous environment with the given configuration
@@ -1625,7 +1663,7 @@ pub fn getSpontaneousEnvironment(allocator: std.mem.Allocator, io: std.Io, optio
         spontaneous_cache = std.StringHashMap(SpontaneousEntry).init(allocator);
     }
     const cache_allocator = spontaneous_cache_allocator.?;
-    const key = try buildSpontaneousKey(cache_allocator, options);
+    const key = try buildSpontaneousKey(cache_allocator, allocator, io, options);
     errdefer cache_allocator.free(key);
 
     if (spontaneous_cache.?.get(key)) |entry| {
@@ -1646,6 +1684,38 @@ pub fn getSpontaneousEnvironment(allocator: std.mem.Allocator, io: std.Io, optio
     try spontaneous_cache.?.put(key, .{ .environment = environment, .allocator = allocator });
 
     return environment;
+}
+
+fn sameIo(a: std.Io, b: std.Io) bool {
+    return a.userdata == b.userdata and a.vtable == b.vtable;
+}
+
+/// Destroy cached spontaneous environments that use `io`, leaving other hosts' entries.
+/// Call this before deinitializing an `std.Io` backend passed to
+/// `getSpontaneousEnvironment`; environments it returned become invalid.
+pub fn releaseSpontaneousEnvironments(io: std.Io) void {
+    spontaneous_cache_mutex.lockUncancelable(io);
+    defer spontaneous_cache_mutex.unlock(io);
+
+    const cache = if (spontaneous_cache) |*value| value else return;
+    const cache_allocator = spontaneous_cache_allocator.?;
+    while (true) {
+        var iter = cache.iterator();
+        const found = while (iter.next()) |entry| {
+            if (sameIo(entry.value_ptr.environment.io, io)) break entry;
+        } else break;
+        const key = found.key_ptr.*;
+        const cached = found.value_ptr.*;
+        cache.removeByPtr(found.key_ptr);
+        cached.environment.deinit();
+        cached.allocator.destroy(cached.environment);
+        cache_allocator.free(key);
+    }
+    if (cache.count() == 0) {
+        cache.deinit();
+        spontaneous_cache = null;
+        spontaneous_cache_allocator = null;
+    }
 }
 
 /// Clear the spontaneous environment cache

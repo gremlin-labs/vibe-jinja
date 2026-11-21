@@ -6,8 +6,8 @@
 //! # Usage
 //!
 //! ```zig
-//! var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-//! var counting = CountingAllocator.init(gpa.allocator());
+//! var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+//! var counting = CountingAllocator.init(debug_allocator.allocator());
 //! const alloc = counting.allocator();
 //!
 //! // Use alloc for all operations...

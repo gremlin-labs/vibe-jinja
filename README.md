@@ -4,7 +4,7 @@
 
 **A high-performance, Jinja2-compatible template engine for Zig.**
 
-Vibe Jinja implements the Jinja syntax and runtime features used by web templates, code generators, configuration tools, and Hugging Face chat templates. It is written in Zig 0.15.2, has no runtime dependencies beyond the Zig standard library, and exposes both AST and bytecode-backed rendering paths.
+Vibe Jinja implements the Jinja syntax and runtime features used by web templates, code generators, configuration tools, and Hugging Face chat templates. It is written in Zig 0.17.1, has no runtime dependencies beyond the Zig standard library, and exposes both AST and bytecode-backed rendering paths.
 
 The project targets practical Jinja2 compatibility. Its unit and integration suites cover inheritance, includes, imports, macros, filters, tests, autoescaping, slicing, and production chat-template fixtures. Compatibility is not claimed for every Python/Jinja2 extension or edge case; consumers should test their own templates against both engines.
 
@@ -16,12 +16,12 @@ On the checked-in render-only comparison suite, Vibe Jinja is faster than Python
 
 | Benchmark | Python Jinja2 avg | Vibe Jinja avg | Speedup |
 | --- | ---: | ---: | ---: |
-| Simple template | 3,450 ns | 877 ns | 3.93x |
-| Loop template | 4,485 ns | 652 ns | 6.88x |
-| Conditional | 3,414 ns | 139 ns | 24.56x |
-| Filter chain | 4,006 ns | 222 ns | 18.05x |
+| Simple template | 3,399 ns | 578 ns | 5.88x |
+| Loop template | 3,986 ns | 724 ns | 5.51x |
+| Conditional | 3,285 ns | 127 ns | 25.87x |
+| Filter chain | 3,400 ns | 201 ns | 16.92x |
 
-Measured on 2026-07-14 on Apple Silicon with Zig 0.15.2 ReleaseFast, Python 3.13.3, and Jinja2 3.1.6. Templates are precompiled and only rendering is timed. Each steady-state Vibe Jinja render made one backing-allocator allocation for the returned string.
+Measured on 2026-11-20 on Apple Silicon with Zig 0.17.1 ReleaseFast, Python 3.13.3, and Jinja2 3.1.6 (median of five runs). Templates are precompiled and only rendering is timed. Each steady-state Vibe Jinja render made one backing-allocator allocation for the returned string.
 
 Benchmark numbers are machine- and load-dependent. Regenerate the Python reference immediately before comparing:
 
@@ -51,7 +51,7 @@ zig build bench-check -Doptimize=ReleaseFast
 
 ## Requirements
 
-- Zig 0.15.2 or later
+- Zig 0.17.1 or later
 - No runtime dependencies outside the Zig standard library
 - Python 3 and Jinja2 only for the cross-language benchmark
 
@@ -80,12 +80,11 @@ exe.root_module.addImport("vibe_jinja", vibe_jinja.module("vibe_jinja"));
 const std = @import("std");
 const jinja = @import("vibe_jinja");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
-    var env = jinja.Environment.init(allocator);
+    // The environment performs file, clock and synchronization work through this I/O backend.
+    var env = jinja.Environment.init(allocator, init.io);
     defer env.deinit();
 
     const template = try env.fromString("Hello, {{ name }}!", "greeting");
@@ -111,7 +110,7 @@ pub fn main() !void {
 ## Common configuration
 
 ```zig
-var env = jinja.Environment.init(allocator);
+var env = jinja.Environment.init(allocator, io);
 defer env.deinit();
 
 env.autoescape = .{ .bool = true };
@@ -129,6 +128,7 @@ The package provides filesystem, dictionary, function, package, prefix, choice, 
 ```zig
 var loader = try jinja.loaders.FileSystemLoader.init(
     allocator,
+    io,
     &[_][]const u8{"templates"},
 );
 
@@ -196,6 +196,8 @@ See [test/README.md](test/README.md) for the complete test-step list, benchmark 
 - `compile` selects bytecode when the template uses supported statements and falls back to AST execution for unsupported bytecode features.
 - Imports, includes, inheritance, filter blocks, and some complex assignments currently use the AST path.
 - Sandboxing and async APIs exist, but applications should validate their own security and concurrency requirements.
+- Every environment carries the `std.Io` it was created with. Shared environments from `getSpontaneousEnvironment` are keyed by allocator and I/O backend; call `releaseSpontaneousEnvironments(io)` before tearing that backend down.
+- `strftime_now` reads the clock through the rendering environment. Code that calls it directly without an environment should use `jinja.utils.strftimeNow(allocator, io, args)`.
 - The production chat-template suite is representative, not an exhaustive proof of compatibility with every tokenizer template.
 
 ## License
