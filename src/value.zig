@@ -1037,7 +1037,7 @@ pub const List = struct {
             .items = undefined,
             .allocator = allocator,
         };
-        // Zig 0.15: Initialize as empty, allocator passed to methods
+        // Unmanaged ArrayList (Zig 0.15+): initialize empty, pass the allocator to methods
         list.items = std.ArrayList(Value).empty;
         return list;
     }

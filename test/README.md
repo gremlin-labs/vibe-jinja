@@ -22,7 +22,7 @@ test/
 └── plaintext/                plain-text fixture
 ```
 
-The current build graph registers 24 files under `test/unit/`, 17 files under `test/integration/`, the public-API test, and the source-to-output fixtures. `zig build test` is the authoritative complete test command; file counts are descriptive and may change.
+The current build graph registers 24 files under `test/unit/`, 19 files under `test/integration/`, the public-API test, and the source-to-output fixtures. `zig build test` is the authoritative complete test command; file counts are descriptive and may change.
 
 ## Test commands
 
@@ -45,6 +45,8 @@ zig build test:regression
 zig build test:filters
 zig build test:huggingface
 zig build test:production
+zig build test:qwen-fixed
+zig build test:qwen3-coder-next
 zig build test:slice
 zig build test:async
 
@@ -99,16 +101,16 @@ The checked-in JSON is a reproducibility aid, not a universal performance guaran
 
 ## Current comparison snapshot
 
-Measured on 2026-07-14 on Apple Silicon with Zig 0.15.2 ReleaseFast, Python 3.13.3, and Jinja2 3.1.6:
+Measured on 2026-11-20 (03:37 UTC on 2026-11-21) for the 2.0.0 release on an Apple M3 Max running macOS 26.6.2, with Zig 0.17.1 ReleaseFast, Python 3.13.3, and Jinja2 3.1.6. The Python reference was regenerated first. Values are the median of five sequential `bench-compare` runs after one warm-up build:
 
-| Benchmark | Python avg | Vibe Jinja avg | Speedup |
-| --- | ---: | ---: | ---: |
-| Simple template | 3,450 ns | 877 ns | 3.93x |
-| Loop template | 4,485 ns | 652 ns | 6.88x |
-| Conditional | 3,414 ns | 139 ns | 24.56x |
-| Filter chain | 4,006 ns | 222 ns | 18.05x |
+| Benchmark | Python avg | Vibe Jinja avg | Speedup (avg) | Python median | Vibe Jinja median | Vibe Jinja p95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Simple template | 3,314 ns | 532 ns | 6.23x | 3,250 ns | 125 ns | 2,042 ns |
+| Loop template | 3,942 ns | 726 ns | 5.43x | 3,917 ns | 708 ns | 792 ns |
+| Conditional | 3,385 ns | 124 ns | 27.30x | 3,250 ns | 125 ns | 166 ns |
+| Filter chain | 3,554 ns | 202 ns | 17.59x | 3,542 ns | 208 ns | 250 ns |
 
-All four scenarios passed `bench-check`, and each Vibe Jinja render made one backing-allocator allocation for its returned string.
+All four scenarios passed `bench-check`, and each Vibe Jinja render made one backing-allocator allocation for its returned string. The host was a shared workstation with a load average of about 3.4. The Zig timer ticks at about 41 ns on this machine, so differences of one or two ticks are noise.
 
 ## Updating benchmarks safely
 

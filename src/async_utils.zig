@@ -144,12 +144,14 @@
 //! - Integrate with standard event loops
 //! - Provide zero-allocation async iterators
 //!
-//! ## Zig Async Status (as of Zig 0.15)
+//! ## Zig Async Status (as of Zig 0.17)
 //!
-//! Zig's async/await was removed in Zig 0.11 and is being redesigned. Current status:
+//! Zig's async/await keywords were removed in Zig 0.11. Current status:
 //! - **Removed**: The original `async`/`await`/`suspend`/`resume` keywords
-//! - **Planned**: New design focusing on structured concurrency
-//! - **Timeline**: No stable release date announced yet
+//! - **Available**: `std.Io` (since 0.16) provides `io.async`, `io.concurrent` and
+//!   `std.Io.Future` for structured concurrency through the caller's I/O backend
+//! - **This module**: still exposes synchronous AsyncIterator/AsyncIterable shapes;
+//!   it does not yet schedule work on `std.Io`
 //!
 //! Track progress: https://github.com/ziglang/zig/issues/6025
 //!

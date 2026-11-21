@@ -14,14 +14,23 @@ Vibe Jinja is also a core component of [Vibe Mode](https://vibemode.ai).
 
 On the checked-in render-only comparison suite, Vibe Jinja is faster than Python Jinja2 in all four comparable scenarios:
 
-| Benchmark | Python Jinja2 avg | Vibe Jinja avg | Speedup |
-| --- | ---: | ---: | ---: |
-| Simple template | 3,399 ns | 578 ns | 5.88x |
-| Loop template | 3,986 ns | 724 ns | 5.51x |
-| Conditional | 3,285 ns | 127 ns | 25.87x |
-| Filter chain | 3,400 ns | 201 ns | 16.92x |
+| Benchmark | Python Jinja2 avg | Vibe Jinja avg | Speedup (avg) | Python Jinja2 median | Vibe Jinja median |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Simple template | 3,314 ns | 532 ns | 6.23x | 3,250 ns | 125 ns |
+| Loop template | 3,942 ns | 726 ns | 5.43x | 3,917 ns | 708 ns |
+| Conditional | 3,385 ns | 124 ns | 27.30x | 3,250 ns | 125 ns |
+| Filter chain | 3,554 ns | 202 ns | 17.59x | 3,542 ns | 208 ns |
 
-Measured on 2026-11-20 on Apple Silicon with Zig 0.17.1 ReleaseFast, Python 3.13.3, and Jinja2 3.1.6 (median of five runs). Templates are precompiled and only rendering is timed. Each steady-state Vibe Jinja render made one backing-allocator allocation for the returned string.
+Measured on 2026-11-20 (03:37 UTC on 2026-11-21) for the 2.0.0 release on an Apple M3 Max running macOS 26.6.2, with Zig 0.17.1 ReleaseFast, Python 3.13.3, and Jinja2 3.1.6. Each steady-state Vibe Jinja render made one backing-allocator allocation for the returned string.
+
+Protocol:
+
+1. Regenerate the Python reference with `benchmark_python.py` immediately before the Zig runs (10 warm-up renders, then 100–1,000 timed renders per scenario).
+2. Build `bench-compare` once, then run it five times in a row. Each run times 5,000–10,000 renders per scenario after 200 warm-up renders.
+3. Report the median of the five per-run averages and medians. Templates are precompiled and only rendering is timed.
+4. Run `bench-check`, which fails unless Vibe Jinja beats Python on both average and median in every scenario.
+
+The machine was a shared workstation (load average about 3.4), not an isolated runner. The simple-template average sits well above its median because a slow tail (p95 about 2 µs) pulls it up; the medians are the steadier comparison.
 
 Benchmark numbers are machine- and load-dependent. Regenerate the Python reference immediately before comparing:
 
@@ -32,7 +41,7 @@ python3 test/benchmarks/benchmark_python.py
 # Or, from this workspace, use the local reference checkout.
 PYTHONPATH=../references/jinja/src python3 test/benchmarks/benchmark_python.py
 
-zig build bench-compare -Doptimize=ReleaseFast
+zig build bench-compare -Doptimize=ReleaseFast   # repeat five times for the published protocol
 zig build bench-check -Doptimize=ReleaseFast
 ```
 
@@ -60,7 +69,8 @@ zig build bench-check -Doptimize=ReleaseFast
 Add the package:
 
 ```sh
-zig fetch --save git+https://github.com/gremlin-labs/vibe-jinja
+# Pin a release (2.x requires Zig 0.17.1; use 1.3.1 for Zig 0.15.2).
+zig fetch --save git+https://github.com/gremlin-labs/vibe-jinja#2.0.0
 ```
 
 Then import its module in `build.zig`:
@@ -73,6 +83,10 @@ const vibe_jinja = b.dependency("vibe_jinja", .{
 
 exe.root_module.addImport("vibe_jinja", vibe_jinja.module("vibe_jinja"));
 ```
+
+## Upgrading from 1.x
+
+2.0.0 moves to Zig 0.17.1, where file, clock and lock operations go through `std.Io`. Pass your program's `io` wherever the library needs one: `Environment.init(allocator, io)`, the filesystem, package and module loaders, `FileSystemBytecodeCache.init`, the sandboxed environments, `eval`, `eval_file`, `compileToZig`, and `getSpontaneousEnvironment`/`clearSpontaneousCache`. See the [2.0.0 changelog](CHANGELOG.md) for the complete list.
 
 ## Quick start
 

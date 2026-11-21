@@ -65,7 +65,7 @@ pub const TemplateCacheEntry = struct {
 /// const entry = try allocator.create(jinja.cache.TemplateCacheEntry);
 /// entry.* = jinja.cache.TemplateCacheEntry{
 ///     .template = template,
-///     .last_modified = std.time.timestamp(),
+///     .last_modified = std.Io.Clock.real.now(io).toSeconds(),
 ///     .access_count = 0,
 ///     .source_checksum = checksum,
 /// };

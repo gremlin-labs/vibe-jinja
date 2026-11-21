@@ -373,7 +373,7 @@ pub const Cycler = struct {
             .index = 0,
             .allocator = allocator,
         };
-        // Zig 0.15: Initialize as empty, allocator passed to methods
+        // Unmanaged ArrayList (Zig 0.15+): initialize empty, pass the allocator to methods
         cycler.values = std.ArrayList(Value).empty;
 
         for (values) |val| {
